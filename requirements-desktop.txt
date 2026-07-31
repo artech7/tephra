@@ -1,0 +1,8 @@
+# Everything needed to build a frozen desktop app with PyInstaller.
+#
+# Platform webview backends are intentionally NOT pinned: pywebview declares
+# them itself (pythonnet on Windows, pyobjc on macOS), and pinning an old
+# pyobjc forces a source build on newer Pythons — on macOS that means
+# requiring Xcode for what should be a wheel download.
+-r requirements-run.txt
+pyinstaller>=6.11,<7

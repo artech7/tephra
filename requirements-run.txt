@@ -1,0 +1,5 @@
+# Everything needed to run Tephra as a desktop app via run.py.
+# Platform-specific webview backends (pythonnet on Windows, pyobjc on macOS)
+# are declared by pywebview itself, so they resolve automatically.
+-r requirements.txt
+pywebview>=5.3,<6

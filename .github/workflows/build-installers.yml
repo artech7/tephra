@@ -1,0 +1,121 @@
+# Builds installers on real macOS and Windows runners.
+#
+# This is the practical path if you don't own both machines: push a tag and
+# collect a .dmg and a setup.exe from the release. Cross-compiling desktop
+# apps isn't a thing — PyInstaller freezes for the OS it runs on.
+name: build installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    # macos-14 is Apple Silicon; macos-13 is Intel. Build both and ship two
+    # dmgs rather than a universal binary — universal2 wheels are patchy.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install create-dmg
+        run: brew install create-dmg || true
+
+      - name: Import signing certificate
+        # Skipped automatically when the secrets aren't set, so forks and
+        # first-time builds still produce a working (unsigned) dmg.
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASS: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASS: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASS" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASS" build.keychain
+          rm /tmp/cert.p12
+
+      - name: Store notarisation credentials
+        if: ${{ secrets.APPLE_ID != '' }}
+        run: |
+          xcrun notarytool store-credentials tephra \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}"
+
+      - name: Build
+        env:
+          VERSION: ${{ github.ref_name }}
+          SIGN_ID: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_PROFILE: ${{ secrets.APPLE_ID != '' && 'tephra' || '' }}
+        run: ./packaging/build_macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tephra-macos-${{ matrix.arch }}
+          path: dist/*.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Decode signing certificate
+        if: ${{ secrets.WINDOWS_CERT_PFX != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx",
+            [Convert]::FromBase64String($env:CERT))
+          echo "SIGN_PFX=$env:RUNNER_TEMP\cert.pfx" >> $env:GITHUB_ENV
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_PFX }}
+
+      - name: Build
+        shell: pwsh
+        env:
+          VERSION: ${{ github.ref_name }}
+          SIGN_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: .\packaging\build_windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tephra-windows-x64
+          path: dist/*setup.exe
+
+  release:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

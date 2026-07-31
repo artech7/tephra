@@ -1,0 +1,1754 @@
+/* ══════════════════════════════════════════════════════════════
+   Tephra frontend. No framework on purpose — the whole app is
+   three static files the container serves, so it stays editable
+   by whoever is self-hosting it.
+   ══════════════════════════════════════════════════════════════ */
+const $ = (s) => document.querySelector(s);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const R = document.documentElement;
+
+const api = async (path, opts = {}) => {
+  const res = await fetch('/api' + path, {
+    headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) throw new Error((await res.text()) || res.status);
+  return res.status === 204 ? null : res.json();
+};
+
+function toast(msg, ms = 2600) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('on'), ms);
+}
+
+const state = { slug: null, note: null, notes: [], editing: false, dirty: false,
+                sort: 'updated', tag: '', media: [], mediaOpen: {} };
+
+// study.js is a separate file so this one stays readable; these three are the
+// only things it needs from here.
+window.tephraApi = api;
+window.tephraToast = toast;
+window.tephraOpenNote = (slug) => openNote(slug);
+// after an in-app import the sidebar and graph need to catch up
+window.tephraCurrentSlug = () => state.slug;
+// Crucible calls this after flagging so the indicators update live.
+window.tephraRefreshFlags = async () => {
+  await loadList();
+  if (state.slug && !state.dirty) {
+    try {
+      const fresh = await api('/notes/' + encodeURIComponent(state.slug));
+      state.note = fresh;
+      renderFlagChip(fresh);
+    } catch {}
+  }
+};
+window.tephraReloadList = async () => {
+  window.tephraLinks?.poll();
+  await loadList();
+  await loadGraph();
+  await loadMedia();
+  if (state.slug) { try { await openNote(state.slug, false); } catch {} }
+  else if (state.notes[0]) await openNote(state.notes[0].slug, false);
+};
+
+/* ══ THEME ═══════════════════════════════════════════════════
+   Persisted server-side to vault/theme.json, so it rides along
+   with the notes and survives container rebuilds.
+   ═══════════════════════════════════════════════════════════ */
+const DEFAULTS = { acc: '63,224,173', wall: 'aurora', wallUrl: null, blur: 30, frost: 55,
+  sat: 200, scrim: 26, inset: 20, contrast: 0, auto: false,
+  note_sort: 'updated', note_tag: '', media_open: {} };
+let T = { ...DEFAULTS };
+
+const WALLS = {
+  aurora: null,
+  slate: 'linear-gradient(150deg,#0E1C26 0%,#22384A 38%,#415C6E 72%,#16242E 100%)',
+  ember: 'linear-gradient(150deg,#180B07 0%,#4E2317 40%,#9A4E2C 74%,#251009 100%)',
+  bloom: 'linear-gradient(150deg,#1E0B26 0%,#4C1D46 40%,#8E3A62 72%,#25102A 100%)',
+};
+
+const hex = (r) => '#' + r.split(',').map((n) => (+n).toString(16).padStart(2, '0')).join('');
+
+/* Accent is pulled from the wallpaper, so a hardcoded Crucible palette can
+   land on top of it — which is exactly what happened: a peach wallpaper made
+   both marks peach. Deriving Crucible from the accent's complement keeps the
+   two distinguishable by construction rather than by luck. */
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) {
+    h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  const l = (mx + mn) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return [h, s, l];
+}
+function hslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.min(1, Math.max(0, s)); l = Math.min(1, Math.max(0, l));
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  const seg = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+  return '#' + seg.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('');
+}
+function cruciblePalette(accRgb) {
+  const [r, g, b] = accRgb.split(',').map(Number);
+  let [h, s, l] = rgbToHsl(r, g, b);
+  s = Math.max(s, 0.62);                 // a grey accent must still yield colour
+  l = Math.min(Math.max(l, 0.55), 0.72);
+  return [hslToHex(h + 165, s, l), hslToHex(h + 200, s, l - 0.04), hslToHex(h + 135, s, l + 0.05)];
+}
+const rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(','); };
+
+function applyTheme() {
+  R.style.setProperty('--acc', T.acc);
+  R.style.setProperty('--accent', hex(T.acc));
+  const [ca, cb, cc] = cruciblePalette(T.acc);
+  R.style.setProperty('--cruc-a', ca);
+  R.style.setProperty('--cruc-b', cb);
+  R.style.setProperty('--cruc-c', cc);
+  R.style.setProperty('--blur', T.blur + 'px');
+  R.style.setProperty('--frost', (T.frost / 1000).toFixed(4));
+  R.style.setProperty('--sat', T.sat + '%');
+  R.style.setProperty('--scrim', (T.scrim / 100).toFixed(2));
+  R.style.setProperty('--inset', T.inset + 'px');
+  R.style.setProperty('--radius', Math.max(8, Math.min(32, T.inset * 1.4 + 8)) + 'px');
+
+  // Contrast is derived: the less the frost, blur and dim are doing,
+  // the more the ink layer has to do to keep text legible.
+  const auto = 0.52 - (T.frost / 200) * 0.20 - (T.blur / 70) * 0.12 - (T.scrim / 100) * 0.18;
+  const ink = Math.max(0.02, Math.min(0.78, auto + T.contrast / 100));
+  R.style.setProperty('--ink', ink.toFixed(3));
+
+  $('#vInk').textContent = Math.round(ink * 100) + '%';
+  $('#vBlur').textContent = T.blur + 'px';
+  $('#vFrost').textContent = (T.frost / 10).toFixed(1) + '%';
+  $('#vSat').textContent = T.sat + '%';
+  $('#vScrim').textContent = T.scrim + '%';
+  $('#vInset').textContent = T.inset + 'px';
+  $('#vAcc').textContent = hex(T.acc).toUpperCase();
+  $('#lgW').style.background = hex(T.acc);
+  $('#autoAcc').toggleAttribute('data-on', !!T.auto);
+
+  const isAurora = T.wall === 'aurora';
+  $('#aurora').style.display = isAurora ? 'block' : 'none';
+  $('#wall').style.display = isAurora ? 'none' : 'block';
+  if (T.wall === 'custom' && T.wallUrl) $('#wall').style.backgroundImage = `url('${T.wallUrl}')`;
+  else if (WALLS[T.wall]) $('#wall').style.backgroundImage = WALLS[T.wall];
+
+  document.querySelectorAll('.wallopt').forEach((x) => x.removeAttribute('data-on'));
+  const wsel = T.wall === 'custom' ? $('#wallUp') : document.querySelector(`.wallopt[data-wall="${T.wall}"]`);
+  if (wsel) wsel.setAttribute('data-on', '');
+  if (T.wall === 'custom' && T.wallUrl) $('#wallUp').style.backgroundImage = `url('${T.wallUrl}')`;
+
+  document.querySelectorAll('.sw').forEach((x) => x.removeAttribute('data-on'));
+  (document.querySelector(`.sw[data-acc="${T.acc}"]`) || document.querySelector('.sw.custom')).setAttribute('data-on', '');
+  $('#accPick').value = hex(T.acc);
+
+  if ($('#noteSort')) $('#noteSort').value = state.sort;
+  ['rBlur:blur', 'rFrost:frost', 'rSat:sat', 'rScrim:scrim', 'rInset:inset', 'rContrast:contrast']
+    .forEach((pair) => { const [id, key] = pair.split(':'); $('#' + id).value = T[key]; });
+}
+
+let themeT;
+function saveTheme() {
+  T.note_sort = state.sort;
+  T.note_tag = state.tag;
+  T.media_open = state.mediaOpen;
+  clearTimeout(themeT);
+  themeT = setTimeout(() => api('/theme', { method: 'PUT', body: JSON.stringify(T) }).catch(() => {}), 400);
+}
+function setTheme(patch) { Object.assign(T, patch); applyTheme(); saveTheme(); }
+
+/* Dominant-colour extraction. Buckets pixels by hue and weights each
+   bucket by count x saturation, rather than trusting any single pixel —
+   one specular highlight would otherwise return white. */
+function accentFrom(img) {
+  const n = 64, cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, n, n);
+  let d;
+  try { d = g.getImageData(0, 0, n, n).data; } catch { return null; }
+
+  const B = 18, bins = Array.from({ length: B }, () => ({ w: 0, r: 0, g: 0, b: 0, n: 0 }));
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i] / 255, gg = d[i + 1] / 255, b = d[i + 2] / 255;
+    const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), c = mx - mn;
+    if (mx < 0.10 || c < 0.06) continue;
+    let h = mx === r ? ((gg - b) / c + 6) % 6 : mx === gg ? (b - r) / c + 2 : (r - gg) / c + 4;
+    h *= 60;
+    const sat = c / mx, k = Math.floor((h / 360) * B) % B;
+    const bin = bins[k];
+    bin.w += sat * sat * (1 - Math.abs(mx - 0.66));
+    bin.r += d[i]; bin.g += d[i + 1]; bin.b += d[i + 2]; bin.n++;
+  }
+  let win = null;
+  for (const bin of bins) if (bin.n > 3 && (!win || bin.w > win.w)) win = bin;
+  if (!win) return null;
+  let out = [win.r / win.n, win.g / win.n, win.b / win.n];
+  const mn = Math.min(...out);
+  out = out.map((v) => mn + (v - mn) * 1.45);
+  const lift = Math.min(2.6, 222 / Math.max(...out, 1));
+  return out.map((v) => Math.max(0, Math.min(255, Math.round(v * lift)))).join(',');
+}
+
+/* ══ NOTES ═══════════════════════════════════════════════════ */
+
+function fmtAgo(iso) {
+  if (!iso) return '';
+  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return Math.round(s / 86400) + 'd ago';
+}
+
+/* The list is fetched once and then filtered and sorted client side, so
+   changing sort or tapping a tag is instant and costs no round trip. */
+const SORTS = {
+  updated:   (a, b) => (b.updated || '').localeCompare(a.updated || ''),
+  title:     (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+  backlinks: (a, b) => b.backlinks - a.backlinks || a.title.localeCompare(b.title),
+  links_out: (a, b) => b.links_out - a.links_out || a.title.localeCompare(b.title),
+  size:      (a, b) => b.size - a.size,
+  flags:     (a, b) => (b.flags || 0) - (a.flags || 0) ||
+                       a.title.localeCompare(b.title),
+  kind:      (a, b) => ['index', 'study', 'note'].indexOf(a.kind) -
+                       ['index', 'study', 'note'].indexOf(b.kind) ||
+                       a.title.localeCompare(b.title),
+};
+
+async function loadList() {
+  state.notes = await api('/notes');
+  renderList();
+}
+
+function renderList() {
+  const list = $('#noteList');
+  const sort = SORTS[state.sort] ? state.sort : 'updated';
+  const shown = state.notes
+    .filter((n) => !state.tag || n.tags.includes(state.tag))
+    .sort(SORTS[sort]);
+
+  $('#noteCount').textContent = state.tag || shown.length !== state.notes.length
+    ? `${shown.length} of ${state.notes.length}`
+    : `${state.notes.length} notes`;
+
+  list.innerHTML = '';
+  if (!shown.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = state.tag ? `Nothing tagged #${state.tag}.` : 'No notes yet.';
+    list.appendChild(e);
+  }
+  // The trailing number changes meaning with the sort, so label it.
+  const metric = { backlinks: 'backlinks', links_out: 'links out', size: 'characters' }[sort];
+  for (const n of shown) {
+    const el = document.createElement('div');
+    el.className = 'node kind-' + n.kind;
+    el.dataset.slug = n.slug;
+    if (n.slug === state.slug) el.setAttribute('aria-current', 'page');
+    const num = sort === 'size' ? (n.size > 999 ? Math.round(n.size / 1000) + 'k' : n.size)
+      : sort === 'links_out' ? n.links_out
+      : sort === 'title' || sort === 'kind' || sort === 'updated' ? (n.backlinks || '')
+      : n.backlinks;
+    const flagMark = n.flags
+      ? `<span class="flagmark" title="${n.flags} flagged question${n.flags === 1 ? '' : 's'}">⚑</span>`
+      : '';
+    el.innerHTML = `<span class="dot"></span><span class="t"></span>${flagMark}<span class="n">${num}</span>`;
+    el.querySelector('.t').textContent = n.title;
+    el.title = `${n.title}\n${n.kind} · ${n.backlinks} backlinks · ${n.links_out} links out`
+      + (n.flags ? `\n${n.flags} flagged question${n.flags === 1 ? '' : 's'}` : '')
+      + (metric ? `\nsorted by ${metric}` : '');
+    el.onclick = () => openNote(n.slug);
+    list.appendChild(el);
+  }
+
+  const tags = [...new Set(state.notes.flatMap((n) => n.tags))].sort();
+  $('#tagSect').hidden = !tags.length;
+  $('#tagClear').hidden = !state.tag;
+  const cloud = $('#tagCloud');
+  cloud.innerHTML = '';
+  for (const t of tags) {
+    const chip = document.createElement('span');
+    chip.className = 'tag';
+    chip.textContent = '#' + t;
+    if (state.tag === t) chip.setAttribute('data-on', '');
+    // Clicking a tag filters the list; clicking the active one clears it.
+    chip.onclick = () => { state.tag = state.tag === t ? '' : t; renderList(); saveTheme(); };
+    cloud.appendChild(chip);
+  }
+}
+
+/* Media, grouped by type into collapsible sections. A flat grid of 100 files
+   is unusable; the counts alone tell you what a vault holds. Each tile reveals
+   a remove control on hover, and warns first if a note still embeds it. */
+const MEDIA_GROUPS = [
+  { kind: 'image', label: 'Images' },
+  { kind: 'video', label: 'Video' },
+  { kind: 'audio', label: 'Audio' },
+  { kind: 'file',  label: 'Files' },
+];
+
+async function loadMedia() {
+  state.media = await api('/media');
+  renderMedia();
+}
+
+function renderMedia() {
+  const media = state.media || [];
+  $('#mediaCount').textContent = media.length;
+  const host = $('#mediaGroups');
+  host.innerHTML = '';
+  if (!media.length) {
+    host.innerHTML = '<div class="empty">Nothing attached yet. Drag a file onto a note.</div>';
+    return;
+  }
+  for (const g of MEDIA_GROUPS) {
+    const items = media.filter((m) => m.kind === g.kind);
+    if (!items.length) continue;
+    const open = state.mediaOpen[g.kind] !== false;   // open unless collapsed
+    const sec = document.createElement('div');
+    sec.className = 'mgroup';
+    const head = document.createElement('button');
+    head.className = 'mgroup-h' + (open ? ' open' : '');
+    head.innerHTML = `<span class="mcaret">▸</span><span class="mlabel"></span>
+      <span class="mcount">${items.length}</span>`;
+    head.querySelector('.mlabel').textContent = g.label;
+    head.onclick = () => {
+      state.mediaOpen[g.kind] = !open;
+      renderMedia();
+      saveTheme();
+    };
+    sec.appendChild(head);
+
+    if (open) {
+      const grid = document.createElement('div');
+      grid.className = 'mediagrid';
+      for (const m of items) {
+        const cell = document.createElement('div');
+        cell.className = 'mcell';
+        const link = document.createElement('a');
+        link.href = m.url;
+        link.target = '_blank';
+        link.title = `${m.name}\n${Math.round((m.size || 0) / 1024)} KB`
+          + (m.used_by?.length ? `\nused by ${m.used_by.length} note(s)` : '\nnot referenced by any note');
+        if (m.kind === 'image') link.style.backgroundImage = `url('${m.url}')`;
+        else link.textContent = m.name.slice(0, 16);
+        cell.appendChild(link);
+        if (m.used_by?.length) {
+          const badge = document.createElement('span');
+          badge.className = 'mused';
+          badge.textContent = m.used_by.length;
+          badge.title = 'Embedded in ' + m.used_by.join(', ');
+          cell.appendChild(badge);
+        }
+        const rm = document.createElement('button');
+        rm.className = 'mremove';
+        rm.textContent = '×';
+        rm.title = 'Remove from vault';
+        let armed = false, timer = null;
+        rm.onclick = async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!armed) {
+            armed = true;
+            rm.classList.add('armed');
+            rm.textContent = '✓';
+            rm.title = m.used_by?.length
+              ? `Still embedded in ${m.used_by.length} note(s) — click again to remove anyway`
+              : 'Click again to remove';
+            if (m.used_by?.length) toast(`${m.name} is used by ${m.used_by.join(', ')}`, 5000);
+            timer = setTimeout(() => {
+              armed = false; rm.classList.remove('armed'); rm.textContent = '×';
+            }, 4000);
+            return;
+          }
+          clearTimeout(timer);
+          try {
+            await api('/media/' + encodeURIComponent(m.name), { method: 'DELETE' });
+            toast(`Moved ${m.name} to the vault trash`);
+            await loadMedia();
+            if (state.slug) await openNote(state.slug, false);
+          } catch { toast(`Could not remove ${m.name}`); }
+        };
+        cell.appendChild(rm);
+        grid.appendChild(cell);
+      }
+      sec.appendChild(grid);
+    }
+    host.appendChild(sec);
+  }
+}
+
+async function openNote(slug, push = true) {
+  if (state.dirty) await flush();
+  let note;
+  try { note = await api('/notes/' + encodeURIComponent(slug)); }
+  catch { toast('That note is gone'); return loadList(); }
+
+  state.slug = slug; state.note = note; state.editing = false;
+  if (push && location.hash.slice(1) !== slug) location.hash = slug;
+
+  // The topbar shows which vault you are in; the note names itself in its own
+  // heading, so repeating it there was pure duplication.
+  document.title = note.title + ' — Tephra';
+  renderDocCrumb(note);
+  $('#noteTitle').value = note.title;
+  autoGrow($('#noteTitle'));
+  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+  $('#noteSrc').value = note.body;
+  $('#noteSrc').hidden = true;
+  $('#noteBody').hidden = false;
+  $('#metaWords').textContent = note.words + ' words';
+  $('#metaLinks').textContent = note.links_out + ' links out';
+  $('#metaBack').textContent = note.backlinks.length + ' backlinks';
+  mark('saved', 'Saved ' + fmtAgo(note.updated));
+  $('#doc').scrollTop = 0;
+
+  renderBacklinks(note.backlinks);
+  renderGraphCrumb(note);
+  renderStudyChip(note);
+  renderFlagChip(note);
+  renderDeleteButton();
+  document.querySelectorAll('#noteList .node').forEach((el) =>
+    el.toggleAttribute('aria-current', el.dataset.slug === slug));
+  drawMini();
+}
+
+/* Study state for the open note. This is the "turn into study guide item"
+   affordance: one button when the note isn't one, and the category with an
+   inline correction when it is. */
+/* Deletion is two-step rather than a modal: the first click arms it, the
+   second commits, and it disarms itself after a few seconds. Notes go to
+   vault/.trash rather than being unlinked, so this is recoverable. */
+/* The other half of the flag: a question flagged in Crucible shows up here, on
+   the note it belongs to, and clicking it drills just those questions. */
+function renderFlagChip(note) {
+  const host = $('#flagChip');
+  if (!host) return;
+  host.innerHTML = '';
+  const n = note.flags || 0;
+  if (!n) return;
+  const b = document.createElement('button');
+  b.className = 'chipbtn flagged';
+  b.innerHTML = `<span class="flagmark">⚑</span> ${n} flagged`;
+  b.title = (note.flagged_questions || []).map((q) => '• ' + q.question).join('\n')
+    + '\n\nClick to drill just these in Crucible';
+  b.onclick = () => window.tephraStudy?.openFlagged(note.slug);
+  host.appendChild(b);
+}
+
+/* Where the note sits, shown above its own heading rather than in the app
+   header — so it travels with the note and is simply absent in Crucible. */
+/* A one-line reminder of the note's group, sitting above the local graph so
+   the panel says what you are looking at. */
+function renderGraphCrumb(note) {
+  const host = $('#graphCrumb');
+  if (!host) return;
+  const cat = ((note.meta || {}).category || '').trim();
+  const prev = (note.category_history || [])[0];
+  host.hidden = !cat;
+  if (!cat) return;
+  host.innerHTML = '';
+  const now = document.createElement('span');
+  now.className = 'gc-now';
+  now.textContent = cat;
+  host.appendChild(now);
+  if (prev) {
+    const was = document.createElement('span');
+    was.className = 'gc-was';
+    was.textContent = `was ${prev.category}`;
+    was.title = `Moved from ${prev.category} ${fmtAgo(prev.at)}`;
+    host.appendChild(was);
+  }
+}
+
+function renderDocCrumb(note) {
+  const host = $('#docCrumb');
+  if (!host) return;
+  host.innerHTML = '';
+  const meta = note.meta || {};
+  const category = (meta.category || '').trim();
+  const parts = [];
+
+  if (category) {
+    parts.push({ label: category, target: category });
+  } else if (note.tags?.length) {
+    for (const t of note.tags.slice(0, 3)) parts.push({ label: '#' + t, tag: t });
+  }
+  host.hidden = !parts.length;
+  if (!parts.length) return;
+
+  parts.forEach((p, i) => {
+    if (i) {
+      const sep = document.createElement('span');
+      sep.className = 'dc-sep';
+      sep.textContent = '·';
+      host.appendChild(sep);
+    }
+    const el = document.createElement('button');
+    el.className = 'dc-part';
+    el.textContent = p.label;
+    if (p.tag) {
+      el.title = `Show every note tagged #${p.tag}`;
+      el.onclick = () => { state.tag = p.tag; renderList(); saveTheme(); };
+    } else {
+      // A category usually has an index note of the same name; link to it when
+      // it exists, so this doubles as navigation rather than decoration.
+      const idx = state.notes.find((n) => n.title.toLowerCase() === p.target.toLowerCase());
+      if (idx) {
+        el.title = `Open ${idx.title}`;
+        el.onclick = () => openNote(idx.slug);
+      } else {
+        el.disabled = true;
+      }
+    }
+    host.appendChild(el);
+  });
+}
+
+function renderDeleteButton() {
+  const host = $('#deleteChip');
+  if (!host) return;
+  host.innerHTML = '';
+  let armed = false, timer = null;
+  const b = document.createElement('button');
+  b.className = 'chipbtn danger';
+  b.textContent = 'Delete';
+  b.title = 'Move this note to the vault trash';
+  const disarm = () => {
+    armed = false; b.textContent = 'Delete';
+    b.classList.remove('armed'); clearTimeout(timer);
+  };
+  b.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      b.textContent = 'Delete — click again';
+      b.classList.add('armed');
+      timer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    const gone = state.slug, title = state.note?.title || gone;
+    try {
+      await api('/notes/' + encodeURIComponent(gone), { method: 'DELETE' });
+    } catch {
+      toast('Could not delete that');
+      return;
+    }
+    state.dirty = false;                     // don't autosave a deleted note
+    toast(`Moved “${title}” to the vault trash`);
+    await loadList();
+    await loadGraph();
+    const next = state.notes.find((n) => n.slug !== gone);
+    if (next) await openNote(next.slug);
+    else {
+      state.slug = null; state.note = null;
+      $('#noteTitle').value = '';
+      $('#docCrumb').hidden = true;
+      $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
+    }
+    window.tephraStudy?.refresh();
+  };
+  host.appendChild(b);
+}
+
+async function renderStudyChip(note) {
+  const host = document.getElementById('studyChip');
+  host.innerHTML = '';
+  const meta = note.meta || {};
+  const on = String(meta.study || '').toLowerCase() === 'true';
+
+  if (!on) {
+    const b = document.createElement('button');
+    b.className = 'chipbtn';
+    b.textContent = '+ Make study item';
+    b.title = 'Add this note to the study guide and categorise it';
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = 'Categorising…';
+      try {
+        const r = await api(`/study/${state.slug}/enable`, {
+          method: 'POST', body: JSON.stringify({}),
+        });
+        const g = r.guess || {};
+        toast(g.category
+          ? `Added to ${g.category}${g.low_confidence ? ' — worth checking' : ''}`
+          : 'Added — no category guess yet');
+        await openNote(state.slug, false);
+        window.tephraStudy?.refresh();
+      } catch {
+        toast('Could not add it');
+        b.disabled = false;
+        b.textContent = '+ Make study item';
+      }
+    };
+    host.appendChild(b);
+    return;
+  }
+
+  const cat = (meta.category || '').trim();
+  const source = (meta.category_source || 'auto').trim();
+  const conf = parseFloat(meta.category_confidence);
+
+  const wrap = document.createElement('span');
+  wrap.className = 'studychip' + (source === 'auto' ? ' unsure' : '');
+
+  const sel = document.createElement('select');
+  sel.className = 'chipselect';
+  let cats = [];
+  try { cats = (await api('/study')).known_categories; } catch {}
+  if (cat && !cats.includes(cat)) cats.unshift(cat);
+  for (const c of cats) {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    if (c === cat) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.onchange = async () => {
+    const to = sel.value;
+    sel.disabled = true;
+    try {
+      const r = await api(`/study/${state.slug}/category`, {
+        method: 'POST', body: JSON.stringify({ category: to }),
+      });
+      // Say what actually happened, not just that something did. "Moved X ->
+      // Y" is the whole point of the revamp; a silent select told you nothing.
+      toast(r.changed
+        ? `Moved from ${r.from || 'no category'} to ${to} — the classifier learns from this`
+        : `Already in ${to}`);
+      await openNote(state.slug, false);
+      window.tephraStudy?.refresh();
+    } catch {
+      toast('Could not change the category');
+      sel.disabled = false;
+    }
+  };
+
+  const label = document.createElement('span');
+  label.className = 'chiplabel';
+  label.textContent = 'study group';
+  wrap.appendChild(label);
+  wrap.appendChild(sel);
+
+  if (source === 'auto') {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag';
+    tag.textContent = Number.isFinite(conf) ? `guessed ${Math.round(conf * 100)}%` : 'guessed';
+    tag.title = 'Tephra assigned this. Change it above if it is wrong — your correction teaches the classifier.';
+    wrap.appendChild(tag);
+  } else if (source === 'import') {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag neutral';
+    tag.textContent = 'from the guide';
+    wrap.appendChild(tag);
+  } else {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag ok';
+    tag.textContent = 'set by you';
+    wrap.appendChild(tag);
+  }
+  host.appendChild(wrap);
+  renderCategoryTrail(note);
+}
+
+/* Where this note has been, newest first, each entry one click from being
+   restored. Lives under the chip so the change and its undo sit together. */
+function renderCategoryTrail(note) {
+  const host = $('#trailChip');
+  if (!host) return;
+  host.innerHTML = '';
+  const trail = note.category_history || [];
+  if (!trail.length) { host.hidden = true; return; }
+  host.hidden = false;
+
+  const line = document.createElement('div');
+  line.className = 'trail';
+  const head = document.createElement('span');
+  head.className = 'trail-h';
+  head.textContent = trail.length === 1 ? 'previously' : `previously (${trail.length})`;
+  line.appendChild(head);
+
+  for (const e of trail.slice(0, 4)) {
+    const b = document.createElement('button');
+    b.className = 'trail-item';
+    b.innerHTML = `<span class="trail-cat"></span><span class="trail-when"></span>`;
+    b.querySelector('.trail-cat').textContent = e.category;
+    b.querySelector('.trail-when').textContent = fmtAgo(e.at);
+    b.title = `Move it back to ${e.category}`
+      + (e.source === 'auto' ? ' (it was a guess then, and will be again)' : '');
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api(`/study/${state.slug}/revert`, {
+          method: 'POST', body: JSON.stringify({ category: e.category }),
+        });
+        toast(`Moved back to ${r.category}`
+          + (r.restored_source === 'auto' ? ' — restored as a guess, not a correction' : ''));
+        await openNote(state.slug, false);
+        window.tephraStudy?.refresh();
+      } catch {
+        toast('Could not move it back');
+        b.disabled = false;
+      }
+    };
+    line.appendChild(b);
+  }
+  if (trail.length > 4) {
+    const more = document.createElement('span');
+    more.className = 'trail-more';
+    more.textContent = `+${trail.length - 4} older`;
+    more.title = trail.slice(4).map((e) => `${e.category} — ${fmtAgo(e.at)}`).join('\n');
+    line.appendChild(more);
+  }
+  host.appendChild(line);
+}
+
+function renderBacklinks(list) {
+  $('#backCount').textContent = list.length;
+  const el = $('#backList');
+  if (!list.length) { el.innerHTML = '<div class="empty">Nothing links here yet.</div>'; return; }
+  el.innerHTML = '';
+  for (const b of list) {
+    const d = document.createElement('div');
+    d.className = 'mention';
+    d.innerHTML = '<div class="m-t"></div><div class="m-x"></div>';
+    d.querySelector('.m-t').textContent = b.title;
+    d.querySelector('.m-x').textContent = b.excerpt;
+    d.onclick = () => openNote(b.slug);
+    el.appendChild(d);
+  }
+}
+
+/* Link suggestions moved out of the note panel into the Links tab. Reviewing
+   them one note at a time hid the size of the queue, and there was nowhere to
+   see or undo what you had already turned down. */
+
+/* Study state for the open note. This is the "turn into study guide item"
+   affordance: one button when the note isn't one, and the category with an
+   inline correction when it is. */
+/* Deletion is two-step rather than a modal: the first click arms it, the
+   second commits, and it disarms itself after a few seconds. Notes go to
+   vault/.trash rather than being unlinked, so this is recoverable. */
+/* The other half of the flag: a question flagged in Crucible shows up here, on
+   the note it belongs to, and clicking it drills just those questions. */
+function renderFlagChip(note) {
+  const host = $('#flagChip');
+  if (!host) return;
+  host.innerHTML = '';
+  const n = note.flags || 0;
+  if (!n) return;
+  const b = document.createElement('button');
+  b.className = 'chipbtn flagged';
+  b.innerHTML = `<span class="flagmark">⚑</span> ${n} flagged`;
+  b.title = (note.flagged_questions || []).map((q) => '• ' + q.question).join('\n')
+    + '\n\nClick to drill just these in Crucible';
+  b.onclick = () => window.tephraStudy?.openFlagged(note.slug);
+  host.appendChild(b);
+}
+
+/* Where the note sits, shown above its own heading rather than in the app
+   header — so it travels with the note and is simply absent in Crucible. */
+/* A one-line reminder of the note's group, sitting above the local graph so
+   the panel says what you are looking at. */
+function renderGraphCrumb(note) {
+  const host = $('#graphCrumb');
+  if (!host) return;
+  const cat = ((note.meta || {}).category || '').trim();
+  const prev = (note.category_history || [])[0];
+  host.hidden = !cat;
+  if (!cat) return;
+  host.innerHTML = '';
+  const now = document.createElement('span');
+  now.className = 'gc-now';
+  now.textContent = cat;
+  host.appendChild(now);
+  if (prev) {
+    const was = document.createElement('span');
+    was.className = 'gc-was';
+    was.textContent = `was ${prev.category}`;
+    was.title = `Moved from ${prev.category} ${fmtAgo(prev.at)}`;
+    host.appendChild(was);
+  }
+}
+
+function renderDocCrumb(note) {
+  const host = $('#docCrumb');
+  if (!host) return;
+  host.innerHTML = '';
+  const meta = note.meta || {};
+  const category = (meta.category || '').trim();
+  const parts = [];
+
+  if (category) {
+    parts.push({ label: category, target: category });
+  } else if (note.tags?.length) {
+    for (const t of note.tags.slice(0, 3)) parts.push({ label: '#' + t, tag: t });
+  }
+  host.hidden = !parts.length;
+  if (!parts.length) return;
+
+  parts.forEach((p, i) => {
+    if (i) {
+      const sep = document.createElement('span');
+      sep.className = 'dc-sep';
+      sep.textContent = '·';
+      host.appendChild(sep);
+    }
+    const el = document.createElement('button');
+    el.className = 'dc-part';
+    el.textContent = p.label;
+    if (p.tag) {
+      el.title = `Show every note tagged #${p.tag}`;
+      el.onclick = () => { state.tag = p.tag; renderList(); saveTheme(); };
+    } else {
+      // A category usually has an index note of the same name; link to it when
+      // it exists, so this doubles as navigation rather than decoration.
+      const idx = state.notes.find((n) => n.title.toLowerCase() === p.target.toLowerCase());
+      if (idx) {
+        el.title = `Open ${idx.title}`;
+        el.onclick = () => openNote(idx.slug);
+      } else {
+        el.disabled = true;
+      }
+    }
+    host.appendChild(el);
+  });
+}
+
+function renderDeleteButton() {
+  const host = $('#deleteChip');
+  if (!host) return;
+  host.innerHTML = '';
+  let armed = false, timer = null;
+  const b = document.createElement('button');
+  b.className = 'chipbtn danger';
+  b.textContent = 'Delete';
+  b.title = 'Move this note to the vault trash';
+  const disarm = () => {
+    armed = false; b.textContent = 'Delete';
+    b.classList.remove('armed'); clearTimeout(timer);
+  };
+  b.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      b.textContent = 'Delete — click again';
+      b.classList.add('armed');
+      timer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    const gone = state.slug, title = state.note?.title || gone;
+    try {
+      await api('/notes/' + encodeURIComponent(gone), { method: 'DELETE' });
+    } catch {
+      toast('Could not delete that');
+      return;
+    }
+    state.dirty = false;                     // don't autosave a deleted note
+    toast(`Moved “${title}” to the vault trash`);
+    await loadList();
+    await loadGraph();
+    const next = state.notes.find((n) => n.slug !== gone);
+    if (next) await openNote(next.slug);
+    else {
+      state.slug = null; state.note = null;
+      $('#noteTitle').value = '';
+      $('#docCrumb').hidden = true;
+      $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
+    }
+    window.tephraStudy?.refresh();
+  };
+  host.appendChild(b);
+}
+
+async function renderStudyChip(note) {
+  const host = document.getElementById('studyChip');
+  host.innerHTML = '';
+  const meta = note.meta || {};
+  const on = String(meta.study || '').toLowerCase() === 'true';
+
+  if (!on) {
+    const b = document.createElement('button');
+    b.className = 'chipbtn';
+    b.textContent = '+ Make study item';
+    b.title = 'Add this note to the study guide and categorise it';
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = 'Categorising…';
+      try {
+        const r = await api(`/study/${state.slug}/enable`, {
+          method: 'POST', body: JSON.stringify({}),
+        });
+        const g = r.guess || {};
+        toast(g.category
+          ? `Added to ${g.category}${g.low_confidence ? ' — worth checking' : ''}`
+          : 'Added — no category guess yet');
+        await openNote(state.slug, false);
+        window.tephraStudy?.refresh();
+      } catch {
+        toast('Could not add it');
+        b.disabled = false;
+        b.textContent = '+ Make study item';
+      }
+    };
+    host.appendChild(b);
+    return;
+  }
+
+  const cat = (meta.category || '').trim();
+  const source = (meta.category_source || 'auto').trim();
+  const conf = parseFloat(meta.category_confidence);
+
+  const wrap = document.createElement('span');
+  wrap.className = 'studychip' + (source === 'auto' ? ' unsure' : '');
+
+  const sel = document.createElement('select');
+  sel.className = 'chipselect';
+  let cats = [];
+  try { cats = (await api('/study')).known_categories; } catch {}
+  if (cat && !cats.includes(cat)) cats.unshift(cat);
+  for (const c of cats) {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    if (c === cat) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.onchange = async () => {
+    const to = sel.value;
+    sel.disabled = true;
+    try {
+      const r = await api(`/study/${state.slug}/category`, {
+        method: 'POST', body: JSON.stringify({ category: to }),
+      });
+      // Say what actually happened, not just that something did. "Moved X ->
+      // Y" is the whole point of the revamp; a silent select told you nothing.
+      toast(r.changed
+        ? `Moved from ${r.from || 'no category'} to ${to} — the classifier learns from this`
+        : `Already in ${to}`);
+      await openNote(state.slug, false);
+      window.tephraStudy?.refresh();
+    } catch {
+      toast('Could not change the category');
+      sel.disabled = false;
+    }
+  };
+
+  const label = document.createElement('span');
+  label.className = 'chiplabel';
+  label.textContent = 'study group';
+  wrap.appendChild(label);
+  wrap.appendChild(sel);
+
+  if (source === 'auto') {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag';
+    tag.textContent = Number.isFinite(conf) ? `guessed ${Math.round(conf * 100)}%` : 'guessed';
+    tag.title = 'Tephra assigned this. Change it above if it is wrong — your correction teaches the classifier.';
+    wrap.appendChild(tag);
+  } else if (source === 'import') {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag neutral';
+    tag.textContent = 'from the guide';
+    wrap.appendChild(tag);
+  } else {
+    const tag = document.createElement('span');
+    tag.className = 'chipflag ok';
+    tag.textContent = 'set by you';
+    wrap.appendChild(tag);
+  }
+  host.appendChild(wrap);
+  renderCategoryTrail(note);
+}
+
+/* Where this note has been, newest first, each entry one click from being
+   restored. Lives under the chip so the change and its undo sit together. */
+function renderCategoryTrail(note) {
+  const host = $('#trailChip');
+  if (!host) return;
+  host.innerHTML = '';
+  const trail = note.category_history || [];
+  if (!trail.length) { host.hidden = true; return; }
+  host.hidden = false;
+
+  const line = document.createElement('div');
+  line.className = 'trail';
+  const head = document.createElement('span');
+  head.className = 'trail-h';
+  head.textContent = trail.length === 1 ? 'previously' : `previously (${trail.length})`;
+  line.appendChild(head);
+
+  for (const e of trail.slice(0, 4)) {
+    const b = document.createElement('button');
+    b.className = 'trail-item';
+    b.innerHTML = `<span class="trail-cat"></span><span class="trail-when"></span>`;
+    b.querySelector('.trail-cat').textContent = e.category;
+    b.querySelector('.trail-when').textContent = fmtAgo(e.at);
+    b.title = `Move it back to ${e.category}`
+      + (e.source === 'auto' ? ' (it was a guess then, and will be again)' : '');
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api(`/study/${state.slug}/revert`, {
+          method: 'POST', body: JSON.stringify({ category: e.category }),
+        });
+        toast(`Moved back to ${r.category}`
+          + (r.restored_source === 'auto' ? ' — restored as a guess, not a correction' : ''));
+        await openNote(state.slug, false);
+        window.tephraStudy?.refresh();
+      } catch {
+        toast('Could not move it back');
+        b.disabled = false;
+      }
+    };
+    line.appendChild(b);
+  }
+  if (trail.length > 4) {
+    const more = document.createElement('span');
+    more.className = 'trail-more';
+    more.textContent = `+${trail.length - 4} older`;
+    more.title = trail.slice(4).map((e) => `${e.category} — ${fmtAgo(e.at)}`).join('\n');
+    line.appendChild(more);
+  }
+  host.appendChild(line);
+}
+
+function renderBacklinks(list) {
+  $('#backCount').textContent = list.length;
+  const el = $('#backList');
+  if (!list.length) { el.innerHTML = '<div class="empty">Nothing links here yet.</div>'; return; }
+  el.innerHTML = '';
+  for (const b of list) {
+    const d = document.createElement('div');
+    d.className = 'mention';
+    d.innerHTML = '<div class="m-t"></div><div class="m-x"></div>';
+    d.querySelector('.m-t').textContent = b.title;
+    d.querySelector('.m-x').textContent = b.excerpt;
+    d.onclick = () => openNote(b.slug);
+    el.appendChild(d);
+  }
+}
+
+/* ══ AUTOSAVE ════════════════════════════════════════════════
+   Debounce while the keys are moving, flush hard on blur, on
+   navigation and on tab-hide, so a note is never more than one
+   keystroke behind what's on disk.
+   ═══════════════════════════════════════════════════════════ */
+const chip = $('#saveChip');
+let saveT = null;
+
+function mark(stateName, text) {
+  chip.dataset.state = stateName;
+  chip.innerHTML = '<i></i>' + text;
+}
+
+async function flush() {
+  clearTimeout(saveT); saveT = null;
+  if (!state.slug || !state.dirty) return;
+  const payload = { title: $('#noteTitle').value.trim() || 'Untitled', body: $('#noteSrc').value };
+  state.dirty = false;
+  try {
+    const saved = await api('/notes/' + encodeURIComponent(state.slug), {
+      method: 'PUT', body: JSON.stringify(payload),
+    });
+    if (saved.renamed_to && saved.renamed_to !== state.slug) {
+      state.slug = saved.renamed_to;
+      location.hash = state.slug;
+    }
+    mark('saved', 'Saved just now');
+    // The header names the vault, never the note. Writing the note title here
+    // survived the move and quietly undid it on every autosave.
+    document.title = saved.title + ' — Tephra';
+    loadList();
+  } catch (e) {
+    state.dirty = true;
+    mark('error', 'Not saved — retrying');
+    setTimeout(flush, 3000);
+  }
+}
+
+function touched() {
+  state.dirty = true;
+  if (!saveT) mark('saving', 'Saving…');
+  clearTimeout(saveT);
+  saveT = setTimeout(flush, 700);
+}
+
+function autoGrow(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+
+$('#noteTitle').addEventListener('input', (e) => { autoGrow(e.target); touched(); });
+$('#noteSrc').addEventListener('input', touched);
+$('#noteTitle').addEventListener('blur', flush);
+addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
+addEventListener('beforeunload', (e) => { if (state.dirty) { flush(); e.preventDefault(); e.returnValue = ''; } });
+
+/* ══ EDIT MODE ═══════════════════════════════════════════════ */
+async function setEditing(on) {
+  if (on === state.editing) return;
+  state.editing = on;
+  $('#noteSrc').hidden = !on;
+  $('#noteBody').hidden = on;
+  $('#editHint').textContent = on
+    ? '⌘E OR CLICK AWAY TO PREVIEW · [[LINK]] · ![[EMBED]] · DRAG FILES IN'
+    : 'CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH';
+  if (on) {
+    const ta = $('#noteSrc');
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(ta.scrollHeight, 320) + 'px';
+    ta.focus();
+  } else {
+    await flush();
+    const note = await api('/notes/' + encodeURIComponent(state.slug));
+    state.note = note;
+    $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+    $('#metaWords').textContent = note.words + ' words';
+    $('#metaLinks').textContent = note.links_out + ' links out';
+    $('#metaBack').textContent = note.backlinks.length + ' backlinks';
+    renderBacklinks(note.backlinks);
+      loadList();
+    drawMini();
+  }
+}
+
+$('#noteBody').addEventListener('click', (e) => {
+  if (e.target.closest('a')) return;   // links win over entering edit mode
+  setEditing(true);
+});
+$('#noteSrc').addEventListener('blur', () => setEditing(false));
+
+/* wikilink navigation, including creating the missing page */
+$('#noteBody').addEventListener('click', async (e) => {
+  const a = e.target.closest('a.wl');
+  if (!a) return;
+  e.preventDefault();
+  if (a.dataset.slug) return openNote(a.dataset.slug);
+  const title = a.dataset.title;
+  const r = await api(`/notes/${encodeURIComponent(state.slug)}/resolve`, {
+    method: 'POST', body: JSON.stringify({ title }),
+  });
+  toast(r.created ? `Created “${title}”` : `Opened “${title}”`);
+  await loadList();
+  openNote(r.slug);
+});
+
+/* ══ HOVER LENS ══════════════════════════════════════════════ */
+const lensCache = new Map();
+let lensT;
+document.addEventListener('mouseover', async (e) => {
+  const a = e.target.closest('a.wl');
+  if (!a) return;
+  clearTimeout(lensT);
+  lensT = setTimeout(async () => {
+    const lens = $('#lens');
+    let data;
+    if (a.dataset.slug) {
+      if (!lensCache.has(a.dataset.slug)) {
+        try { lensCache.set(a.dataset.slug, await api('/notes/' + a.dataset.slug)); }
+        catch { return; }
+      }
+      const n = lensCache.get(a.dataset.slug);
+      data = {
+        k: 'NOTE', t: n.title,
+        b: n.body.replace(/[#*`>\[\]]/g, '').slice(0, 260) || 'This note is empty.',
+        m: `${n.links_out} links · ${n.backlinks.length} backlinks · ${fmtAgo(n.updated)}`,
+      };
+    } else {
+      data = { k: 'NOT WRITTEN YET', t: a.dataset.title, b: 'No page for this yet. Click the link and Tephra will create it.', m: 'stub' };
+    }
+    $('#lensKind').textContent = data.k;
+    $('#lensTitle').textContent = data.t;
+    $('#lensBody').textContent = data.b;
+    $('#lensMeta').textContent = data.m;
+    const r = a.getBoundingClientRect();
+    let L = r.left, Tp = r.bottom + 12;
+    if (L + 340 > innerWidth) L = innerWidth - 346;
+    if (Tp + 230 > innerHeight) Tp = r.top - 230;
+    lens.style.left = L + 'px'; lens.style.top = Tp + 'px';
+    lens.classList.add('on');
+  }, 160);
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest('a.wl')) { clearTimeout(lensT); $('#lens').classList.remove('on'); }
+});
+
+/* ══ DRAG AND DROP MEDIA ═════════════════════════════════════ */
+const editor = $('#editor');
+['dragenter', 'dragover'].forEach((ev) => editor.addEventListener(ev, (e) => {
+  e.preventDefault(); editor.classList.add('dragging');
+}));
+['dragleave', 'drop'].forEach((ev) => editor.addEventListener(ev, (e) => {
+  if (ev === 'dragleave' && editor.contains(e.relatedTarget)) return;
+  editor.classList.remove('dragging');
+}));
+editor.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) return;
+  await setEditing(true);
+  for (const f of files) {
+    toast(`Uploading ${f.name}…`, 8000);
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const m = await api('/media', { method: 'POST', body: fd });
+      insertAtCursor($('#noteSrc'), `\n\n![[${m.name}]]\n\n`);
+      touched();
+      toast(`Attached ${m.name}`);
+    } catch { toast(`Upload failed: ${f.name}`); }
+  }
+  await flush();
+  loadMedia();
+});
+
+function insertAtCursor(ta, text) {
+  const s = ta.selectionStart ?? ta.value.length;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(ta.selectionEnd ?? s);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  ta.style.height = 'auto';
+  ta.style.height = Math.max(ta.scrollHeight, 320) + 'px';
+}
+
+/* ══ GRAPH ══════════════════════════════════════
+   The full vault graph lives in graph.js. The old shared engine ran
+   full-strength forces every frame forever, so it never settled and
+   nodes were a moving target. Only the small local-graph thumbnail
+   is drawn here, and it stops as soon as it comes to rest.
+   ═════════════════════════════════════════════ */
+let graphData = { nodes: [], links: [] };
+
+async function loadGraph() {
+  graphData = await api('/graph');
+  $('#orbitCount').textContent = graphData.nodes.length + ' nodes';
+}
+
+function miniGraph(canvas) {
+  const ctx = canvas.getContext && canvas.getContext('2d');
+  if (!ctx) return { redraw() {} };
+  let sim = null, frame = null, nodes = [], links = [], sig = '';
+
+  function build() {
+    const cur = graphData.nodes.findIndex((n) => n.slug === state.slug);
+    if (cur < 0) { nodes = []; links = []; return; }
+    const keep = new Set([cur]);
+    for (const [a, b] of graphData.links) {
+      if (a === cur) keep.add(b);
+      if (b === cur) keep.add(a);
+    }
+    const list = [...keep].slice(0, 40);
+    const remap = new Map(list.map((v, i) => [v, i]));
+    nodes = list.map((i) => ({ ...graphData.nodes[i], self: i === cur }));
+    links = graphData.links
+      .filter(([a, b]) => remap.has(a) && remap.has(b))
+      .map(([a, b]) => [remap.get(a), remap.get(b)]);
+    const I = window.__tephraGraphInternals;
+    sim = I ? I.createSim(nodes, links, { linkDistance: 120, charge: -2600 }) : null;
+  }
+
+  function paint() {
+    const dpr = devicePixelRatio || 1;
+    const r = canvas.getBoundingClientRect();
+    if (canvas.width !== Math.round(r.width * dpr)) {
+      canvas.width = Math.round(r.width * dpr);
+      canvas.height = Math.round(r.height * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, r.width, r.height);
+    const I = window.__tephraGraphInternals;
+    if (!nodes.length || !I) return;
+    const k = Math.min(r.width / (I.W + 200), r.height / (I.H + 200));
+    const tx = (r.width - I.W * k) / 2, ty = (r.height - I.H * k) / 2;
+    const P = (d) => [d.x * k + tx, d.y * k + ty];
+    ctx.strokeStyle = 'rgba(255,255,255,.14)';
+    ctx.lineWidth = 1;
+    for (const [a, b] of links) {
+      const [ax, ay] = P(nodes[a]), [bx, by] = P(nodes[b]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+    for (const d of nodes) {
+      const [x, y] = P(d);
+      const col = d.kind === 'stub' ? '255,157,110' : T.acc;
+      const rr = d.self ? 6 : 3.6;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rr * 3.2);
+      g.addColorStop(0, `rgba(${col},.5)`); g.addColorStop(1, `rgba(${col},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr * 3.2, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(${col},.95)`;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
+      ctx.strokeStyle = d.self ? '#fff' : 'rgba(255,255,255,.5)';
+      ctx.lineWidth = d.self ? 2 : 1;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.stroke();
+    }
+  }
+
+  function loop() {
+    if (sim && sim.running() && !reduce) { sim.tick(); paint(); frame = requestAnimationFrame(loop); }
+    else { paint(); frame = null; }
+  }
+
+  return {
+    redraw() {
+      const s = state.slug + ':' + graphData.nodes.length + ':' + graphData.links.length;
+      if (s !== sig) { sig = s; build(); }
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(loop);
+    },
+  };
+}
+
+let mini = null;
+function drawMini() { if (mini) mini.redraw(); }
+
+/* ══ VIEW TOGGLE ═════════════════════════════════════════════ */
+const gv = $('#graphview');
+/* Write and Graph are the two canvas modes and share the segmented control.
+   Crucible is an overlay on top of whichever one is active, so it has its own
+   button and its own pressed state rather than competing for that slot. */
+/* Tephra and Crucible are two sides of one deck. Clicking Tephra does not
+   change which canvas mode is active underneath — it just brings that side
+   back — so you can leave Crucible and land where you were. */
+function setStudy(on) {
+  $('#crucibleBtn')?.setAttribute('aria-pressed', String(!!on));
+  $('#tephraBtn')?.setAttribute('aria-pressed', String(!on));
+  if (on) window.tephraStudy?.open();
+  else window.tephraStudy?.close();
+}
+
+function setView(v) {
+  if (v === 'study') return setStudy(!window.tephraStudy?.isOpen());
+  setStudy(false);
+  document.querySelectorAll('.segmented button').forEach((b) =>
+    b.setAttribute('aria-pressed', b.dataset.view === v));
+  gv.classList.toggle('on', v === 'graph');
+  if (v === 'graph') window.tephraGraph.open();
+  else window.tephraGraph?.close();
+  if (v === 'links') window.tephraLinks?.open();
+  else window.tephraLinks?.close();
+}
+document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+$('#noteSort').onchange = (e) => { state.sort = e.target.value; renderList(); saveTheme(); };
+$('#tagClear').onclick = () => { state.tag = ''; renderList(); saveTheme(); };
+$('#tephraBtn').onclick = () => setStudy(false);
+$('#crucibleBtn').onclick = () => setStudy(true);
+$('#gvClose').onclick = () => setView('write');
+$('#orbit').onclick = () => setView('graph');
+
+
+/* ══ COMMAND PALETTE ═════════════════════════════════════════ */
+const pal = $('#palette'), scrim = $('#scrim'), pInput = $('#pInput'), pList = $('#pList');
+let sel = 0, results = [];
+
+async function renderPalette(q) {
+  q = q.trim();
+  results = q
+    ? (await api('/search?q=' + encodeURIComponent(q))).map((r) => ({ ...r, kind: 'note' }))
+    : state.notes.slice(0, 12).map((n) => ({ slug: n.slug, title: n.title, snippet: fmtAgo(n.updated), kind: 'note' }));
+  if (q && !results.some((r) => r.title.toLowerCase() === q.toLowerCase())) {
+    results.push({ kind: 'create', title: q, snippet: 'Create this note' });
+  }
+  sel = Math.min(sel, Math.max(results.length - 1, 0));
+  pList.innerHTML = results.map((r, i) =>
+    `<div class="pitem" ${i === sel ? 'data-sel' : ''}>
+       <span class="pk">${r.kind === 'create' ? 'NEW' : '↵'}</span>
+       <span class="pt">${escapeHtml(r.title)}</span>
+       <span class="parrow">${escapeHtml(r.snippet || '')}</span>
+     </div>`).join('') || '<div class="pitem" style="color:var(--faint)">No matches</div>';
+  [...pList.children].forEach((el, i) => (el.onclick = () => choose(i)));
+}
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function choose(i) {
+  const r = results[i];
+  if (!r) return;
+  closePal();
+  if (r.kind === 'create') {
+    const n = await api('/notes', { method: 'POST', body: JSON.stringify({ title: r.title }) });
+    await loadList();
+    openNote(n.slug);
+    setEditing(true);
+  } else openNote(r.slug);
+}
+function openPal() { scrim.classList.add('on'); pal.classList.add('on'); pInput.value = ''; sel = 0; renderPalette(''); pInput.focus(); }
+function closePal() { scrim.classList.remove('on'); pal.classList.remove('on'); }
+$('#openPalette').onclick = openPal;
+scrim.onclick = closePal;
+let searchT;
+pInput.oninput = (e) => { clearTimeout(searchT); searchT = setTimeout(() => renderPalette(e.target.value), 120); };
+
+/* ══ KEYBOARD ════════════════════════════════════════════════ */
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && k === 'k') { e.preventDefault(); openPal(); return; }
+  if (mod && k === 's') { e.preventDefault(); flush(); toast('Saved — autosave is always on'); return; }
+  if (mod && k === 'e') { e.preventDefault(); setEditing(!state.editing); return; }
+  if (e.key === 'Escape') {
+    closePal();
+    // Close the topmost thing only, so Escape doesn't also dump you out of
+    // Graph on the way past.
+    if (window.tephraStudy?.isOpen()) return setStudy(false);
+    if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
+    if ($('#theme').classList.contains('on')) return $('#theme').classList.remove('on');
+    setView('write');
+  }
+  if (pal.classList.contains('on')) {
+    const n = results.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % n; renderPalette(pInput.value); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + n) % n; renderPalette(pInput.value); }
+    if (e.key === 'Enter') { e.preventDefault(); choose(sel); }
+    return;
+  }
+  if (e.altKey && k === 'g') { e.preventDefault(); setView('graph'); }
+  if (e.altKey && k === 'd') { e.preventDefault(); setView('study'); }
+  if (e.altKey && k === 't') { e.preventDefault(); $('#theme').classList.toggle('on'); }
+  if (e.altKey && k === 'v') { e.preventDefault(); $('#vaultBtn').click(); }
+  if (e.altKey && k === 'n') { e.preventDefault(); $('#newNote').click(); }
+});
+
+$('#newNote').onclick = async () => {
+  const n = await api('/notes', { method: 'POST', body: JSON.stringify({ title: 'Untitled' }) });
+  await loadList();
+  await openNote(n.slug);
+  $('#noteTitle').focus();
+  $('#noteTitle').select();
+};
+
+/* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
+$('#themeBtn').onclick = () => $('#theme').classList.toggle('on');
+$('#themeClose').onclick = () => $('#theme').classList.remove('on');
+document.querySelectorAll('.wallopt[data-wall]').forEach((o) => (o.onclick = () => {
+  const patch = { wall: o.dataset.wall };
+  if (T.auto && o.dataset.acc) patch.acc = o.dataset.acc;
+  setTheme(patch);
+}));
+$('#wallUp').onclick = () => $('#wallFile').click();
+$('#wallFile').onchange = async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  e.target.value = '';
+  toast('Uploading wallpaper…', 8000);
+  const fd = new FormData();
+  fd.append('file', f);
+  const m = await api('/media', { method: 'POST', body: fd });
+  const im = new Image();
+  im.onload = () => {
+    const patch = { wall: 'custom', wallUrl: m.url };
+    if (T.auto) { const a = accentFrom(im); if (a) patch.acc = a; }
+    setTheme(patch);
+    toast('Wallpaper saved to your vault');
+  };
+  im.src = m.url;
+};
+document.querySelectorAll('.sw[data-acc]').forEach((s) => (s.onclick = () => setTheme({ acc: s.dataset.acc, auto: false })));
+$('#accPick').oninput = (e) => setTheme({ acc: rgb(e.target.value), auto: false });
+$('#autoAcc').onclick = () => setTheme({ auto: !T.auto });
+[['rContrast', 'contrast'], ['rSat', 'sat'], ['rBlur', 'blur'], ['rFrost', 'frost'], ['rScrim', 'scrim'], ['rInset', 'inset']]
+  .forEach(([id, key]) => ($('#' + id).oninput = (e) => setTheme({ [key]: +e.target.value })));
+$('#thReset').onclick = () => setTheme({ ...DEFAULTS, wallUrl: T.wallUrl });
+
+/* ══ VAULTS ═════════════════════════════════════
+   Switching vault repoints the server and rebuilds its index, so the whole
+   client state has to be reloaded afterwards — theme included, since theme
+   lives inside the vault.
+   ═════════════════════════════════════════════ */
+const vaultsEl = () => $('#vaults');
+
+async function showVaultName() {
+  try {
+    const v = await api('/vault/info');
+    const name = String(v.vault).split('/').filter(Boolean).pop() || v.vault;
+    $('#crumbTitle').textContent = name;
+    $('#vaultCrumb').title = v.vault + ' — click to switch vaults';
+  } catch {}
+}
+
+async function renderVaults() {
+  let data;
+  try { data = await api('/vault/list'); } catch { return; }
+  const box = $('#vaultList');
+  box.innerHTML = '';
+  $('#renameRow').hidden = true;
+  for (const v of data.recent) {
+    const row = document.createElement('button');
+    row.className = 'vaultrow' + (v.current ? ' current' : '') + (v.exists ? '' : ' missing');
+    const name = v.path.split('/').filter(Boolean).pop() || v.path;
+    row.innerHTML = `<span class="vaultname"></span><span class="vaultpath"></span>`;
+    row.querySelector('.vaultname').textContent = name + (v.current ? ' · open' : '');
+    row.querySelector('.vaultpath').textContent = v.path;
+    row.disabled = v.current;
+    if (!v.exists) row.title = 'This folder no longer has a notes/ directory';
+    row.onclick = () => switchVault('/vault/open', v.path);
+    box.appendChild(row);
+    if (v.current) {
+      // Rename is offered only for the open vault: renaming one the app is not
+      // serving would need a second index to be closed and reopened for no
+      // real gain.
+      const ren = document.createElement('button');
+      ren.className = 'vaultrename';
+      ren.textContent = 'Rename this vault';
+      ren.onclick = (e) => {
+        e.stopPropagation();
+        $('#renameRow').hidden = false;
+        $('#renameInput').value = name;
+        $('#renameInput').focus();
+        $('#renameInput').select();
+      };
+      box.appendChild(ren);
+    }
+  }
+  if (!$('#vaultPath').value) {
+    $('#vaultPath').placeholder = `${data.suggested_parent}/Tephra-…`;
+  }
+}
+
+async function switchVault(endpoint, path) {
+  const msg = $('#vaultMsg');
+  msg.textContent = 'Switching…';
+  try {
+    const r = await api(endpoint, { method: 'POST', body: JSON.stringify({ path }) });
+    // Theme is per-vault, so re-read it rather than carrying the old one over.
+    try { T = { ...DEFAULTS, ...(await api('/theme')) }; } catch {}
+    state.sort = SORTS[T.note_sort] ? T.note_sort : 'updated';
+    state.tag = T.note_tag || '';
+    state.slug = null; state.note = null; state.dirty = false;
+    applyTheme();
+    await loadList();
+    await loadGraph();
+    await loadMedia();
+    if (state.notes[0]) await openNote(state.notes[0].slug, false);
+    await renderVaults();
+    await showVaultName();
+  window.tephraLinks?.poll();
+    window.tephraStudy?.refresh();
+    msg.textContent = `Now in ${r.vault}` + (r.created ? ' (new)' : '');
+    toast(r.created ? `Created vault at ${r.vault}` : `Opened ${r.vault}`);
+    $('#vaultPath').value = '';
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    msg.textContent = detail;
+    toast(detail.slice(0, 160), 6000);
+  }
+}
+
+async function doRename() {
+  const name = $('#renameInput').value.trim();
+  const msg = $('#vaultMsg');
+  if (!name) { msg.textContent = 'Type a folder name first.'; return; }
+  msg.textContent = 'Renaming…';
+  try {
+    const r = await api('/vault/rename', { method: 'POST', body: JSON.stringify({ name }) });
+    $('#renameRow').hidden = true;
+    await renderVaults();
+    await showVaultName();
+  window.tephraLinks?.poll();
+    msg.textContent = `Vault folder is now ${r.name}`;
+    toast(`Renamed to ${r.name}`);
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    msg.textContent = detail;
+    toast(detail.slice(0, 160), 6000);
+  }
+}
+$('#renameSave').onclick = doRename;
+$('#renameCancel').onclick = () => { $('#renameRow').hidden = true; };
+$('#renameInput').onkeydown = (e) => {
+  if (e.key === 'Enter') doRename();
+  if (e.key === 'Escape') { e.stopPropagation(); $('#renameRow').hidden = true; }
+};
+
+$('#vaultCrumb').onclick = () => $('#vaultBtn').click();
+$('#vaultBtn').onclick = () => {
+  vaultsEl().classList.toggle('on');
+  $('#theme').classList.remove('on');
+  if (vaultsEl().classList.contains('on')) renderVaults();
+};
+$('#vaultClose').onclick = () => vaultsEl().classList.remove('on');
+$('#vaultCreate').onclick = () => {
+  const p = $('#vaultPath').value.trim();
+  if (!p) return ($('#vaultMsg').textContent = 'Type a folder path first.');
+  switchVault('/vault/create', p);
+};
+$('#vaultOpen').onclick = () => {
+  const p = $('#vaultPath').value.trim();
+  if (!p) return ($('#vaultMsg').textContent = 'Type a folder path first.');
+  switchVault('/vault/open', p);
+};
+$('#vaultPath').onkeydown = (e) => { if (e.key === 'Enter') $('#vaultOpen').click(); };
+
+/* Summarise a repair report in one line. Counts, not jargon: "3 nested links"
+   means something; "flatten_nested_links" does not. */
+function describeRepair(r) {
+  const sum = (k) => (r.notes || []).reduce((n, x) => n + (x[k] || 0), 0);
+  const bits = [];
+  if (sum('nested')) bits.push(`${sum('nested')} nested link${sum('nested') === 1 ? '' : 's'}`);
+  if (sum('quiz_links')) bits.push(`${sum('quiz_links')} link${sum('quiz_links') === 1 ? '' : 's'} in quiz text`);
+  if (sum('frontmatter')) bits.push(`${sum('frontmatter')} heading${sum('frontmatter') === 1 ? '' : 's'}`);
+  if (sum('empty')) bits.push(`${sum('empty')} empty link${sum('empty') === 1 ? '' : 's'}`);
+  const n = r.changed;
+  let msg = `Cleaned up ${n} note${n === 1 ? '' : 's'}`;
+  if (bits.length) msg += ` — ${bits.join(', ')}`;
+  if (r.created?.length) {
+    msg += `; created ${r.created.length} missing note${r.created.length === 1 ? '' : 's'}`;
+  }
+  return msg;
+}
+
+/* Content check. The auto-linker that produced nested links is fixed, but a
+   vault it already damaged stays damaged until something rewrites it — so this
+   has to be reachable, not just an endpoint. */
+$('#auditRun').onclick = async () => {
+  const out = $('#auditResult');
+  out.textContent = 'Checking…';
+  try {
+    const [a, preview] = await Promise.all([
+      api('/audit'),
+      api('/repair?dry_run=true', { method: 'POST' }),
+    ]);
+    if (a.clean) {
+      out.textContent = 'No malformed links found.';
+      $('#repairRun').disabled = true;
+      return;
+    }
+    const n = preview.changed;
+    out.innerHTML = `<b>${n} note${n === 1 ? '' : 's'}</b> would be rewritten.`;
+    const p = preview.notes.find((x) => x.preview && x.preview.before);
+    if (p) {
+      const box = document.createElement('div');
+      box.className = 'auditsample';
+      box.innerHTML = `<div class="abefore"></div><div class="aafter"></div>`;
+      box.querySelector('.abefore').textContent = p.preview.before;
+      box.querySelector('.aafter').textContent = p.preview.after;
+      out.appendChild(box);
+    }
+    $('#repairRun').disabled = false;
+  } catch { out.textContent = 'Could not run the check.'; }
+};
+
+$('#repairRun').onclick = async () => {
+  const out = $('#auditResult');
+  out.textContent = 'Repairing…';
+  try {
+    const r = await api('/repair', { method: 'POST' });
+    out.textContent = describeRepair(r) + '.';
+    $('#repairRun').disabled = true;
+    toast(describeRepair(r), 6000);
+    await loadList();
+    await loadGraph();
+    if (state.slug) await openNote(state.slug, false);
+    window.tephraStudy?.refresh();
+  } catch { out.textContent = 'Repair failed.'; }
+};
+
+/* Link maintenance. Audit is read-only and always safe; repair rewrites the
+   markdown, so it is only offered once something is actually found. */
+$('#btnAudit').onclick = async () => {
+  const msg = $('#maintMsg');
+  msg.textContent = 'Checking…';
+  try {
+    const a = await api('/audit');
+    if (a.clean) { msg.textContent = 'All links look correct.'; return; }
+    const worst = a.issues[0];
+    msg.innerHTML = '';
+    msg.appendChild(document.createTextNode(
+      `${a.issues.length} note${a.issues.length === 1 ? '' : 's'} affected. `
+      + `For example ${worst.title}: `));
+    const code = document.createElement('code');
+    code.textContent = (worst.sample || '').slice(0, 60);
+    msg.appendChild(code);
+    const fix = document.createElement('button');
+    fix.className = 'sv-btn primary';
+    fix.style.marginTop = '10px';
+    fix.textContent = `Repair ${a.issues.length} note${a.issues.length === 1 ? '' : 's'}`;
+    fix.onclick = async () => {
+      fix.disabled = true;
+      fix.textContent = 'Repairing…';
+      try {
+        const r = await api('/repair', { method: 'POST' });
+        toast(describeRepair(r), 6000);
+        msg.textContent = `Repaired ${r.changed} of ${r.scanned} notes.`;
+        await loadList();
+        await loadGraph();
+        if (state.slug) await openNote(state.slug, false);
+        window.tephraStudy?.refresh();
+      } catch { msg.textContent = 'Repair failed.'; }
+    };
+    msg.appendChild(document.createElement('br'));
+    msg.appendChild(fix);
+  } catch { msg.textContent = 'Could not run the check.'; }
+};
+
+$('#btnReindex').onclick = async () => {
+  const msg = $('#maintMsg');
+  msg.textContent = 'Rebuilding…';
+  try {
+    const r = await api('/reindex', { method: 'POST' });
+    await loadList(); await loadGraph(); await loadMedia();
+    msg.textContent = `Reindexed ${r.notes} notes.`;
+  } catch { msg.textContent = 'Reindex failed.'; }
+};
+
+/* ══ AMBIENT AURORA ══════════════════════════════════════════ */
+(function () {
+  const c = $('#aurora'), x = c.getContext('2d');
+  let w, h;
+  const blobs = [
+    { r: .55, a: .40, sx: .00021, sy: .00016, px: 0, py: 0, useAcc: true },
+    { r: .48, a: .34, sx: -.00017, sy: .00023, px: 2, py: 1, h: '183,156,255' },
+    { r: .42, a: .26, sx: .00013, sy: -.00019, px: 4, py: 3, h: '255,157,110' },
+    { r: .60, a: .44, sx: -.00011, sy: -.00014, px: 1, py: 5, h: '26,104,138' },
+  ];
+  const size = () => { w = c.width = Math.round(innerWidth * .45); h = c.height = Math.round(innerHeight * .45); };
+  size(); addEventListener('resize', size);
+  function draw(t) {
+    x.fillStyle = '#050C0E'; x.fillRect(0, 0, w, h);
+    for (const b of blobs) {
+      const col = b.useAcc ? T.acc : b.h;
+      const cx = w * (.5 + .42 * Math.sin(t * b.sx + b.px));
+      const cy = h * (.5 + .42 * Math.cos(t * b.sy + b.py));
+      const rr = Math.max(w, h) * b.r;
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      g.addColorStop(0, `rgba(${col},${b.a})`); g.addColorStop(1, `rgba(${col},0)`);
+      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, rr, 0, 7); x.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  reduce ? draw(0) : requestAnimationFrame(draw);
+})();
+
+/* ══ BOOT ════════════════════════════════════════════════════ */
+addEventListener('hashchange', () => {
+  const s = location.hash.slice(1);
+  if (s && s !== state.slug) openNote(s, false);
+});
+
+(async function boot() {
+  try { T = { ...DEFAULTS, ...(await api('/theme')) }; } catch {}
+  state.sort = SORTS[T.note_sort] ? T.note_sort : 'updated';
+  state.tag = T.note_tag || '';
+  state.mediaOpen = T.media_open || {};
+  applyTheme();
+  mini = miniGraph($('#mini'));
+  await loadList();
+  await loadGraph();
+  await loadMedia();
+  // Repair runs server-side before the UI exists, so say what it did once the
+  // window is actually up. Consumed on read, so a reload does not repeat it.
+  try {
+    const r = await api('/repair/last');
+    if (r && r.changed) toast(describeRepair(r), 7000);
+  } catch {}
+
+  await showVaultName();
+  window.tephraLinks?.poll();
+
+  const want = location.hash.slice(1) || state.notes[0]?.slug;
+  if (want) await openNote(want, false);
+  drawMini();
+  setInterval(() => { if (!state.dirty && state.note) mark('saved', 'Saved ' + fmtAgo(state.note.updated)); }, 20000);
+})();

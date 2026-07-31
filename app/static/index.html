@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tephra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..700&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233FE0AD'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<canvas id="aurora"></canvas>
+<div id="wall"></div>
+<div id="wallscrim"></div>
+<div id="grain"></div>
+
+<div class="shell">
+
+  <header class="topbar">
+    <button class="mark markbtn" id="tephraBtn" aria-pressed="true"
+            title="Notes (⌥D toggles)"><i></i> Tephra</button>
+    <button class="mark markbtn" id="crucibleBtn" aria-pressed="false"
+            title="Crucible — study guide (⌥D)"><i class="cruc-mark"></i> Crucible</button>
+    <button class="crumbs vaultpill" id="vaultCrumb" title="Current vault — click to switch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+      </svg>
+      <b id="crumbTitle">…</b>
+    </button>
+    <div class="searchbar" id="openPalette">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <span>Search or jump to…</span><kbd>⌘K</kbd>
+    </div>
+    <div class="segmented">
+      <button aria-pressed="true" data-view="write">Write</button>
+      <button aria-pressed="false" data-view="graph">Graph</button>
+      <button aria-pressed="false" data-view="links">Links<span class="tabbadge" id="linksBadge" hidden></span></button>
+    </div>
+    <button class="iconbtn" id="vaultBtn" title="Vaults">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+    </button>
+    <button class="iconbtn" id="themeBtn" title="Appearance (⌥T)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 000-9 4.5 4.5 0 010-9z"/></svg>
+    </button>
+  </header>
+
+  <div class="deck">
+   <div class="side" id="sideTephra">
+    <div class="row">
+
+    <aside class="sidebar">
+      <div class="side-scroll">
+        <div class="sect">
+          <div class="eyebrow"><span>Vault</span><span id="noteCount">—</span></div>
+          <div class="sortrow">
+            <select id="noteSort" title="Sort notes">
+              <option value="updated">Recently edited</option>
+              <option value="title">Title A–Z</option>
+              <option value="backlinks">Most linked to</option>
+              <option value="links_out">Most links out</option>
+              <option value="flags">Flagged first</option>
+              <option value="kind">Type</option>
+              <option value="size">Longest</option>
+            </select>
+          </div>
+          <div class="tree" id="noteList"></div>
+        </div>
+        <div class="sect" id="tagSect" hidden>
+          <div class="eyebrow"><span>Tags</span><span id="tagClear" hidden>clear</span></div>
+          <div class="tagcloud" id="tagCloud"></div>
+        </div>
+      </div>
+      <button class="newnote" id="newNote">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        New note
+      </button>
+    </aside>
+
+    <main class="editor" id="editor">
+      <div class="dropzone">Drop to attach</div>
+      <div class="doc" id="doc">
+        <div class="doc-inner">
+          <div class="doc-crumb" id="docCrumb" hidden></div>
+          <textarea class="title" id="noteTitle" rows="1" spellcheck="false" placeholder="Untitled"></textarea>
+          <div class="metarow">
+            <span class="saved" id="saveChip" data-state="saved"><i></i>Saved</span><span class="sep">·</span>
+            <span id="metaWords">0 words</span><span class="sep">·</span>
+            <span id="metaLinks">0 links out</span><span class="sep">·</span>
+            <span id="metaBack">0 backlinks</span><span class="sep">·</span>
+            <span id="studyChip"></span><span class="sep">·</span>
+            <span id="flagChip"></span>
+            <span id="deleteChip"></span>
+          </div>
+          <div id="trailChip" hidden></div>
+          <div class="body" id="noteBody"></div>
+          <textarea class="src" id="noteSrc" spellcheck="false" hidden placeholder="Write in markdown. [[Double brackets]] link a note, ![[file.png]] embeds one."></textarea>
+          <div class="hint" id="editHint">CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH</div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="context">
+      <div class="ctx-scroll">
+        <div class="sect">
+          <div class="eyebrow"><span>Local graph</span><span id="orbitCount">—</span></div>
+          <div id="graphCrumb" class="graph-crumb" hidden></div>
+          <div class="orbit g2" id="orbit"><canvas id="mini"></canvas><div class="expand">EXPAND ⌥G</div></div>
+        </div>
+        <div class="sect">
+          <div class="eyebrow"><span>Backlinks</span><span id="backCount">0</span></div>
+          <div id="backList"></div>
+        </div>
+        <div class="sect">
+          <div class="eyebrow"><span>Media in vault</span><span id="mediaCount">0</span></div>
+          <div id="mediaGroups"></div>
+        </div>
+      </div>
+    </aside>
+    </div>
+    <div id="graphview" class="pane">
+      <div class="gv-head"><h3>Vault graph</h3><p id="gvStats">—</p></div>
+      <div class="gv-tools">
+        <select id="gvLayout" title="Layout">
+          <option value="cluster">Clustered</option>
+          <option value="tree">Tidy tree</option>
+        </select>
+        <button class="gv-tool wide" id="gvStubs" data-on title="Show notes that don't exist yet">Stubs</button>
+        <button class="gv-tool wide" id="gvLeaves" data-on title="Show notes with only one link">Leaves</button>
+        <input type="text" id="gvFind" placeholder="Find a note…" autocomplete="off">
+        <button class="gv-tool" id="gvZoomOut" title="Zoom out">−</button>
+        <button class="gv-tool" id="gvZoomIn" title="Zoom in">+</button>
+        <button class="gv-tool wide" id="gvFit" title="Fit to view">Fit</button>
+        <button class="gv-tool wide" id="gvRelax" title="Unpin everything and re-settle">Relax</button>
+        <button class="gv-close" id="gvClose">✕</button>
+      </div>
+      <canvas id="graph"></canvas>
+      <aside id="gvPanel"><div class="gv-hint">Click a node to see what it connects to.</div></aside>
+      <div class="gv-legend">
+        <span><i id="lgW"></i>Written</span>
+        <span><i style="background:#FF9D6E"></i>Stub</span>
+        <span>drag to pan · scroll to zoom · double-click to open</span>
+      </div>
+    </div>
+   </div>
+  </div>
+</div>
+
+<aside id="vaults">
+  <div class="th-head"><h4>Vaults</h4><button class="mini" id="vaultClose">×</button></div>
+  <div class="th-body">
+    <div class="th-sect">
+      <div class="th-l"><span>Open</span></div>
+      <div id="vaultList"></div>
+      <div class="th-row" id="renameRow" hidden>
+        <input type="text" id="renameInput" class="th-input" spellcheck="false"
+               placeholder="New folder name">
+        <button class="sv-btn primary" id="renameSave">Save</button>
+        <button class="sv-btn" id="renameCancel">Cancel</button>
+      </div>
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>New or existing</span></div>
+      <input type="text" id="vaultPath" class="th-input" placeholder="~/Documents/Tephra-Storage" spellcheck="false">
+      <div class="th-row">
+        <button class="sv-btn primary" id="vaultCreate">Create</button>
+        <button class="sv-btn" id="vaultOpen">Open existing</button>
+      </div>
+      <div class="th-note" id="vaultMsg">Each vault is a self-contained folder — its own notes, media, study progress and theme.</div>
+    </div>
+
+    <div class="th-sect">
+      <div class="th-l"><span>Content check</span></div>
+      <div id="auditResult" class="th-note">Not checked yet.</div>
+      <div class="th-row">
+        <button class="sv-btn" id="auditRun">Check</button>
+        <button class="sv-btn primary" id="repairRun" disabled>Repair</button>
+      </div>
+      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown.</div>
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Maintenance</span></div>
+      <div class="th-row">
+        <button class="sv-btn" id="btnAudit">Check links</button>
+        <button class="sv-btn" id="btnReindex">Rebuild index</button>
+      </div>
+      <div class="th-note" id="maintMsg">Checks for malformed links and markup that leaked into quiz blocks.</div>
+    </div>
+  </div>
+</aside>
+
+<aside id="theme">
+  <div class="th-head"><h4>Appearance</h4><button class="mini" id="themeClose">×</button></div>
+  <div class="th-body">
+    <div class="th-sect">
+      <div class="th-l"><span>Wallpaper</span></div>
+      <div class="wallgrid">
+        <div class="wallopt" data-wall="aurora" data-acc="63,224,173" style="background:linear-gradient(135deg,#0A3B33,#2A2B52 60%,#4A2436)">AURORA</div>
+        <div class="wallopt" data-wall="slate"  data-acc="125,211,252" style="background:linear-gradient(150deg,#132430,#2B4254 55%,#4A6070)">SLATE</div>
+        <div class="wallopt" data-wall="ember"  data-acc="255,157,110" style="background:linear-gradient(150deg,#22110C,#5A2A1C 55%,#94492A)">EMBER</div>
+        <div class="wallopt" data-wall="bloom"  data-acc="255,143,177" style="background:linear-gradient(150deg,#2A1030,#5B2350 52%,#8A3A5E)">BLOOM</div>
+        <div class="wallopt up" id="wallUp" style="grid-column:1/-1"><span>＋ Upload your own image</span></div>
+      </div>
+      <input type="file" id="wallFile" accept="image/*" hidden>
+      <div class="th-note">Saved to <code>theme.json</code> in your vault, so it survives rebuilds.</div>
+    </div>
+
+    <div class="th-sect">
+      <div class="th-l"><span>Accent</span><b id="vAcc">#3FE0AD</b></div>
+      <div class="swatches">
+        <div class="sw" data-acc="63,224,173"  style="background:#3FE0AD;color:#3FE0AD"></div>
+        <div class="sw" data-acc="183,156,255" style="background:#B79CFF;color:#B79CFF"></div>
+        <div class="sw" data-acc="255,157,110" style="background:#FF9D6E;color:#FF9D6E"></div>
+        <div class="sw" data-acc="125,211,252" style="background:#7DD3FC;color:#7DD3FC"></div>
+        <div class="sw" data-acc="255,143,177" style="background:#FF8FB1;color:#FF8FB1"></div>
+        <div class="sw" data-acc="198,242,78"  style="background:#C6F24E;color:#C6F24E"></div>
+        <div class="sw custom" title="Custom colour"><input type="color" id="accPick" value="#3FE0AD"></div>
+      </div>
+      <div class="tglrow" style="margin-top:14px">
+        <span>Pull accent from wallpaper</span>
+        <div class="tgl" id="autoAcc"><i></i></div>
+      </div>
+    </div>
+
+    <div class="th-sect">
+      <div class="th-l"><span>Text contrast</span><b id="vInk">36%</b></div>
+      <input type="range" id="rContrast" min="-34" max="42" value="0">
+      <div class="th-note">Tracks blur, frost and dim automatically — this nudges the result.</div>
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Colour bleed</span><b id="vSat">200%</b></div>
+      <input type="range" id="rSat" min="100" max="320" value="200">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Glass blur</span><b id="vBlur">30px</b></div>
+      <input type="range" id="rBlur" min="0" max="70" value="30">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Frost</span><b id="vFrost">5.5%</b></div>
+      <input type="range" id="rFrost" min="0" max="200" value="55">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Wallpaper dim</span><b id="vScrim">26%</b></div>
+      <input type="range" id="rScrim" min="0" max="90" value="26">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Window inset</span><b id="vInset">20px</b></div>
+      <input type="range" id="rInset" min="0" max="56" value="20">
+      <button class="th-reset" id="thReset">Reset to defaults</button>
+    </div>
+  </div>
+</aside>
+
+<div id="lens" class="pane">
+  <div class="l-k" id="lensKind">NOTE</div>
+  <div class="l-t" id="lensTitle"></div>
+  <div class="l-b" id="lensBody"></div>
+  <div class="l-f"><span id="lensMeta"></span></div>
+</div>
+
+<div id="scrim"></div>
+<div id="palette" class="pane">
+  <input type="text" placeholder="Search notes, or type a new title…" id="pInput" autocomplete="off">
+  <div class="plist" id="pList"></div>
+</div>
+
+
+
+<div id="toast" class="pane"></div>
+
+<script src="/static/graph.js"></script>
+<script src="/static/links.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/study.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# user data — inert with run.py, essential under docker compose
+vault/
+
+# run.py bootstrap (.tephra-deps stamp lives inside)
+.venv/
+
+# python
+__pycache__/
+*.py[cod]
+
+# desktop builds
+build/
+dist/
+*.spec
+
+# macOS
+.DS_Store
