@@ -1140,10 +1140,22 @@ $('#noteBody').addEventListener('click', async (e) => {
 /* ══ HOVER LENS ══════════════════════════════════════════════ */
 const lensCache = new Map();
 let lensT;
+// Which anchor the pending lens belongs to. The open is delayed and may await
+// a fetch, so by the time it resolves the pointer may have moved on, or the
+// note may have been re-rendered out from under it.
+let lensFor = null;
+
+function hideLens() {
+  clearTimeout(lensT);
+  lensFor = null;
+  $('#lens').classList.remove('on');
+}
+
 document.addEventListener('mouseover', async (e) => {
   const a = e.target.closest('a.wl');
   if (!a) return;
   clearTimeout(lensT);
+  lensFor = a;
   lensT = setTimeout(async () => {
     const lens = $('#lens');
     let data;
@@ -1161,6 +1173,10 @@ document.addEventListener('mouseover', async (e) => {
     } else {
       data = { k: 'NOT WRITTEN YET', t: a.dataset.title, b: 'No page for this yet. Click the link and Tephra will create it.', m: 'stub' };
     }
+    // The await above can outlast a click that re-renders the note. A detached
+    // anchor measures as 0,0, which would park the lens in the corner with no
+    // pointer anywhere near it to dismiss it again.
+    if (lensFor !== a || !a.isConnected) return;
     $('#lensKind').textContent = data.k;
     $('#lensTitle').textContent = data.t;
     $('#lensBody').textContent = data.b;
@@ -1173,9 +1189,21 @@ document.addEventListener('mouseover', async (e) => {
     lens.classList.add('on');
   }, 160);
 });
+
 document.addEventListener('mouseout', (e) => {
-  if (e.target.closest('a.wl')) { clearTimeout(lensT); $('#lens').classList.remove('on'); }
+  if (e.target.closest('a.wl')) hideLens();
 });
+
+// mouseout is not enough on its own. Removing a hovered element does not fire
+// it, so clicking a wiki link re-renders the note and strands the lens with
+// nothing left able to dismiss it. Capture phase, so it runs before the
+// handler that does the re-rendering.
+document.addEventListener('click', hideLens, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideLens(); });
+// The note body scrolls, not the window, and the lens is position:fixed --
+// without this it detaches from the link it belongs to.
+window.addEventListener('scroll', hideLens, true);
+window.addEventListener('blur', hideLens);
 
 /* ══ DRAG AND DROP MEDIA ═════════════════════════════════════ */
 const editor = $('#editor');
