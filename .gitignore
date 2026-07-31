@@ -17,4 +17,3 @@ dist/
 
 # node (jsdom for the ui_*.mjs suites)
 node_modules/
-package-lock.json
