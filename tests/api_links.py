@@ -50,7 +50,7 @@ with TestClient(app) as c:
 
     print("\n── the real guide survives repeated auto-linking ──")
     c.post("/api/study/import", files={"file": ("g.py", io.BytesIO(
-        open("/mnt/user-data/uploads/fb_study_guide.py", "rb").read()), "text/x-python")})
+        open(os.path.join(os.path.dirname(__file__), "fixtures/fb_study_guide.py"), "rb").read()), "text/x-python")})
     before = c.get("/api/study").json()["totals"]["questions"]
     for _ in range(3):
         for s in c.get("/api/suggestions").json()[:4]:
