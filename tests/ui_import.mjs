@@ -1,7 +1,7 @@
 import { JSDOM } from 'jsdom';
 import fs from 'fs';
 
-const ROOT = '/home/claude/tephra/app/static';
+const ROOT = new URL('../app/static', import.meta.url).pathname;
 const html = fs.readFileSync(`${ROOT}/index.html`, 'utf8');
 
 const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://127.0.0.1:8400/' });

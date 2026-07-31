@@ -2,7 +2,7 @@ import { JSDOM } from 'jsdom';
 import fs from 'fs';
 const dom = new JSDOM('<html></html>', { runScripts: 'outside-only' });
 dom.window.tephraApi = async () => ({ nodes: [], links: [] });
-dom.window.eval(fs.readFileSync('/home/claude/tephra/app/static/graph.js', 'utf8'));
+dom.window.eval(fs.readFileSync(new URL('../app/static/graph.js', import.meta.url).pathname, 'utf8'));
 const I = dom.window.__tephraGraphInternals;
 
 // A vault shaped like Dylan's after import: root -> 13 categories -> 62 topics
