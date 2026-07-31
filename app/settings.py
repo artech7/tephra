@@ -17,6 +17,9 @@ MAX_RECENT = 8
 
 
 def config_dir() -> Path:
+    override = os.environ.get("TEPHRA_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     elif os.name == "nt":
@@ -64,7 +67,11 @@ def rename_vault(old: str | Path, new: str | Path) -> dict:
     """Point config at a moved vault, keeping its place in the recents list."""
     cfg = load()
     old_s, new_s = str(Path(old).resolve()), str(Path(new).resolve())
-    cfg["recent"] = [new_s if r == old_s else r for r in cfg.get("recent", [])]
+    renamed = [new_s if r == old_s else r for r in cfg.get("recent", [])]
+    # Replacing can collide with an entry that is already present, so dedupe
+    # rather than leaving the same path in the list twice.
+    seen: set[str] = set()
+    cfg["recent"] = [r for r in renamed if not (r in seen or seen.add(r))]
     # Only ever called for the vault in use, and on a first run the config may
     # not name a vault at all yet — so set it rather than only updating a match.
     cfg["vault"] = new_s

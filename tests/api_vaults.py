@@ -1,13 +1,13 @@
 """Vault switching and multi-format import."""
 import io, json, os, shutil, sys
 from pathlib import Path
-os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/tephra-test-cfg")
+os.environ.setdefault("TEPHRA_CONFIG_DIR", os.path.realpath("/tmp") + "/tephra-test-cfg/Tephra")
 # Everything under one parent that gets wiped: rename creates sibling folders,
 # and a leftover target from a previous run made the rename fail with a 409
 # that surfaced as a confusing KeyError.
-ROOT = "/tmp/tephra-test-vaults"
+ROOT = os.path.realpath("/tmp") + "/tephra-test-vaults"
 shutil.rmtree(ROOT, ignore_errors=True)
-shutil.rmtree(os.environ["XDG_CONFIG_HOME"], ignore_errors=True)
+shutil.rmtree(os.environ["TEPHRA_CONFIG_DIR"], ignore_errors=True)
 os.makedirs(ROOT, exist_ok=True)
 A = os.environ.setdefault("TEPHRA_VAULT", f"{ROOT}/vault-a")
 B = f"{ROOT}/vault-b"
@@ -81,7 +81,7 @@ with TestClient(app) as c:
     l = c.get("/api/vault/list").json()
     ck("both listed", {x["path"] for x in l["recent"]} >= {A, B}, [x["path"] for x in l["recent"]])
     ck("config not inside a vault",
-       os.path.isfile(f"{os.environ['XDG_CONFIG_HOME']}/Tephra/config.json")
+       os.path.isfile(f"{os.environ['TEPHRA_CONFIG_DIR']}/config.json")
        and not os.path.exists(f"{A}/config.json"))
 
     print("\n── renaming the vault folder ──")
@@ -98,7 +98,7 @@ with TestClient(app) as c:
     ck("writes land in the new folder",
        c.post("/api/notes", json={"title": "Post Rename"}).status_code == 200
        and os.path.isfile(f"{NEW}/notes/post-rename.md"))
-    cfgf = _json.load(open(f"{os.environ['XDG_CONFIG_HOME']}/Tephra/config.json"))
+    cfgf = _json.load(open(f"{os.environ['TEPHRA_CONFIG_DIR']}/config.json"))
     ck("config follows", cfgf["vault"] == NEW, cfgf["vault"])
     ck("no dead recents entry", A not in cfgf["recent"], cfgf["recent"])
 

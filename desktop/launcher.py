@@ -36,6 +36,9 @@ APP_NAME = "Tephra"
 # ── platform paths ─────────────────────────────────────────────────────────
 
 def config_dir() -> Path:
+    override = os.environ.get("TEPHRA_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     elif os.name == "nt":
