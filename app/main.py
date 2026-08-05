@@ -546,6 +546,33 @@ def vault_list():
             "suggested_parent": str(cfg.default_vault().parent)}
 
 
+@app.get("/api/vault/browse")
+def vault_browse(path: str | None = None):
+    """List immediate subdirectories of `path`, flagged with whether each
+    looks like a vault, for the vault picker's browse modal.
+
+    No authentication guards this app, so a path parameter that walks the
+    filesystem is treated with care: resolved before any check (so a symlink
+    cannot be used to escape), confined to `vault.browse_root()`, and a
+    containment failure is a 403 rather than a 404 so the response never
+    confirms whether a path outside the root exists.
+    """
+    root = vault.browse_root()
+    target = Path(path).expanduser().resolve() if path else root
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise HTTPException(403, "outside the browse root")
+    if not target.is_dir():
+        raise HTTPException(404, f"no such directory: {target}")
+
+    return {
+        "path": str(target),
+        "parent": str(target.parent),
+        "entries": vault.list_browsable(target),
+    }
+
+
 class RenameIn(BaseModel):
     name: str
 

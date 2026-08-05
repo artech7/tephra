@@ -170,6 +170,16 @@
         <button class="sv-btn primary" id="vaultCreate">Create</button>
         <button class="sv-btn" id="vaultOpen">Open existing</button>
       </div>
+      <div class="th-row">
+        <button class="sv-btn" id="vaultBrowseToggle">Browse folders…</button>
+      </div>
+      <div id="vaultBrowse" hidden>
+        <div class="th-l">
+          <span id="vaultBrowsePath"></span>
+          <button class="mini" id="vaultBrowseUp" title="Up one level">↑</button>
+        </div>
+        <div id="vaultBrowseList"></div>
+      </div>
       <div class="th-note" id="vaultMsg">Each vault is a self-contained folder — its own notes, media, study progress and theme.</div>
     </div>
 

@@ -628,6 +628,10 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .vaultrow.missing{opacity:.5}
 .vaultname{font-size:12.5px;font-weight:500}
 .vaultpath{font-family:var(--mono);font-size:9.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#vaultBrowse{margin-top:9px}
+#vaultBrowsePath{font-family:var(--mono);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;flex:1;margin-right:8px}
+#vaultBrowseList{max-height:220px;overflow-y:auto}
 
 /* ── format reference on the importer ── */
 .sv-formats{width:100%;text-align:left;border-radius:12px;border:1px solid var(--edge);

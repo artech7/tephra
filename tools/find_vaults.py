@@ -18,37 +18,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from app.vault import walk  # noqa: E402
+
 SEARCH_ROOTS = [Path.home() / "Documents", Path.home() / "Desktop",
                 Path.home(), Path.cwd()]
-MAX_DEPTH = 4
-
-
-def is_vault(p: Path) -> bool:
-    notes = p / "notes"
-    if not notes.is_dir():
-        return False
-    try:
-        return any(notes.glob("*.md")) or (p / ".index").is_dir()
-    except OSError:
-        return False
-
-
-def walk(root: Path, depth: int = 0):
-    if depth > MAX_DEPTH or not root.is_dir():
-        return
-    try:
-        entries = list(root.iterdir())
-    except (OSError, PermissionError):
-        return
-    for e in entries:
-        if not e.is_dir() or e.is_symlink():
-            continue
-        if e.name in ("node_modules", "Library", ".git", ".venv"):
-            continue
-        if is_vault(e):
-            yield e
-            continue                      # do not descend into a vault
-        yield from walk(e, depth + 1)
 
 
 def config_path() -> Path:

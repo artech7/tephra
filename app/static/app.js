@@ -1609,6 +1609,58 @@ $('#vaultOpen').onclick = () => {
 };
 $('#vaultPath').onkeydown = (e) => { if (e.key === 'Enter') $('#vaultOpen').click(); };
 
+/* Browse modal: a directory listing scoped server-side to vault.browse_root()
+   (parent of the current vault, by default). The text field above stays the
+   escape hatch for any vault living outside that root. */
+let browseAt = { path: null, parent: null };
+
+async function renderBrowse(path) {
+  const box = $('#vaultBrowseList');
+  box.textContent = 'Loading…';
+  let data;
+  try {
+    data = await api('/vault/browse' + (path ? `?path=${encodeURIComponent(path)}` : ''));
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    box.textContent = detail;
+    return;
+  }
+  browseAt = { path: data.path, parent: data.parent };
+  $('#vaultBrowsePath').textContent = data.path;
+  $('#vaultBrowseUp').disabled = data.parent === data.path;
+  box.innerHTML = '';
+  if (!data.entries.length) {
+    box.innerHTML = '<div class="th-note">No subfolders here.</div>';
+    return;
+  }
+  for (const entry of data.entries) {
+    const row = document.createElement('button');
+    row.className = 'vaultrow';
+    row.innerHTML = `<span class="vaultname"></span><span class="vaultpath"></span>`;
+    row.querySelector('.vaultname').textContent = entry.name + (entry.is_vault ? '  ·  vault' : '');
+    row.querySelector('.vaultpath').textContent = entry.path;
+    row.onclick = async () => {
+      if (entry.is_vault) {
+        await switchVault('/vault/open', entry.path);
+        $('#vaultBrowse').hidden = true;
+      } else {
+        renderBrowse(entry.path);
+      }
+    };
+    box.appendChild(row);
+  }
+}
+
+$('#vaultBrowseToggle').onclick = () => {
+  const box = $('#vaultBrowse');
+  box.hidden = !box.hidden;
+  if (!box.hidden) renderBrowse();
+};
+$('#vaultBrowseUp').onclick = () => {
+  if (browseAt.parent && browseAt.parent !== browseAt.path) renderBrowse(browseAt.parent);
+};
+
 /* Summarise a repair report in one line. Counts, not jargon: "3 nested links"
    means something; "flatten_nested_links" does not. */
 function describeRepair(r) {
