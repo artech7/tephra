@@ -81,7 +81,6 @@ makes them worse, the change is wrong, not the test.
 
 ## Traps
 
-- `tools/api_repair.py` and `tests/api_repair.py` are DIFFERENT files.
 - `config_dir()` is duplicated in app/settings.py, desktop/launcher.py, and
   (as `config_path()`) tools/recover_vaults.py. Change one, change all three.
   Each checks `TEPHRA_CONFIG_DIR` before the platform branch -- that
