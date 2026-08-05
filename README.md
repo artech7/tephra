@@ -536,20 +536,18 @@ nothing. The vault differs by how you launch:
 | bare `uvicorn` with `TEPHRA_VAULT` unset | `/vault` |
 
 Import to the wrong one and you get 76 notes in a folder nobody reads, an empty
-Study tab, and no error. So the Study tab prints the vault path it is using,
-and the CLI now refuses to guess:
+Study tab, and no error. So the Study tab prints the vault path it is using.
+Headless equivalent, which has no path argument and therefore no way to
+import into the wrong directory:
 
 ```bash
-python3 tools/import_fb_guide.py guide.py --vault ~/Documents/Tephra
-python3 tools/import_fb_guide.py guide.py --vault ./vault --dry-run
+curl -sX POST -F 'file=@guide.py' 'http://localhost:8080/api/study/import?dry_run=true'
+curl -sX POST -F 'file=@guide.py' 'http://localhost:8080/api/study/import'
 ```
 
-With no `--vault` and no `TEPHRA_VAULT`, it lists the candidates and exits
-rather than writing somewhere plausible.
-
-Either route reads `TOPICS` and `QUIZ` with `ast` rather than importing the
-module, so the old app's server and tkinter are never touched. Importing
-in-app also reindexes, so notes, graph and backlinks appear without a restart.
+It reads `TOPICS` and `QUIZ` with `ast` rather than importing the module, so
+the old app's server and tkinter are never touched. Importing also reindexes,
+so notes, graph and backlinks appear without a restart.
 
 Re-running is safe: notes update in place, nothing duplicates, and **manual
 category corrections survive** — a re-import won't undo them.
