@@ -12,10 +12,13 @@ services:
     ports:
       - "${TEPHRA_PORT:-8080}:8000"
     volumes:
-      # This is your data. Everything else in the container is disposable.
-      - ./vault:/vault
+      # All vaults, so the picker can switch between them.
+      - /home/pureuser/Documents/vaults:/vaults
+      # Settings and recents list — without this, vault choice resets on restart.
+      - ./config:/config
     environment:
-      TEPHRA_VAULT: /vault
+      TEPHRA_VAULT: /vaults/Tephra
+      XDG_CONFIG_HOME: /config
       TEPHRA_MAX_UPLOAD_MB: "200"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3).status==200 else 1)"]
