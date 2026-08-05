@@ -47,8 +47,8 @@ which vault to open.
 **If your vault seems to have vanished**, it is almost certainly still there:
 
 ```bash
-python3 tools/find_vaults.py            # report, including hidden folders
-python3 tools/find_vaults.py --recover  # rename hidden strays back into view
+python3 tools/recover_vaults.py            # report hidden strays
+python3 tools/recover_vaults.py --recover  # rename them back into view
 ```
 
 A case-only rename needs two moves on a case-insensitive filesystem, and the
@@ -214,8 +214,8 @@ embeds, inline code and fenced code all survive. The pass is idempotent.
 Headless equivalent:
 
 ```bash
-TEPHRA_VAULT=~/Documents/Tephra python3 tools/repair.py         # report only
-TEPHRA_VAULT=~/Documents/Tephra python3 tools/repair.py --fix   # apply
+curl -sX POST 'http://localhost:8080/api/repair?dry_run=true' | python3 -m json.tool
+curl -sX POST 'http://localhost:8080/api/repair'
 ```
 
 `GET /api/audit` is a read-only check; `POST /api/repair?dry_run=true` previews.
@@ -536,20 +536,18 @@ nothing. The vault differs by how you launch:
 | bare `uvicorn` with `TEPHRA_VAULT` unset | `/vault` |
 
 Import to the wrong one and you get 76 notes in a folder nobody reads, an empty
-Study tab, and no error. So the Study tab prints the vault path it is using,
-and the CLI now refuses to guess:
+Study tab, and no error. So the Study tab prints the vault path it is using.
+Headless equivalent, which has no path argument and therefore no way to
+import into the wrong directory:
 
 ```bash
-python3 tools/import_fb_guide.py guide.py --vault ~/Documents/Tephra
-python3 tools/import_fb_guide.py guide.py --vault ./vault --dry-run
+curl -sX POST -F 'file=@guide.py' 'http://localhost:8080/api/study/import?dry_run=true'
+curl -sX POST -F 'file=@guide.py' 'http://localhost:8080/api/study/import'
 ```
 
-With no `--vault` and no `TEPHRA_VAULT`, it lists the candidates and exits
-rather than writing somewhere plausible.
-
-Either route reads `TOPICS` and `QUIZ` with `ast` rather than importing the
-module, so the old app's server and tkinter are never touched. Importing
-in-app also reindexes, so notes, graph and backlinks appear without a restart.
+It reads `TOPICS` and `QUIZ` with `ast` rather than importing the module, so
+the old app's server and tkinter are never touched. Importing also reindexes,
+so notes, graph and backlinks appear without a restart.
 
 Re-running is safe: notes update in place, nothing duplicates, and **manual
 category corrections survive** — a re-import won't undo them.

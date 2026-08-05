@@ -41,7 +41,83 @@ def use(path: str | Path) -> Path:
 
 def looks_like_vault(path: str | Path) -> bool:
     p = Path(path).expanduser()
-    return (p / "notes").is_dir()
+    # A permission-restricted sibling (a docker volume, another user's
+    # folder) must make that one entry unreadable, not crash the whole scan
+    # or HTTP request that is looking past it.
+    try:
+        return (p / "notes").is_dir()
+    except OSError:
+        return False
+
+
+# Directory names that are never useful to show or descend into while looking
+# for vaults — dependency trees and VCS/OS internals, not candidate vaults.
+WALK_SKIP = {"node_modules", "Library", ".git", ".venv"}
+WALK_MAX_DEPTH = 4
+
+
+def walk(root: Path, depth: int = 0):
+    """Yield vault directories under root, breadth stopping at each vault
+    found (a vault's own subfolders are never candidate vaults) and depth
+    capped so a search never wanders into an entire home directory. Symlinks
+    are never followed, so a link cannot walk the search outside of `root`.
+    """
+    if depth > WALK_MAX_DEPTH or not root.is_dir():
+        return
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return
+    for e in entries:
+        try:
+            if not e.is_dir() or e.is_symlink():
+                continue
+        except OSError:
+            continue
+        if e.name in WALK_SKIP:
+            continue
+        if looks_like_vault(e):
+            yield e
+            continue                      # do not descend into a vault
+        yield from walk(e, depth + 1)
+
+
+BROWSE_ROOT_ENV = "TEPHRA_BROWSE_ROOT"
+
+
+def browse_root() -> Path:
+    """Root the vault-picker's directory browser is confined to.
+
+    Read fresh on every call rather than cached, so it always reflects the
+    vault currently open (and TEPHRA_BROWSE_ROOT, if set) — not the vault
+    that was open when the server started.
+    """
+    override = os.environ.get(BROWSE_ROOT_ENV)
+    if override:
+        return Path(override).expanduser().resolve()
+    return VAULT.parent
+
+
+def list_browsable(path: Path) -> list[dict]:
+    """Immediate subdirectories of `path`, flagged with whether each looks
+    like a vault. Symlinks are skipped outright — never listed, so browsing
+    can never be used to hop outside the confined root via a linked entry.
+    """
+    out = []
+    try:
+        children = sorted(path.iterdir())
+    except OSError:
+        return out
+    for e in children:
+        try:
+            if not e.is_dir() or e.is_symlink():
+                continue
+        except OSError:
+            continue
+        if e.name in WALK_SKIP:
+            continue
+        out.append({"name": e.name, "path": str(e), "is_vault": looks_like_vault(e)})
+    return out
 
 MEDIA_KINDS = {
     "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".bmp"},

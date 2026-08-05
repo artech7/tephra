@@ -142,6 +142,59 @@ with TestClient(app) as c:
     ck("still serving it", c.get("/api/vault/info").json()["vault"] == cur)
     ck("notes intact", len(c.get("/api/notes").json()) == n_before, len(c.get("/api/notes").json()))
 
+    print("\n── vault browse: containment ──")
+    # No authentication guards this app, so a path parameter that walks the
+    # filesystem is the one place traversal actually matters. Exercised
+    # against a dedicated root rather than the vault dirs above, so a bug
+    # here can't be masked by ROOT already containing plausible-looking paths.
+    BROOT = f"{ROOT}/browse-root"
+    shutil.rmtree(BROOT, ignore_errors=True)
+    os.makedirs(f"{BROOT}/PlainFolder")
+    os.makedirs(f"{BROOT}/VaultFolder/notes")
+    os.makedirs(f"{BROOT}/.git")
+    OUTSIDE = f"{ROOT}/browse-outside"
+    shutil.rmtree(OUTSIDE, ignore_errors=True)
+    os.makedirs(f"{OUTSIDE}/secret")
+    os.symlink(OUTSIDE, f"{BROOT}/escape-link")
+    os.environ["TEPHRA_BROWSE_ROOT"] = BROOT
+
+    r = c.get("/api/vault/browse")
+    ck("defaults to the configured root", r.status_code == 200 and r.json()["path"] == BROOT, r.json())
+    entries = r.json()["entries"]
+    names = {e["name"] for e in entries}
+    ck("lists plain and vault folders", {"PlainFolder", "VaultFolder"} <= names, names)
+    ck("skips .git", ".git" not in names, names)
+    ck("skips symlinked entries", "escape-link" not in names, names)
+    vf = next(e for e in entries if e["name"] == "VaultFolder")
+    pf = next(e for e in entries if e["name"] == "PlainFolder")
+    ck("flags the vault folder", vf["is_vault"] is True)
+    ck("does not flag the plain folder", pf["is_vault"] is False)
+
+    r = c.get("/api/vault/browse", params={"path": f"{BROOT}/VaultFolder"})
+    ck("descending into a subdirectory works",
+       r.status_code == 200 and r.json()["parent"] == BROOT, r.json())
+
+    r = c.get("/api/vault/browse", params={"path": OUTSIDE})
+    ck("a path outside the root is refused with 403, not 404", r.status_code == 403, r.status_code)
+
+    r = c.get("/api/vault/browse", params={"path": f"{OUTSIDE}/does-not-exist"})
+    ck("...even one that doesn't exist, so existence outside the root leaks nothing",
+       r.status_code == 403, r.status_code)
+
+    r = c.get("/api/vault/browse", params={"path": f"{BROOT}/escape-link"})
+    ck("a symlink resolving outside the root is refused, not followed",
+       r.status_code == 403, r.status_code)
+
+    r = c.get("/api/vault/browse", params={"path": f"{BROOT}/../browse-outside"})
+    ck("dot-dot is refused once resolved, not string-matched before",
+       r.status_code == 403, r.status_code)
+
+    r = c.get("/api/vault/browse", params={"path": f"{BROOT}/nonexistent-inside"})
+    ck("a missing directory inside the root is 404, distinct from outside-root 403",
+       r.status_code == 404, r.status_code)
+
+    del os.environ["TEPHRA_BROWSE_ROOT"]
+
     print("\n── formats endpoint matches the parsers ──")
     f = c.get("/api/study/formats").json()
     ck("advertises what it accepts", set(f["accepted"]) == set(I.ACCEPTED))
