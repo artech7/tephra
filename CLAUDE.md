@@ -83,7 +83,7 @@ makes them worse, the change is wrong, not the test.
 
 - `tools/api_repair.py` and `tests/api_repair.py` are DIFFERENT files.
 - `config_dir()` is duplicated in app/settings.py, desktop/launcher.py, and
-  (as `config_path()`) tools/find_vaults.py. Change one, change all three.
+  (as `config_path()`) tools/recover_vaults.py. Change one, change all three.
   Each checks `TEPHRA_CONFIG_DIR` before the platform branch -- that
   override exists so tests can isolate their config, because the macOS
   branch is reached before `XDG_CONFIG_HOME` is ever consulted.

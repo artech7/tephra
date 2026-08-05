@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-Find Tephra vaults on this machine, including ones Finder hides.
+Rename back a vault stranded mid-rename.
 
-    python3 tools/find_vaults.py
-    python3 tools/find_vaults.py --recover     # rename hidden strays back
+    python3 tools/recover_vaults.py              # report only
+    python3 tools/recover_vaults.py --recover     # rename strays back into view
 
-A vault is any folder containing a `notes/` directory with markdown in it. An
-interrupted rename could leave one named `.something.tephra-renaming`, which
-Finder does not show — so "my vault disappeared" usually means "my vault is
-sitting right there with a dot in front of its name".
+A case-only rename needs two moves on a case-insensitive filesystem, and the
+halfway state is a dot-prefixed folder (`.something.tephra-renaming`) that
+Finder does not display — so "my vault disappeared" usually means "my vault
+is sitting right there with a dot in front of its name". Tephra recovers any
+stray it finds on the next start, so this script is for the harder case: a
+vault broken badly enough that the app will not start. It stays a script
+rather than an endpoint for exactly that reason — `docker compose exec`
+still works when uvicorn is crash-looping. General vault discovery lives in
+the app itself now (`GET /api/vault/browse`), so this only searches for the
+one thing that needs a filesystem-level tool to fix.
 """
 from __future__ import annotations
 
@@ -52,8 +58,6 @@ def main() -> int:
         try:
             cfg = json.loads(cfgp.read_text())
             print(f"  the app expects its vault at: {cfg.get('vault', '(not recorded)')}")
-            for r in cfg.get("recent", [])[1:]:
-                print(f"    also remembered: {r}")
         except Exception as exc:
             print(f"  (could not read it: {exc})")
     else:
@@ -66,44 +70,40 @@ def main() -> int:
             seen_roots.add(rp)
             roots.append(rp)
 
-    found, hidden = [], []
-    seen = set()
+    hidden, seen = [], set()
     print("\n  searching…")
     for root in roots:
         for v in walk(root):
-            if v in seen:
+            if v in seen or not v.name.startswith("."):
                 continue
             seen.add(v)
-            (hidden if v.name.startswith(".") else found).append(v)
+            hidden.append(v)
+
+    if not hidden:
+        print("\n  no stray hidden vaults found\n")
+        return 0
 
     def describe(p: Path) -> str:
         n = len(list((p / "notes").glob("*.md")))
         return f"{p}  ({n} note{'s' if n != 1 else ''})"
 
-    print(f"\n  vaults found: {len(found)}")
-    for v in sorted(found):
+    print(f"\n  HIDDEN vaults: {len(hidden)}  <- Finder does not show these")
+    for v in sorted(hidden):
         print(f"    {describe(v)}")
 
-    if hidden:
-        print(f"\n  HIDDEN vaults: {len(hidden)}  <- Finder does not show these")
+    if args.recover:
         for v in sorted(hidden):
-            print(f"    {describe(v)}")
-        if args.recover:
-            for v in sorted(hidden):
-                name = v.name.lstrip(".")
-                if name.endswith(".tephra-renaming"):
-                    name = name[: -len(".tephra-renaming")]
-                target = v.parent / name
-                if target.exists():
-                    print(f"    skipped {v.name}: {target} already exists")
-                    continue
-                v.rename(target)
-                print(f"    recovered -> {target}")
-        else:
-            print("\n    Re-run with --recover to rename them back into view.")
-
-    if not found and not hidden:
-        print("\n    Nothing found. Try: python3 tools/find_vaults.py --root /Volumes")
+            name = v.name.lstrip(".")
+            if name.endswith(".tephra-renaming"):
+                name = name[: -len(".tephra-renaming")]
+            target = v.parent / name
+            if target.exists():
+                print(f"    skipped {v.name}: {target} already exists")
+                continue
+            v.rename(target)
+            print(f"    recovered -> {target}")
+    else:
+        print("\n    Re-run with --recover to rename them back into view.")
     print()
     return 0
 

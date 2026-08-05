@@ -47,8 +47,8 @@ which vault to open.
 **If your vault seems to have vanished**, it is almost certainly still there:
 
 ```bash
-python3 tools/find_vaults.py            # report, including hidden folders
-python3 tools/find_vaults.py --recover  # rename hidden strays back into view
+python3 tools/recover_vaults.py            # report hidden strays
+python3 tools/recover_vaults.py --recover  # rename them back into view
 ```
 
 A case-only rename needs two moves on a case-insensitive filesystem, and the
