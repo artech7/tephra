@@ -214,8 +214,8 @@ embeds, inline code and fenced code all survive. The pass is idempotent.
 Headless equivalent:
 
 ```bash
-TEPHRA_VAULT=~/Documents/Tephra python3 tools/repair.py         # report only
-TEPHRA_VAULT=~/Documents/Tephra python3 tools/repair.py --fix   # apply
+curl -sX POST 'http://localhost:8080/api/repair?dry_run=true' | python3 -m json.tool
+curl -sX POST 'http://localhost:8080/api/repair'
 ```
 
 `GET /api/audit` is a read-only check; `POST /api/repair?dry_run=true` previews.
