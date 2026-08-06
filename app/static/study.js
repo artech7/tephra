@@ -138,6 +138,34 @@
       n.onclick = () => { S.category = c.category; resetBrowse(); renderCats(); render(); };
       box.appendChild(n);
     }
+    renderSeeds(box);
+  }
+
+  /* Built-in starter categories with nothing in them yet. Dismissing one is
+     just a display filter — nothing is deleted, and typing the same name
+     into "+ New study group…" brings it straight back as a real category. */
+  function renderSeeds(box) {
+    const seeds = S.data.unused_seeds || [];
+    if (!seeds.length) return;
+    box.appendChild(el('div', 'eyebrow sv-seed-head', 'Starter categories'));
+    for (const name of seeds) {
+      const row = el('div', 'node sv-seed');
+      row.innerHTML = `<span class="dot"></span><span class="t"></span>`;
+      row.querySelector('.t').textContent = name;
+      const hide = el('button', 'sv-seed-hide', '×');
+      hide.type = 'button';
+      hide.title = `Hide "${name}" from the study group picker`;
+      hide.onclick = async (e) => {
+        e.stopPropagation();
+        await api('/study/seeds', {
+          method: 'POST', body: JSON.stringify({ category: name, dismissed: true }),
+        });
+        S.data = await api('/study');
+        renderCats();
+      };
+      row.appendChild(hide);
+      box.appendChild(row);
+    }
   }
 
   /* Changing category clears the open card *and* any quiz in progress. Without
@@ -255,14 +283,43 @@
       if (c === item.category) o.selected = true;
       sel.appendChild(o);
     }
-    sel.onchange = async () => {
+    const newOpt = el('option', null, '+ New study group…');
+    newOpt.value = '__new__';
+    sel.appendChild(newOpt);
+
+    async function apply(category) {
       await api(`/study/${item.slug}/category`, {
-        method: 'POST', body: JSON.stringify({ category: sel.value }),
+        method: 'POST', body: JSON.stringify({ category }),
       });
-      toast(`Moved to ${sel.value} — the classifier learns from this`);
+      toast(`Moved to ${category} — the classifier learns from this`);
       S.data = await api('/study');
       S.item = await api('/study/item/' + item.slug);
       renderCats(); renderStats(); render();
+    }
+
+    // Picking "+ New study group…" swaps the select for a text input rather
+    // than a native prompt(), matching every other inline edit in this app.
+    // Blur re-renders the whole topic anyway once a name is applied, so the
+    // swapped-in input never needs to be manually put back except on cancel.
+    sel.onchange = () => {
+      if (sel.value !== '__new__') { apply(sel.value); return; }
+      const input = el('input', 'sv-select');
+      input.placeholder = 'New study group name';
+      wrap.replaceChild(input, sel);
+      input.focus();
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        const name = input.value.trim();
+        if (!name) { done = true; wrap.replaceChild(sel, input); return; }
+        done = true;
+        apply(name);
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { done = true; wrap.replaceChild(sel, input); }
+      });
+      input.addEventListener('blur', commit);
     };
     wrap.appendChild(sel);
 

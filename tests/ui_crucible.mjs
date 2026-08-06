@@ -38,17 +38,56 @@ ck('animates offsets, never transform',
 ck('old fixed-overlay pop-in removed', !flat.includes('#studyview{position:fixed'));
 
 console.log('\n── body class drives both sides ──');
-window.tephraApi = async (p) => {
-  if (p === '/study') return { items: [
-      { slug: 'icmp', title: 'ICMP', category: 'Networking', source: 'import', questions: 2, question: 'q1?', needs_review: false },
-      { slug: 'lun',  title: 'LUN masking', category: 'SAN', source: 'import', questions: 1, question: 'q2?', needs_review: false }],
-    categories: [{ category: 'Networking', topics: 1, questions: 2 }, { category: 'SAN', topics: 1, questions: 1 }],
-    known_categories: ['Networking', 'SAN'],
+// A tiny in-memory store so the mock can reflect writes back on the next
+// /study read — needed for the "+ New study group…" and seed-dismiss tests
+// below, which each round-trip a POST through a re-fetch.
+const SEEDS = ['OSI Model'];
+const studyState = {
+  items: [
+    { slug: 'icmp', title: 'ICMP', category: 'Networking', source: 'import', questions: 2, question: 'q1?', needs_review: false },
+    { slug: 'lun',  title: 'LUN masking', category: 'SAN', source: 'import', questions: 1, question: 'q2?', needs_review: false },
+  ],
+  dismissedSeeds: [],
+};
+function studyPayload() {
+  const cats = {};
+  for (const it of studyState.items) {
+    const c = it.category || 'Uncategorised';
+    cats[c] ??= { category: c, topics: 0, questions: 0 };
+    cats[c].topics++; cats[c].questions += it.questions;
+  }
+  const inUse = studyState.items.map((it) => it.category);
+  return {
+    items: studyState.items,
+    categories: Object.values(cats).sort((a, b) => a.category.localeCompare(b.category)),
+    known_categories: [...new Set([...inUse, ...SEEDS.filter((s) => !studyState.dismissedSeeds.includes(s))])].sort(),
+    unused_seeds: SEEDS.filter((s) => !inUse.includes(s) && !studyState.dismissedSeeds.includes(s)),
     progress: { answered: 0, correct: 0, flagged: 0 },
-    totals: { topics: 2, questions: 3, needs_review: 0 } };
-  if (p === '/vault/info') return { vault: '/v', files_on_disk: 2, indexed: 2, study_items: 2 };
-  if (p.startsWith('/study/item/')) return { slug: p.split('/').pop(), title: 'ICMP', category: 'Networking',
-    source: 'import', confidence: null, question: 'q1?', prose: '', html: '<p>body</p>', quiz: [], updated: '' };
+    totals: { topics: studyState.items.length,
+      questions: studyState.items.reduce((s, it) => s + it.questions, 0), needs_review: 0 },
+  };
+}
+window.tephraApi = async (p, opts = {}) => {
+  const body = opts.body ? JSON.parse(opts.body) : {};
+  if (p === '/study') return studyPayload();
+  if (p === '/vault/info') return { vault: '/v', files_on_disk: 2, indexed: 2, study_items: studyState.items.length };
+  if (p.startsWith('/study/item/')) {
+    const it = studyState.items.find((i) => i.slug === p.split('/').pop());
+    return { slug: it.slug, title: it.title, category: it.category, source: it.source,
+      confidence: null, question: it.question, prose: '', html: '<p>body</p>', quiz: [], updated: '' };
+  }
+  const catMatch = p.match(/^\/study\/([^/]+)\/category$/);
+  if (catMatch) {
+    const it = studyState.items.find((i) => i.slug === catMatch[1]);
+    const from = it.category;
+    it.category = body.category; it.source = 'manual';
+    return { slug: it.slug, category: it.category, from, changed: from !== it.category };
+  }
+  if (p === '/study/seeds') {
+    studyState.dismissedSeeds = studyState.dismissedSeeds.filter((c) => c !== body.category);
+    if (body.dismissed) studyState.dismissedSeeds.push(body.category);
+    return { dismissed_seeds: studyState.dismissedSeeds };
+  }
   throw new Error(p);
 };
 window.tephraToast = () => {}; window.tephraOpenNote = () => {};
@@ -89,6 +128,36 @@ ck('open a card from within a category', !!doc.querySelector('.sv-topic-head'));
 catNodes.find(n => n.textContent.includes('All categories')).onclick();
 await new Promise(r => setTimeout(r, 30));
 ck('All categories also clears the topic', [...doc.querySelectorAll('.sv-card')].length === 2);
+
+console.log('\n── "+ New study group…" creates a category ──');
+const icmpCard = [...doc.querySelectorAll('.sv-card')].find((c) => c.textContent.includes('ICMP'));
+icmpCard.onclick(); await new Promise((r) => setTimeout(r, 30));
+
+const sel = doc.querySelector('.sv-cat-edit select');
+const opts = [...sel.options].map((o) => o.value);
+ck('offers a "+ New study group…" option', opts.includes('__new__'), opts.join(','));
+
+sel.value = '__new__';
+sel.onchange();
+const catInput = doc.querySelector('.sv-cat-edit input');
+ck('swaps the select for a text input', !!catInput && !doc.querySelector('.sv-cat-edit select'));
+
+catInput.value = 'Custom Group';
+catInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }));
+await new Promise((r) => setTimeout(r, 30));
+ck('applies the typed name as the category',
+   doc.querySelector('.sv-c-cat')?.textContent === 'Custom Group', doc.querySelector('.sv-c-cat')?.textContent);
+ck('a human-typed name is ground truth, not an auto guess',
+   studyState.items.find((i) => i.slug === 'icmp').source === 'manual');
+
+console.log('\n── unused starter categories can be hidden ──');
+const seedRows = () => [...doc.querySelectorAll('.sv-seed')];
+ck('a starter category with no notes is offered',
+   seedRows().some((r) => r.textContent.includes('OSI Model')), seedRows().map((r) => r.textContent).join(','));
+const hideBtn = seedRows().find((r) => r.textContent.includes('OSI Model')).querySelector('.sv-seed-hide');
+await hideBtn.onclick({ stopPropagation() {} });
+ck('dismissing removes it from the sidebar', !seedRows().some((r) => r.textContent.includes('OSI Model')));
+ck('and drops it from known_categories', !studyPayload().known_categories.includes('OSI Model'));
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

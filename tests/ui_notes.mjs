@@ -21,6 +21,8 @@ window.fetch = async (u, o = {}) => {
   else if (o.method === 'DELETE') { const sl = p.split('/').pop(); deleted.push(sl); notes = notes.filter(n => n.slug !== sl); b = { ok: true }; }
   else if (/\/api\/notes\/[\w-]+$/.test(p)) { const sl = p.split('/').pop();
     const n = notes.find(x => x.slug === sl) || notes[0];
+    if (o.method === 'PUT') { const payload = o.body ? JSON.parse(o.body) : {};
+      if (payload.tags) n.tags = payload.tags; }
     b = { slug: n.slug, title: n.title, body: '', tags: n.tags, meta: {}, html: '<p>x</p>', links_out: n.links_out, media: [], backlinks: [], suggestions: [], words: 1, updated: n.updated }; }
   else if (p.includes('/api/notes')) b = notes;
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
@@ -98,6 +100,51 @@ doc.querySelector('#tagClear').onclick();
 ck('clear button works', titles().length === 3);
 await new Promise(r => setTimeout(r, 450));
 ck('tag choice persisted too', 'note_tag' in theme);
+
+console.log('\n── tag editor on a note ──');
+const tagChips = () => [...doc.querySelectorAll('#tagRow .tag')];
+const chipText = (c) => c.querySelector('span').textContent;
+// Boot opens state.notes[0], i.e. zeta (the raw /api/notes order), tagged ['note'].
+ck('shows the note\'s current tags on boot',
+   tagChips().map(chipText).join(',') === '#note', tagChips().map(chipText).join(','));
+
+doc.querySelector('#noteList .node[data-slug="alpha"]').onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('switching notes reloads the tag row',
+   tagChips().map(chipText).sort().join(',') === '#nf,#study', tagChips().map(chipText).join(','));
+const studyChipEl = tagChips().find((c) => chipText(c) === '#study');
+ck('the study tag is locked', studyChipEl.classList.contains('locked') && !studyChipEl.querySelector('.tagx'));
+const nfChipEl = tagChips().find((c) => chipText(c) === '#nf');
+ck('an ordinary tag is removable', !!nfChipEl.querySelector('.tagx'));
+
+const tagInput = () => doc.querySelector('#tagRow .taginput');
+const enter = () => tagInput().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }));
+tagInput().value = 'Solar Gear';
+enter();
+await new Promise((r) => setTimeout(r, 20));
+ck('typed tag is normalised (lowercased, spaces to -)',
+   tagChips().map(chipText).sort().join(',') === '#nf,#solar-gear,#study',
+   tagChips().map(chipText).join(','));
+ck('written through to the note', notes.find((n) => n.slug === 'alpha').tags.includes('solar-gear'));
+
+tagInput().value = 'study';
+enter();
+await new Promise((r) => setTimeout(r, 20));
+ck('typing "study" directly is refused',
+   tagChips().filter((c) => chipText(c) === '#study').length === 1, tagChips().map(chipText).join(','));
+
+const removeBtn = tagChips().find((c) => chipText(c) === '#solar-gear').querySelector('.tagx');
+removeBtn.onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('removing a tag drops its chip',
+   tagChips().map(chipText).sort().join(',') === '#nf,#study', tagChips().map(chipText).join(','));
+ck('and drops from the note on disk', !notes.find((n) => n.slug === 'alpha').tags.includes('solar-gear'));
+
+tagInput().value = 'n';
+tagInput().dispatchEvent(new window.Event('input'));
+ck('autocomplete suggests existing tags sharing the prefix, minus ones already on the note',
+   [...doc.querySelectorAll('.tagsuggest-item')].map((o) => o.textContent).join(',') === '#note',
+   [...doc.querySelectorAll('.tagsuggest-item')].map((o) => o.textContent).join(','));
 
 console.log('\n── deleting a note ──');
 const delBtn = () => doc.querySelector('#deleteChip button');

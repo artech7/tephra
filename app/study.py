@@ -352,9 +352,18 @@ def classify_note(note: vault.Note, items: list[dict] | None = None) -> dict:
     return clf.predict(feature_text(note.title, note.meta.get("question"), prose))
 
 
-def known_categories(items: list[dict]) -> list[str]:
+def known_categories(items: list[dict], dismissed=()) -> list[str]:
     cats = {it["category"] for it in items if it["category"]}
-    return sorted(cats | set(SEEDS))
+    return sorted(cats | (set(SEEDS) - set(dismissed)))
+
+
+def unused_seeds(items: list[dict], dismissed=()) -> list[str]:
+    """Starter categories with no notes in them yet and not already hidden —
+    what the sidebar offers to dismiss. A dismissed seed that gained notes
+    (e.g. by being typed as a new study group) drops out on its own without
+    needing to be un-dismissed."""
+    cats = {it["category"] for it in items if it["category"]}
+    return sorted(c for c in SEEDS if c not in cats and c not in set(dismissed))
 
 
 # ── progress ───────────────────────────────────────────────────────────────
@@ -372,11 +381,12 @@ def load_progress() -> dict:
             data.setdefault("flagged", [])
             data.setdefault("settings", {})
             data["settings"].setdefault("quiz_count", DEFAULT_QUIZ_COUNT)
+            data["settings"].setdefault("dismissed_seeds", [])
             return data
         except Exception:
             pass
     return {"answers": {}, "flagged": [],
-            "settings": {"quiz_count": DEFAULT_QUIZ_COUNT}}
+            "settings": {"quiz_count": DEFAULT_QUIZ_COUNT, "dismissed_seeds": []}}
 
 
 def save_progress(data: dict) -> None:
@@ -466,6 +476,18 @@ def set_quiz_count(n: int) -> int:
     data["settings"]["quiz_count"] = n
     save_progress(data)
     return n
+
+
+def set_seed_dismissed(name: str, dismissed: bool) -> list[str]:
+    """Hides (or restores) one of the built-in starter categories from the
+    picker. Purely a display filter: SEEDS itself is untouched, so cold-start
+    classification is unaffected."""
+    data = load_progress()
+    hidden = set(data["settings"]["dismissed_seeds"])
+    hidden.add(name) if dismissed else hidden.discard(name)
+    data["settings"]["dismissed_seeds"] = sorted(hidden)
+    save_progress(data)
+    return data["settings"]["dismissed_seeds"]
 
 
 def set_flag(qid: str, flagged: bool) -> list[str]:

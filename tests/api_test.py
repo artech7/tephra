@@ -291,6 +291,47 @@ with TestClient(app) as c:
     check("nothing to revert is refused clearly",
        c.post(f"/api/study/{fresh}/revert", json={}).status_code == 400)
 
+    print("\n── tags ──")
+    tg = c.post("/api/notes", json={"title": "Tag Test"}).json()["slug"]
+    c.put(f"/api/notes/{tg}", json={"tags": ["gear", "solar"]})
+    check("tags round-trip", c.get(f"/api/notes/{tg}").json()["tags"] == ["gear", "solar"])
+    c.put(f"/api/notes/{tg}", json={"tags": ["solar"]})
+    check("tag removed", c.get(f"/api/notes/{tg}").json()["tags"] == ["solar"])
+    check("tag cloud reflects it",
+       "solar" in {t for n in c.get("/api/notes").json() for t in n["tags"]})
+
+    print("\n── manual study-group creation ──")
+    ng = c.post("/api/notes", json={"title": "Freeform Group Note"}).json()["slug"]
+    c.put(f"/api/notes/{ng}", json={"body": "Anything goes here."})
+    r = c.post(f"/api/study/{ng}/enable",
+               json={"category": "Brand New Study Group"}).json()
+    check("arbitrary category accepted on enable",
+       r["item"]["category"] == "Brand New Study Group", r["item"]["category"])
+    check("becomes ground truth, not a guess", r["item"]["source"] == "manual",
+       r["item"]["source"])
+    check("shows up in known_categories",
+       "Brand New Study Group" in c.get("/api/study").json()["known_categories"])
+
+    print("\n── seed dismissal ──")
+    before = c.get("/api/study").json()
+    check("starter categories start visible", "OSI Model" in before["known_categories"],
+       before["known_categories"])
+    check("and listed as unused", "OSI Model" in before["unused_seeds"])
+    d = c.post("/api/study/seeds", json={"category": "OSI Model", "dismissed": True}).json()
+    check("dismiss records it", "OSI Model" in d["dismissed_seeds"])
+    after = c.get("/api/study").json()
+    check("dismissed seed drops out of known_categories",
+       "OSI Model" not in after["known_categories"])
+    check("dismissed seed drops out of unused_seeds",
+       "OSI Model" not in after["unused_seeds"])
+    restore = c.post("/api/study/seeds",
+                     json={"category": "OSI Model", "dismissed": False}).json()
+    check("restoring un-hides it", "OSI Model" not in restore["dismissed_seeds"])
+    check("back in known_categories",
+       "OSI Model" in c.get("/api/study").json()["known_categories"])
+    check("rejects a non-seed name",
+       c.post("/api/study/seeds", json={"category": "Not A Real Seed"}).status_code == 400)
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

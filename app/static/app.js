@@ -228,6 +228,10 @@ async function loadList() {
   renderList();
 }
 
+function allTags() {
+  return [...new Set(state.notes.flatMap((n) => n.tags))].sort();
+}
+
 function renderList() {
   const list = $('#noteList');
   const sort = SORTS[state.sort] ? state.sort : 'updated';
@@ -269,7 +273,7 @@ function renderList() {
     list.appendChild(el);
   }
 
-  const tags = [...new Set(state.notes.flatMap((n) => n.tags))].sort();
+  const tags = allTags();
   $('#tagSect').hidden = !tags.length;
   $('#tagClear').hidden = !state.tag;
   const cloud = $('#tagCloud');
@@ -414,317 +418,13 @@ async function openNote(slug, push = true) {
 
   renderBacklinks(note.backlinks);
   renderGraphCrumb(note);
+  renderTagRow(note);
   renderStudyChip(note);
   renderFlagChip(note);
   renderDeleteButton();
   document.querySelectorAll('#noteList .node').forEach((el) =>
     el.toggleAttribute('aria-current', el.dataset.slug === slug));
   drawMini();
-}
-
-/* Study state for the open note. This is the "turn into study guide item"
-   affordance: one button when the note isn't one, and the category with an
-   inline correction when it is. */
-/* Deletion is two-step rather than a modal: the first click arms it, the
-   second commits, and it disarms itself after a few seconds. Notes go to
-   vault/.trash rather than being unlinked, so this is recoverable. */
-/* The other half of the flag: a question flagged in Crucible shows up here, on
-   the note it belongs to, and clicking it drills just those questions. */
-function renderFlagChip(note) {
-  const host = $('#flagChip');
-  if (!host) return;
-  host.innerHTML = '';
-  const n = note.flags || 0;
-  if (!n) return;
-  const b = document.createElement('button');
-  b.className = 'chipbtn flagged';
-  b.innerHTML = `<span class="flagmark">⚑</span> ${n} flagged`;
-  b.title = (note.flagged_questions || []).map((q) => '• ' + q.question).join('\n')
-    + '\n\nClick to drill just these in Crucible';
-  b.onclick = () => window.tephraStudy?.openFlagged(note.slug);
-  host.appendChild(b);
-}
-
-/* Where the note sits, shown above its own heading rather than in the app
-   header — so it travels with the note and is simply absent in Crucible. */
-/* A one-line reminder of the note's group, sitting above the local graph so
-   the panel says what you are looking at. */
-function renderGraphCrumb(note) {
-  const host = $('#graphCrumb');
-  if (!host) return;
-  const cat = ((note.meta || {}).category || '').trim();
-  const prev = (note.category_history || [])[0];
-  host.hidden = !cat;
-  if (!cat) return;
-  host.innerHTML = '';
-  const now = document.createElement('span');
-  now.className = 'gc-now';
-  now.textContent = cat;
-  host.appendChild(now);
-  if (prev) {
-    const was = document.createElement('span');
-    was.className = 'gc-was';
-    was.textContent = `was ${prev.category}`;
-    was.title = `Moved from ${prev.category} ${fmtAgo(prev.at)}`;
-    host.appendChild(was);
-  }
-}
-
-function renderDocCrumb(note) {
-  const host = $('#docCrumb');
-  if (!host) return;
-  host.innerHTML = '';
-  const meta = note.meta || {};
-  const category = (meta.category || '').trim();
-  const parts = [];
-
-  if (category) {
-    parts.push({ label: category, target: category });
-  } else if (note.tags?.length) {
-    for (const t of note.tags.slice(0, 3)) parts.push({ label: '#' + t, tag: t });
-  }
-  host.hidden = !parts.length;
-  if (!parts.length) return;
-
-  parts.forEach((p, i) => {
-    if (i) {
-      const sep = document.createElement('span');
-      sep.className = 'dc-sep';
-      sep.textContent = '·';
-      host.appendChild(sep);
-    }
-    const el = document.createElement('button');
-    el.className = 'dc-part';
-    el.textContent = p.label;
-    if (p.tag) {
-      el.title = `Show every note tagged #${p.tag}`;
-      el.onclick = () => { state.tag = p.tag; renderList(); saveTheme(); };
-    } else {
-      // A category usually has an index note of the same name; link to it when
-      // it exists, so this doubles as navigation rather than decoration.
-      const idx = state.notes.find((n) => n.title.toLowerCase() === p.target.toLowerCase());
-      if (idx) {
-        el.title = `Open ${idx.title}`;
-        el.onclick = () => openNote(idx.slug);
-      } else {
-        el.disabled = true;
-      }
-    }
-    host.appendChild(el);
-  });
-}
-
-function renderDeleteButton() {
-  const host = $('#deleteChip');
-  if (!host) return;
-  host.innerHTML = '';
-  let armed = false, timer = null;
-  const b = document.createElement('button');
-  b.className = 'chipbtn danger';
-  b.textContent = 'Delete';
-  b.title = 'Move this note to the vault trash';
-  const disarm = () => {
-    armed = false; b.textContent = 'Delete';
-    b.classList.remove('armed'); clearTimeout(timer);
-  };
-  b.onclick = async () => {
-    if (!armed) {
-      armed = true;
-      b.textContent = 'Delete — click again';
-      b.classList.add('armed');
-      timer = setTimeout(disarm, 4000);
-      return;
-    }
-    disarm();
-    const gone = state.slug, title = state.note?.title || gone;
-    try {
-      await api('/notes/' + encodeURIComponent(gone), { method: 'DELETE' });
-    } catch {
-      toast('Could not delete that');
-      return;
-    }
-    state.dirty = false;                     // don't autosave a deleted note
-    toast(`Moved “${title}” to the vault trash`);
-    await loadList();
-    await loadGraph();
-    const next = state.notes.find((n) => n.slug !== gone);
-    if (next) await openNote(next.slug);
-    else {
-      state.slug = null; state.note = null;
-      $('#noteTitle').value = '';
-      $('#docCrumb').hidden = true;
-      $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
-    }
-    window.tephraStudy?.refresh();
-  };
-  host.appendChild(b);
-}
-
-async function renderStudyChip(note) {
-  const host = document.getElementById('studyChip');
-  host.innerHTML = '';
-  const meta = note.meta || {};
-  const on = String(meta.study || '').toLowerCase() === 'true';
-
-  if (!on) {
-    const b = document.createElement('button');
-    b.className = 'chipbtn';
-    b.textContent = '+ Make study item';
-    b.title = 'Add this note to the study guide and categorise it';
-    b.onclick = async () => {
-      b.disabled = true;
-      b.textContent = 'Categorising…';
-      try {
-        const r = await api(`/study/${state.slug}/enable`, {
-          method: 'POST', body: JSON.stringify({}),
-        });
-        const g = r.guess || {};
-        toast(g.category
-          ? `Added to ${g.category}${g.low_confidence ? ' — worth checking' : ''}`
-          : 'Added — no category guess yet');
-        await openNote(state.slug, false);
-        window.tephraStudy?.refresh();
-      } catch {
-        toast('Could not add it');
-        b.disabled = false;
-        b.textContent = '+ Make study item';
-      }
-    };
-    host.appendChild(b);
-    return;
-  }
-
-  const cat = (meta.category || '').trim();
-  const source = (meta.category_source || 'auto').trim();
-  const conf = parseFloat(meta.category_confidence);
-
-  const wrap = document.createElement('span');
-  wrap.className = 'studychip' + (source === 'auto' ? ' unsure' : '');
-
-  const sel = document.createElement('select');
-  sel.className = 'chipselect';
-  let cats = [];
-  try { cats = (await api('/study')).known_categories; } catch {}
-  if (cat && !cats.includes(cat)) cats.unshift(cat);
-  for (const c of cats) {
-    const o = document.createElement('option');
-    o.value = o.textContent = c;
-    if (c === cat) o.selected = true;
-    sel.appendChild(o);
-  }
-  sel.onchange = async () => {
-    const to = sel.value;
-    sel.disabled = true;
-    try {
-      const r = await api(`/study/${state.slug}/category`, {
-        method: 'POST', body: JSON.stringify({ category: to }),
-      });
-      // Say what actually happened, not just that something did. "Moved X ->
-      // Y" is the whole point of the revamp; a silent select told you nothing.
-      toast(r.changed
-        ? `Moved from ${r.from || 'no category'} to ${to} — the classifier learns from this`
-        : `Already in ${to}`);
-      await openNote(state.slug, false);
-      window.tephraStudy?.refresh();
-    } catch {
-      toast('Could not change the category');
-      sel.disabled = false;
-    }
-  };
-
-  const label = document.createElement('span');
-  label.className = 'chiplabel';
-  label.textContent = 'study group';
-  wrap.appendChild(label);
-  wrap.appendChild(sel);
-
-  if (source === 'auto') {
-    const tag = document.createElement('span');
-    tag.className = 'chipflag';
-    tag.textContent = Number.isFinite(conf) ? `guessed ${Math.round(conf * 100)}%` : 'guessed';
-    tag.title = 'Tephra assigned this. Change it above if it is wrong — your correction teaches the classifier.';
-    wrap.appendChild(tag);
-  } else if (source === 'import') {
-    const tag = document.createElement('span');
-    tag.className = 'chipflag neutral';
-    tag.textContent = 'from the guide';
-    wrap.appendChild(tag);
-  } else {
-    const tag = document.createElement('span');
-    tag.className = 'chipflag ok';
-    tag.textContent = 'set by you';
-    wrap.appendChild(tag);
-  }
-  host.appendChild(wrap);
-  renderCategoryTrail(note);
-}
-
-/* Where this note has been, newest first, each entry one click from being
-   restored. Lives under the chip so the change and its undo sit together. */
-function renderCategoryTrail(note) {
-  const host = $('#trailChip');
-  if (!host) return;
-  host.innerHTML = '';
-  const trail = note.category_history || [];
-  if (!trail.length) { host.hidden = true; return; }
-  host.hidden = false;
-
-  const line = document.createElement('div');
-  line.className = 'trail';
-  const head = document.createElement('span');
-  head.className = 'trail-h';
-  head.textContent = trail.length === 1 ? 'previously' : `previously (${trail.length})`;
-  line.appendChild(head);
-
-  for (const e of trail.slice(0, 4)) {
-    const b = document.createElement('button');
-    b.className = 'trail-item';
-    b.innerHTML = `<span class="trail-cat"></span><span class="trail-when"></span>`;
-    b.querySelector('.trail-cat').textContent = e.category;
-    b.querySelector('.trail-when').textContent = fmtAgo(e.at);
-    b.title = `Move it back to ${e.category}`
-      + (e.source === 'auto' ? ' (it was a guess then, and will be again)' : '');
-    b.onclick = async () => {
-      b.disabled = true;
-      try {
-        const r = await api(`/study/${state.slug}/revert`, {
-          method: 'POST', body: JSON.stringify({ category: e.category }),
-        });
-        toast(`Moved back to ${r.category}`
-          + (r.restored_source === 'auto' ? ' — restored as a guess, not a correction' : ''));
-        await openNote(state.slug, false);
-        window.tephraStudy?.refresh();
-      } catch {
-        toast('Could not move it back');
-        b.disabled = false;
-      }
-    };
-    line.appendChild(b);
-  }
-  if (trail.length > 4) {
-    const more = document.createElement('span');
-    more.className = 'trail-more';
-    more.textContent = `+${trail.length - 4} older`;
-    more.title = trail.slice(4).map((e) => `${e.category} — ${fmtAgo(e.at)}`).join('\n');
-    line.appendChild(more);
-  }
-  host.appendChild(line);
-}
-
-function renderBacklinks(list) {
-  $('#backCount').textContent = list.length;
-  const el = $('#backList');
-  if (!list.length) { el.innerHTML = '<div class="empty">Nothing links here yet.</div>'; return; }
-  el.innerHTML = '';
-  for (const b of list) {
-    const d = document.createElement('div');
-    d.className = 'mention';
-    d.innerHTML = '<div class="m-t"></div><div class="m-x"></div>';
-    d.querySelector('.m-t').textContent = b.title;
-    d.querySelector('.m-x').textContent = b.excerpt;
-    d.onclick = () => openNote(b.slug);
-    el.appendChild(d);
-  }
 }
 
 /* Link suggestions moved out of the note panel into the Links tab. Reviewing
@@ -739,6 +439,107 @@ function renderBacklinks(list) {
    vault/.trash rather than being unlinked, so this is recoverable. */
 /* The other half of the flag: a question flagged in Crucible shows up here, on
    the note it belongs to, and clicking it drills just those questions. */
+/* Tags are free-form: any letters/digits/-/_ , 2-40 chars, lowercased and
+   space-collapsed to '-'. "study" is excluded — it's owned by the study
+   toggle, and editing it here without also touching note.meta.study would
+   desync the two. */
+function normalizeTag(raw) {
+  const t = raw.trim().toLowerCase().replace(/^#/, '').replace(/\s+/g, '-');
+  return /^[\w-]{2,40}$/.test(t) ? t : null;
+}
+
+async function saveTags(tags) {
+  try {
+    const saved = await api('/notes/' + encodeURIComponent(state.slug), {
+      method: 'PUT', body: JSON.stringify({ tags }),
+    });
+    state.note.tags = saved.tags;
+    renderTagRow(state.note);
+    loadList();
+  } catch {
+    toast('Could not update tags');
+  }
+}
+
+function renderTagRow(note) {
+  const host = $('#tagRow');
+  if (!host) return;
+  host.innerHTML = '';
+
+  for (const t of note.tags) {
+    const chip = document.createElement('span');
+    chip.className = 'tag editable' + (t === 'study' ? ' locked' : '');
+    const label = document.createElement('span');
+    label.textContent = '#' + t;
+    chip.appendChild(label);
+    if (t === 'study') {
+      chip.title = 'Managed by the study toggle above — remove it there.';
+    } else {
+      const x = document.createElement('button');
+      x.className = 'tagx';
+      x.type = 'button';
+      x.textContent = '×';
+      x.title = `Remove #${t}`;
+      x.onclick = () => saveTags(note.tags.filter((o) => o !== t));
+      chip.appendChild(x);
+    }
+    host.appendChild(chip);
+  }
+
+  const wrap = document.createElement('span');
+  wrap.className = 'tagadd';
+  const input = document.createElement('input');
+  input.className = 'taginput';
+  input.placeholder = note.tags.length ? '+ tag' : 'add a tag…';
+  input.autocomplete = 'off';
+  wrap.appendChild(input);
+
+  const suggest = document.createElement('div');
+  suggest.className = 'tagsuggest';
+  suggest.hidden = true;
+  wrap.appendChild(suggest);
+
+  function closeSuggest() { suggest.hidden = true; suggest.innerHTML = ''; }
+
+  function commit(raw) {
+    if (!raw.trim()) return;
+    const t = normalizeTag(raw);
+    if (!t) { toast('Tags can only have letters, numbers, - and _'); return; }
+    if (t === 'study') { toast('Use "Make study item" to add the study tag'); return; }
+    input.value = '';
+    closeSuggest();
+    if (note.tags.some((o) => o.toLowerCase() === t)) return;
+    saveTags([...note.tags, t]);
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(input.value); }
+    else if (e.key === 'Escape') { input.value = ''; closeSuggest(); }
+  });
+  // mousedown on a suggestion fires before the input's blur, so the click
+  // still lands even though blur also closes the list.
+  input.addEventListener('blur', () => setTimeout(closeSuggest, 150));
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    suggest.innerHTML = '';
+    if (!q) { closeSuggest(); return; }
+    const options = allTags()
+      .filter((t) => t.startsWith(q) && !note.tags.includes(t))
+      .slice(0, 8);
+    if (!options.length) { closeSuggest(); return; }
+    for (const t of options) {
+      const opt = document.createElement('div');
+      opt.className = 'tagsuggest-item';
+      opt.textContent = '#' + t;
+      opt.onmousedown = (e) => { e.preventDefault(); commit(t); };
+      suggest.appendChild(opt);
+    }
+    suggest.hidden = false;
+  });
+
+  host.appendChild(wrap);
+}
+
 function renderFlagChip(note) {
   const host = $('#flagChip');
   if (!host) return;
@@ -876,30 +677,98 @@ async function renderStudyChip(note) {
   const on = String(meta.study || '').toLowerCase() === 'true';
 
   if (!on) {
+    const wrap = document.createElement('span');
+    wrap.className = 'studychip';
+
     const b = document.createElement('button');
     b.className = 'chipbtn';
     b.textContent = '+ Make study item';
     b.title = 'Add this note to the study guide and categorise it';
     b.onclick = async () => {
       b.disabled = true;
-      b.textContent = 'Categorising…';
+      b.textContent = 'Suggesting…';
+      let guess, cats;
       try {
-        const r = await api(`/study/${state.slug}/enable`, {
-          method: 'POST', body: JSON.stringify({}),
-        });
-        const g = r.guess || {};
-        toast(g.category
-          ? `Added to ${g.category}${g.low_confidence ? ' — worth checking' : ''}`
-          : 'Added — no category guess yet');
-        await openNote(state.slug, false);
-        window.tephraStudy?.refresh();
+        [guess, cats] = await Promise.all([
+          api(`/study/${state.slug}/suggest`),
+          api('/study').then((d) => d.known_categories).catch(() => []),
+        ]);
       } catch {
-        toast('Could not add it');
+        toast('Could not get a suggestion');
         b.disabled = false;
         b.textContent = '+ Make study item';
+        return;
       }
+      showSuggestPanel(guess, cats);
     };
-    host.appendChild(b);
+    wrap.appendChild(b);
+    host.appendChild(wrap);
+
+    // Shows the classifier's guess for confirmation rather than committing
+    // it silently — the whole point of this panel is that nothing is written
+    // until "Add to study guide" is clicked.
+    function showSuggestPanel(guess, cats) {
+      wrap.innerHTML = '';
+
+      const label = document.createElement('span');
+      label.className = 'chiplabel';
+      label.textContent = guess.category
+        ? `Suggested${Number.isFinite(guess.confidence) ? `, ${Math.round(guess.confidence * 100)}% sure` : ''}`
+        : 'Study group';
+      wrap.appendChild(label);
+
+      const input = document.createElement('input');
+      input.className = 'chipinput';
+      input.value = guess.category || '';
+      input.placeholder = 'study group name';
+      input.setAttribute('list', 'studyGroupSuggestions');
+      wrap.appendChild(input);
+
+      let dl = document.getElementById('studyGroupSuggestions');
+      if (!dl) {
+        dl = document.createElement('datalist');
+        dl.id = 'studyGroupSuggestions';
+        document.body.appendChild(dl);
+      }
+      dl.innerHTML = '';
+      for (const c of cats || []) {
+        const o = document.createElement('option');
+        o.value = c;
+        dl.appendChild(o);
+      }
+
+      const confirm = document.createElement('button');
+      confirm.className = 'chipbtn';
+      confirm.textContent = 'Add to study guide';
+      confirm.onclick = async () => {
+        confirm.disabled = true; cancel.disabled = true; input.disabled = true;
+        try {
+          const name = input.value.trim();
+          const r = await api(`/study/${state.slug}/enable`, {
+            method: 'POST', body: JSON.stringify(name ? { category: name } : {}),
+          });
+          const g = r.guess || {};
+          toast(g.category
+            ? `Added to ${g.category}${g.low_confidence ? ' — worth checking' : ''}`
+            : 'Added — no category guess yet');
+          await openNote(state.slug, false);
+          window.tephraStudy?.refresh();
+        } catch {
+          toast('Could not add it');
+          confirm.disabled = false; cancel.disabled = false; input.disabled = false;
+        }
+      };
+      wrap.appendChild(confirm);
+
+      const cancel = document.createElement('button');
+      cancel.className = 'chipbtn';
+      cancel.textContent = 'Cancel';
+      cancel.onclick = () => renderStudyChip(note);
+      wrap.appendChild(cancel);
+
+      input.focus();
+      input.select();
+    }
     return;
   }
 
@@ -921,8 +790,12 @@ async function renderStudyChip(note) {
     if (c === cat) o.selected = true;
     sel.appendChild(o);
   }
-  sel.onchange = async () => {
-    const to = sel.value;
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ New study group…';
+  sel.appendChild(newOpt);
+
+  async function applyCategory(to) {
     sel.disabled = true;
     try {
       const r = await api(`/study/${state.slug}/category`, {
@@ -939,6 +812,28 @@ async function renderStudyChip(note) {
       toast('Could not change the category');
       sel.disabled = false;
     }
+  }
+
+  sel.onchange = () => {
+    if (sel.value !== '__new__') { applyCategory(sel.value); return; }
+    const input = document.createElement('input');
+    input.className = 'chipinput';
+    input.placeholder = 'new study group name';
+    wrap.replaceChild(input, sel);
+    input.focus();
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      const name = input.value.trim();
+      if (!name) { done = true; wrap.replaceChild(sel, input); return; }
+      done = true;
+      applyCategory(name);
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { done = true; wrap.replaceChild(sel, input); }
+    });
+    input.addEventListener('blur', commit);
   };
 
   const label = document.createElement('span');
