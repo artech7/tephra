@@ -546,6 +546,26 @@ def vault_list():
             "suggested_parent": str(cfg.default_vault().parent)}
 
 
+class ForgetIn(BaseModel):
+    path: str
+
+
+@app.post("/api/vault/forget")
+def vault_forget(payload: ForgetIn):
+    """Drop a vault from the recents list. The folder on disk is never
+    touched -- this only forgets it until it is opened again.
+
+    The open vault can't be forgotten: vault_list() re-injects whichever
+    vault is currently open even when it isn't in the config's recent list,
+    so forgetting it would just have it reappear on the next render.
+    """
+    target = str(Path(payload.path).expanduser().resolve())
+    if target == str(vault.VAULT):
+        raise HTTPException(400, "switch to another vault before removing this one")
+    cfg.forget_vault(target)
+    return {"path": target, "forgotten": True}
+
+
 @app.get("/api/vault/browse")
 def vault_browse(path: str | None = None):
     """List immediate subdirectories of `path`, flagged with whether each

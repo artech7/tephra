@@ -84,6 +84,26 @@ with TestClient(app) as c:
        os.path.isfile(f"{os.environ['TEPHRA_CONFIG_DIR']}/config.json")
        and not os.path.exists(f"{A}/config.json"))
 
+    print("\n── forgetting a vault ──")
+    ck("A still current before we start", c.get("/api/vault/info").json()["vault"] == A)
+    ck("B is on disk before forgetting", os.path.isdir(B))
+    resp = c.post("/api/vault/forget", json={"path": B})
+    ck("forgotten", resp.status_code == 200 and resp.json()["forgotten"], resp.text[:120])
+    ck("gone from recents", B not in {x["path"] for x in c.get("/api/vault/list").json()["recent"]},
+       [x["path"] for x in c.get("/api/vault/list").json()["recent"]])
+    ck("folder untouched on disk", os.path.isdir(B) and os.path.isfile(f"{B}/notes/only-in-b.md"))
+
+    ck("the open vault cannot be forgotten",
+       c.post("/api/vault/forget", json={"path": A}).status_code == 400)
+    ck("still current and still listed", c.get("/api/vault/info").json()["vault"] == A
+       and A in {x["path"] for x in c.get("/api/vault/list").json()["recent"]})
+
+    reopened = c.post("/api/vault/open", json={"path": B})
+    ck("reopening a forgotten vault still works", reopened.status_code == 200, reopened.text[:120])
+    ck("content survived being forgotten", c.get("/api/notes/only-in-b").status_code == 200)
+    ck("back in recents once reopened", B in {x["path"] for x in c.get("/api/vault/list").json()["recent"]})
+    c.post("/api/vault/open", json={"path": A})
+
     print("\n── renaming the vault folder ──")
     import json as _json
     n0 = len(c.get("/api/notes").json())

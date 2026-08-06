@@ -81,6 +81,18 @@ def rename_vault(old: str | Path, new: str | Path) -> dict:
     return save(cfg)
 
 
+def forget_vault(path: str | Path) -> dict:
+    """Drop a vault from the recents list. The folder itself is never
+    touched — this only removes the app's memory of it, so re-adding it
+    later is just opening the path again."""
+    cfg = load()
+    p = str(Path(path).expanduser().resolve())
+    cfg["recent"] = [r for r in cfg.get("recent", []) if r != p]
+    if cfg.get("vault") == p:
+        cfg["vault"] = cfg["recent"][0] if cfg["recent"] else None
+    return save(cfg)
+
+
 def default_vault() -> Path:
     docs = Path.home() / "Documents"
     return (docs if docs.is_dir() else Path.home()) / APP_NAME

@@ -710,6 +710,9 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .vaultrename{display:block;width:100%;margin:-2px 0 8px;padding:5px 11px;text-align:left;
   font:inherit;font-size:11px;color:var(--accent);background:none;border:0;cursor:pointer}
 .vaultrename:hover{text-decoration:underline;color:#fff}
+.vaultforget{display:block;width:100%;margin:-2px 0 8px;padding:5px 11px;text-align:left;
+  font:inherit;font-size:11px;color:var(--faint);background:none;border:0;cursor:pointer}
+.vaultforget:hover{text-decoration:underline;color:#FFD2B8}
 #renameRow .th-input{flex:1 1 auto;min-width:0}
 #renameRow .sv-btn{flex:0 0 auto}
 

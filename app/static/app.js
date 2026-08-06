@@ -1526,6 +1526,28 @@ async function renderVaults() {
         $('#renameInput').select();
       };
       box.appendChild(ren);
+    } else {
+      // Forgetting only makes sense for a vault the app isn't currently
+      // serving. It drops the recents entry, not the folder — the vault is
+      // still on disk and reopening it (by path, or via Browse) adds it
+      // right back.
+      const forget = document.createElement('button');
+      forget.className = 'vaultforget';
+      forget.textContent = 'Remove from this list';
+      forget.title = 'Forgets this vault here only — the folder is untouched';
+      forget.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          await api('/vault/forget', { method: 'POST', body: JSON.stringify({ path: v.path }) });
+          toast(`Removed ${name} from the list`);
+          await renderVaults();
+        } catch (err) {
+          let detail = String((err && err.message) || err);
+          try { detail = JSON.parse(detail).detail || detail; } catch {}
+          toast(detail.slice(0, 160), 6000);
+        }
+      };
+      box.appendChild(forget);
     }
   }
   if (!$('#vaultPath').value) {
