@@ -402,6 +402,7 @@ async function openNote(slug, push = true) {
   $('#noteTitle').value = note.title;
   autoGrow($('#noteTitle'));
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+  enhanceEmbeds();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
   $('#noteBody').hidden = false;
@@ -1107,6 +1108,7 @@ async function setEditing(on) {
     const note = await api('/notes/' + encodeURIComponent(state.slug));
     state.note = note;
     $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+    enhanceEmbeds();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
@@ -1118,6 +1120,7 @@ async function setEditing(on) {
 
 $('#noteBody').addEventListener('click', (e) => {
   if (e.target.closest('a')) return;   // links win over entering edit mode
+  if (e.target.closest('.embed-handle')) return;   // so does a resize drag
   setEditing(true);
 });
 $('#noteSrc').addEventListener('blur', () => setEditing(false));
@@ -1240,6 +1243,109 @@ function insertAtCursor(ta, text) {
   ta.selectionStart = ta.selectionEnd = s + text.length;
   ta.style.height = 'auto';
   ta.style.height = Math.max(ta.scrollHeight, 320) + 'px';
+}
+
+/* ══ IMAGE RESIZE ══════════════════════════════════════
+   Corner-drag scaling for ![[embed]] figures. The rendered width lives in
+   the markdown source itself (![[pic.png|400]], Obsidian's own convention
+   for image width) rather than anywhere client-side, so it survives a
+   reload and reads sanely if the note is ever opened outside Tephra.
+   Mirrors app/render.py's own parsing so the Nth embed here is the Nth
+   embed there. ═══════════════════════════════════════ */
+const EMBED_RE_G = /!\[\[\s*([^\]|]+?)\s*(?:\|([^\]]*))?\]\]/g;
+const EMBED_SIZE_RE = /^\d+%?$/;
+
+function splitEmbedExtra(raw) {
+  if (raw == null) return [null, null];
+  if (raw.includes('|')) {
+    const i = raw.lastIndexOf('|');
+    const cap = raw.slice(0, i), size = raw.slice(i + 1).trim();
+    if (EMBED_SIZE_RE.test(size)) return [cap || null, size];
+    return [raw, null];
+  }
+  return EMBED_SIZE_RE.test(raw.trim()) ? [null, raw.trim()] : [raw, null];
+}
+
+function setEmbedWidth(body, index, widthPx) {
+  let i = -1;
+  return body.replace(EMBED_RE_G, (whole, name, extra) => {
+    i++;
+    if (i !== index) return whole;
+    const [caption] = splitEmbedExtra(extra);
+    const fields = [name.trim()];
+    if (caption) fields.push(caption);
+    fields.push(String(widthPx));
+    return `![[${fields.join('|')}]]`;
+  });
+}
+
+/* Handles are injected client-side rather than rendered server-side: they
+   are pure UI chrome, only relevant while looking at the live preview, and
+   keeping them out of app/render.py keeps the saved HTML (and the note
+   shown to a viewer who never touches Tephra) free of them. */
+function enhanceEmbeds() {
+  for (const fig of $('#noteBody').querySelectorAll('.embed[data-kind="image"]')) {
+    if (fig.querySelector('.embed-handle')) continue;
+    for (const corner of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('span');
+      h.className = `embed-handle ${corner}`;
+      h.addEventListener('mousedown', (e) => startResize(e, fig, corner));
+      fig.appendChild(h);
+    }
+  }
+}
+
+let resizeState = null;
+
+function startResize(e, fig, corner) {
+  e.preventDefault();
+  e.stopPropagation();
+  fig.classList.add('resizing', 'sized');
+  resizeState = {
+    fig, corner, startX: e.clientX, slug: state.slug,
+    startW: fig.getBoundingClientRect().width,
+    minW: 60,
+    maxW: (fig.parentElement || fig).clientWidth || fig.getBoundingClientRect().width,
+  };
+  document.addEventListener('mousemove', onResizeMove);
+  document.addEventListener('mouseup', onResizeUp);
+}
+
+function onResizeMove(e) {
+  if (!resizeState) return;
+  const { fig, corner, startX, startW, minW, maxW } = resizeState;
+  // A left-side corner (nw/sw) grows the image as the pointer moves away to
+  // the left; a right-side corner (ne/se) grows it moving right. Either way
+  // this only ever touches width -- height follows on its own since the
+  // <img> keeps height:auto, so the drag can't distort the aspect ratio.
+  const dir = (corner === 'nw' || corner === 'sw') ? -1 : 1;
+  const dx = (e.clientX - startX) * dir;
+  resizeState.lastW = Math.max(minW, Math.min(maxW, Math.round(startW + dx)));
+  fig.style.width = resizeState.lastW + 'px';
+}
+
+async function onResizeUp() {
+  document.removeEventListener('mousemove', onResizeMove);
+  document.removeEventListener('mouseup', onResizeUp);
+  if (!resizeState) return;
+  const { fig, slug, startW, lastW } = resizeState;
+  resizeState = null;
+  fig.classList.remove('resizing');
+  // A note switch mid-drag (e.g. a keyboard shortcut while the button is
+  // still down) must not write this resize into whatever note is open now.
+  if (!fig.isConnected || state.slug !== slug || !state.note) return;
+  // The width from the last move, not a fresh getBoundingClientRect() read --
+  // that would depend on a reflow happening to already reflect the inline
+  // style just set, which is a needless thing to depend on when the value is
+  // already in hand.
+  const w = lastW ?? Math.round(startW);
+  const idx = Number(fig.dataset.embedIndex);
+  if (Number.isNaN(idx)) return;
+  const newBody = setEmbedWidth(state.note.body, idx, w);
+  if (newBody === state.note.body) return;
+  state.note.body = newBody;
+  $('#noteSrc').value = newBody;
+  touched();
 }
 
 /* ══ GRAPH ══════════════════════════════════════

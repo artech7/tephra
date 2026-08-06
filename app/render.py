@@ -5,10 +5,16 @@ a folder of documents:
     [[Note Title]]          a link; renders orange if the note doesn't exist
     [[Note Title|shown]]    same, with display text
     ![[picture.png]]        an embed, resolved to img/video/audio/file by extension
+    ![[picture.png|400]]    an embed sized to 400px wide (or |50% of the column)
+    ![[picture.png|caption|400]]   caption and size together
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
 should not require syntax.
+
+Embeds placed on adjacent lines with no blank line between them render as a
+row rather than stacked -- the same "no new syntax" instinct as the size
+spec above. A blank line between two embeds keeps today's stacked layout.
 """
 from __future__ import annotations
 
@@ -30,8 +36,39 @@ URL_LINE_RE = re.compile(r"^\s*(https?://\S+)\s*$", re.M)
 # is markdown-active, so the token survives the parser untouched.
 PLACEHOLDER = "xTEPHRAxHOLDERx{}xENDx"
 
+# A bare number (px) or a number with a trailing `%`, matching Obsidian's own
+# `![[image.png|400]]` convention so it isn't a new idea to learn.
+_SIZE_RE = re.compile(r"^\d+%?$")
+# No blank line between two embeds -- at most a single newline, optionally
+# padded with spaces/tabs -- means "these belong in one row." fullmatch, not
+# match+$: bare `$` matches just before a trailing newline even without
+# re.MULTILINE, which let two embeds separated by a *blank* line (two
+# newlines) pass this check and get grouped into a row by mistake.
+_ADJACENT_RE = re.compile(r"[ \t]*\n?[ \t]*")
 
-def _embed_html(name: str, caption: str | None) -> str:
+
+def _split_embed_extra(raw: str | None) -> tuple[str | None, str | None]:
+    """Split the text after an embed's first `|` into (caption, size).
+
+    A lone field that looks like a size (`400`, `50%`) is a size with no
+    caption. Two fields are caption then size. Anything else -- including a
+    caption that itself happens to contain a literal `|` -- stays a caption
+    verbatim, so a note written before this existed renders exactly as it
+    always did.
+    """
+    if raw is None:
+        return None, None
+    if "|" in raw:
+        cap, _, size = raw.rpartition("|")
+        if _SIZE_RE.match(size.strip()):
+            return (cap or None), size.strip()
+        return raw, None
+    if _SIZE_RE.match(raw.strip()):
+        return None, raw.strip()
+    return raw, None
+
+
+def _embed_html(name: str, caption: str | None, size: str | None, idx: int) -> str:
     kind = vault.kind_of(name)
     url = f"/media/{html.escape(name, quote=True)}"
     label = html.escape(caption or name)
@@ -48,10 +85,54 @@ def _embed_html(name: str, caption: str | None) -> str:
     else:
         return (f'<a class="filechip g2" href="{url}" download>'
                 f'<span class="ic"></span>{html.escape(name)}</a>')
-    return (f'<figure class="embed g2" data-kind="{kind}">'
+    style = f' style="width:{html.escape(size, quote=True)}"' if size else ""
+    sized = " sized" if size else ""
+    # data-embed-index is this embed's position among all embeds in the note,
+    # in document order -- the frontend's drag-resize uses it to find and
+    # rewrite the matching ![[...]] occurrence in the raw source.
+    return (f'<figure class="embed g2{sized}" data-kind="{kind}" data-embed-index="{idx}"{style}>'
             f'<div class="embed-media">{inner}</div>'
             f'<figcaption class="embed-cap"><span class="kind">{kind.upper()}</span>'
             f'{html.escape(name)}</figcaption></figure>')
+
+
+def _embed_runs(body: str, stash) -> tuple[str, list[str]]:
+    """Replace every ![[...]] with its rendered figure, grouping embeds that
+    sit on adjacent lines (no blank line between) into one <div class="embed-
+    row">. Positions shift as fragments are stashed, so this builds the
+    result by slicing the original text between matches rather than using
+    re.sub, which would only see one match at a time and lose the adjacency
+    information it needs for grouping."""
+    matches = list(EMBED_RE.finditer(body))
+    used: list[str] = []
+    if not matches:
+        return body, used
+
+    runs: list[list[re.Match]] = [[matches[0]]]
+    for m in matches[1:]:
+        prev = runs[-1][-1]
+        if _ADJACENT_RE.fullmatch(body[prev.end():m.start()]):
+            runs[-1].append(m)
+        else:
+            runs.append([m])
+
+    out: list[str] = []
+    cursor = 0
+    idx = 0
+    for run in runs:
+        out.append(body[cursor:run[0].start()])
+        figures = []
+        for m in run:
+            name = m.group(1).strip()
+            used.append(name)
+            caption, size = _split_embed_extra(m.group(2))
+            figures.append(_embed_html(name, caption, size, idx))
+            idx += 1
+        frag = figures[0] if len(run) == 1 else f'<div class="embed-row">{"".join(figures)}</div>'
+        out.append("\n\n" + stash(frag) + "\n\n")
+        cursor = run[-1].end()
+    out.append(body[cursor:])
+    return "".join(out), used
 
 
 def _bookmark_html(url: str) -> str:
@@ -86,12 +167,8 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
         blocks.append(fragment)
         return PLACEHOLDER.format(len(blocks) - 1)
 
-    def on_embed(m):
-        name = m.group(1).strip()
-        used.append(name)
-        return "\n\n" + stash(_embed_html(name, m.group(2))) + "\n\n"
-
-    text = EMBED_RE.sub(on_embed, body)
+    text, embed_used = _embed_runs(body, stash)
+    used.extend(embed_used)
 
     def on_wiki(m):
         title = m.group(1).strip()

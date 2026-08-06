@@ -61,6 +61,46 @@ with TestClient(app) as c:
     check("bare url -> bookmark", 'class="bookmark' in emb)
     check("media served", c.get("/media/busbar-layout.png").status_code == 200)
 
+    print("\n── image sizing and rows ──")
+    up2 = c.post("/api/media", files={"file": ("Shunt Photo.png", io.BytesIO(png), "image/png")}).json()
+    check("second image uploaded", up2["name"] == "shunt-photo.png", up2["name"])
+    sizing_note = c.post("/api/notes", json={"title": "Sizing Scratch"}).json()["slug"]
+
+    def rendered(md_body):
+        c.put(f"/api/notes/{sizing_note}", json={"body": md_body})
+        return c.get(f"/api/notes/{sizing_note}").json()["html"]
+
+    h = rendered("![[busbar-layout.png|400]]")
+    check("bare number sizes the figure (px, Obsidian's own convention)",
+          'style="width:400"' in h and 'class="embed g2 sized"' in h, h)
+
+    h = rendered("![[busbar-layout.png|50%]]")
+    check("percent size also works", 'style="width:50%"' in h, h)
+
+    h = rendered("![[busbar-layout.png|A caption]]")
+    check("a lone non-numeric field stays a caption, not a size",
+          'alt="A caption"' in h and "sized" not in h, h)
+
+    h = rendered("![[busbar-layout.png|A caption|300]]")
+    check("caption and size together",
+          'alt="A caption"' in h and 'style="width:300"' in h, h)
+
+    h = rendered("![[busbar-layout.png|before|after]]")
+    check("a caption containing a literal | stays a caption verbatim (backcompat)",
+          'alt="before|after"' in h and "style=" not in h, h)
+
+    h = rendered("![[busbar-layout.png]]\n![[shunt-photo.png]]")
+    check("adjacent embeds (no blank line) become one row",
+          h.count('class="embed-row"') == 1 and h.count("data-embed-index") == 2, h)
+
+    h = rendered("![[busbar-layout.png]]\n\n![[shunt-photo.png]]")
+    check("a blank line between them keeps them stacked, not a row",
+          "embed-row" not in h and h.count("data-embed-index") == 2, h)
+
+    h = rendered("![[busbar-layout.png]]\n![[shunt-photo.png]]\n\n![[busbar-layout.png]]")
+    check("indices run in document order across a mixed row+stack layout",
+          'data-embed-index="0"' in h and 'data-embed-index="1"' in h and 'data-embed-index="2"' in h, h)
+
     print("\n── search ──")
     s = c.get("/api/search", params={"q": "inverter"}).json()
     check("fts finds note", any(x["slug"] == new["slug"] for x in s), [x["slug"] for x in s])

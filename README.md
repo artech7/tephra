@@ -105,10 +105,25 @@ git add -A && git commit -m "snapshot $(date -Iseconds)" || true
 | `[[Note Title]]` | Link. Amber if the note doesn't exist — click to create it. |
 | `[[Note Title\|shown text]]` | Link with different display text. |
 | `![[picture.png]]` | Embed. Resolved to image / video / audio / download by extension. |
+| `![[picture.png\|400]]` | Embed sized to 400px wide (or `\|50%` of the column) — Obsidian's own convention, so it isn't a new idea to learn. |
+| `![[picture.png\|caption\|400]]` | Caption and size together. |
 | A URL alone on a line | Bookmark card. |
 
 Everything else is standard markdown — headings, lists, tables, code fences,
 blockquotes.
+
+**Resizing an image.** Hover it and drag a corner — the same click-and-drag
+gizmos as any slide editor, uniform scaling only (the image keeps its own
+aspect ratio, so there's no distorting it). The width is written back into
+the `![[...]]` line itself, so it's just text and survives outside Tephra.
+
+**Side by side.** Put two or more embeds on adjacent lines, with no blank
+line between them, and they lay out as a row instead of stacked:
+
+    ![[before.png]]
+    ![[after.png]]
+
+A blank line between two embeds keeps them stacked, same as today.
 
 **Saving is automatic.** There is no save button. Typing debounces for 700 ms
 then writes; switching notes, leaving the tab, or closing the window flushes

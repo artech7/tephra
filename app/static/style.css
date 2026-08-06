@@ -168,7 +168,7 @@ body.crucible .side{left:-100%;right:100%}
 .wl.pending:hover{background:linear-gradient(180deg,rgba(var(--apricot),.3),rgba(var(--apricot),.11));box-shadow:0 0 0 1px rgba(var(--apricot),.6),0 0 22px -5px rgb(var(--apricot))}
 
 /* media embeds */
-.embed{margin:26px 0;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8)}
+.embed{position:relative;margin:26px 0;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8)}
 .embed-media{position:relative;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.3)}
 .embed-media img,.embed-media video{width:100%;height:auto;display:block;max-height:60vh;object-fit:contain}
 .embed-media audio{width:100%;margin:18px}
@@ -176,6 +176,26 @@ body.crucible .side{left:-100%;right:100%}
 .embed-cap .kind{padding:2.5px 7px;border-radius:5px;letter-spacing:.06em;background:rgba(var(--violet),.2);border:1px solid rgba(var(--violet),.34);color:#E0D5FF}
 .embed.missing{border:1px dashed rgba(var(--apricot),.5);background:rgba(var(--apricot),.06)}
 .embed.missing .kind{background:rgba(var(--apricot),.2);border-color:rgba(var(--apricot),.4);color:#FFD2B8}
+
+/* embeds on adjacent source lines (no blank line between) render side by
+   side. An unsized embed in a row shares space equally; a sized one keeps
+   its own width and lets the others share what's left. */
+.embed-row{display:flex;gap:14px;flex-wrap:wrap;margin:26px 0}
+.embed-row .embed{margin:0;flex:1 1 0;min-width:140px;max-width:100%}
+.embed-row .embed.sized{flex:0 0 auto}
+
+/* corner resize gizmos, shown on hover over an image embed while not
+   editing. Inset rather than overhanging the edge, since .embed clips
+   with overflow:hidden for its rounded corners. */
+.embed-handle{position:absolute;width:13px;height:13px;border-radius:4px;
+  background:rgba(var(--acc),.9);border:1.5px solid rgba(255,255,255,.85);
+  box-shadow:0 1px 4px rgba(0,0,0,.5);opacity:0;transition:opacity .15s var(--ease);z-index:2}
+.embed[data-kind="image"]:hover .embed-handle{opacity:1}
+.embed-handle.nw{top:7px;left:7px;cursor:nwse-resize}
+.embed-handle.se{bottom:7px;right:7px;cursor:nwse-resize}
+.embed-handle.ne{top:7px;right:7px;cursor:nesw-resize}
+.embed-handle.sw{bottom:7px;left:7px;cursor:nesw-resize}
+.embed.resizing .embed-handle{opacity:1}
 
 .bookmark{margin:24px 0;display:flex;gap:14px;align-items:flex-start;padding:14px;border-radius:16px;cursor:pointer;transition:.28s var(--ease);text-decoration:none!important;color:inherit}
 .bookmark:hover{background:rgba(255,255,255,.11);transform:translateY(-2px);border-color:rgba(var(--apricot),.4)}
