@@ -128,6 +128,7 @@ BOUNDARY = set(
     answer answers answered reply replies replied respond responds responded return returns
     send sends sent receive receives received happen happens happened cause causes caused
     turn turns turned move moves moved call calls called try tries tried ask asks asked
+    mention mentions mentioned
     correct wrong good bad better best worse great nice fine same different several various
     certain particular actual real proper simple easy hard quick slow long short high low
     first last next previous following current recent early late able likely
@@ -512,11 +513,40 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
     # widely enough that casing stops mattering. Then drop anything that is
     # only a fragment of a longer phrase already surfaced, so "voltage drop
     # calculation" suppresses "voltage drop" rather than competing with it.
+    #
+    # "Suppresses" has to mean the longer phrase is genuinely a more specific
+    # version of the shorter one -- not just any string containing it. Two
+    # things a raw substring test (`k in o`) got wrong:
+    #
+    # 1. It matches "cat" inside "category" -- no word-boundary check at all.
+    #
+    # 2. Worse, it matches an n-gram window that only landed on the shorter
+    #    phrase by coincidence, bridged by some connecting verb: "mentions
+    #    Test Bed" contains "test bed" but is not a more specific phrase than
+    #    it, and suppressing "test bed" behind it meant the real, useful
+    #    phrase never got suggested at all -- the actual bug report this
+    #    fixes. A curated verb list (BOUNDARY, below) can catch known cases
+    #    of this, but can never be exhaustive, so it is not the deciding
+    #    check here.
+    #
+    # The document-count match is: if `shorter` ever recurs *without* the
+    # extra words, they cannot be a fixed part of the phrase, no matter what
+    # they are -- which needs no word list and generalizes past any verb
+    # BOUNDARY happens to be missing.
+    def extends(shorter: str, longer: str) -> bool:
+        if df[longer] != df[shorter]:
+            return False
+        lw, sw = longer.split(), shorter.split()
+        for i in range(len(lw) - len(sw) + 1):
+            if lw[i:i + len(sw)] == sw:
+                return bool(lw[:i] + lw[i + len(sw):])   # True iff there is an extra word
+        return False
+
     cands = [k for k, n in df.items() if n >= MIN_DOCS]
     cands.sort(key=lambda k: (-df[k], -len(k)))
     kept: list[str] = []
     for k in cands:
-        if any(k != o and k in o for o in kept):
+        if any(k != o and extends(k, o) for o in kept):
             continue
         kept.append(k)
 

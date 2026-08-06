@@ -120,6 +120,37 @@ with TestClient(app) as c:
         anyfile = open(f"{VAULT}/notes/cable-sizing.md").read()
         check("markdown rewritten on disk", "[[" in anyfile, anyfile.strip().split("\n")[-1][:80])
 
+    print("\n── a coincidental n-gram must not swallow the real phrase ──")
+    # Regression for a real bug report: "Test Bed" typed into three notes with
+    # different surrounding wording never surfaced as its own suggestion,
+    # because a 3-word window landing on it by coincidence (e.g. "on Test
+    # Bed") happened to also clear the MIN_DOCS threshold and, under the old
+    # substring-based suppression, swallowed the shorter, actually-useful
+    # phrase. Deliberately varied phrasing here, since identical wording in
+    # every note would make the longer window a genuine fixed phrase too --
+    # the bug is specifically that ordinary phrasing variation lost the
+    # short phrase to an accidental long one.
+    tb_notes = []
+    for i, body in enumerate([
+        "We ran diagnostics on Test Bed yesterday and it passed.",
+        "The Test Bed needs a firmware update before next week.",
+        "Results from Test Bed look consistent with the last run.",
+    ]):
+        sl = c.post("/api/notes", json={"title": f"Bench Note {i}"}).json()["slug"]
+        c.put(f"/api/notes/{sl}", json={"body": body})
+        tb_notes.append(sl)
+    sugg = c.get("/api/suggestions", params={"limit": 100}).json()
+    tb = next((s for s in sugg if s["term"].lower() == "test bed"), None)
+    check("the real phrase surfaces, not just a coincidental n-gram around it",
+          tb is not None, [s["term"] for s in sugg])
+    if tb:
+        res = c.post("/api/suggestions/apply", json={"term": tb["term"], "target": tb["target"]}).json()
+        check("linked across all three notes it actually appears in",
+              res["notes_updated"] == 3, res)
+        for sl in tb_notes:
+            body = c.get(f"/api/notes/{sl}").json()["body"]
+            check(f"{sl}: linked, not left as manual work", "[[Test Bed]]" in body, body)
+
     print("\n── dismissing a suggestion sticks ──")
     for i, body in enumerate([
         "The remote host answers on tcp 443 every time.",

@@ -130,6 +130,31 @@ ck('shows as linked, not dismissed',
    cards()[0].querySelector('.lv-kind').textContent === 'linked',
    cards()[0].querySelector('.lv-kind').textContent);
 
+console.log('\n── a saved edit refreshes the badge without waiting for something else to ──');
+// The actual bug report: typing a phrase into notes and saving never updated
+// the Links badge until an unrelated action (a vault switch, a full reload)
+// happened to also call poll(). Autosave itself has to trigger it.
+pending = [];
+window.tephraLinks.close();
+doc.querySelector('[data-view="links"]').onclick();
+await new Promise(r => setTimeout(r, 60));
+ck('starts with nothing pending', doc.querySelector('#linksBadge').hidden);
+window.tephraLinks.close();
+
+const ta = doc.querySelector('#noteSrc');
+ta.value = 'Some newly typed text.';
+ta.dispatchEvent(new window.Event('input', { bubbles: true }));
+// The save is debounced ~700ms after the last keystroke; the mock's list
+// changes *after* the edit, simulating a suggestion that only exists once
+// this text is on disk -- so the badge can only be right if flush() itself
+// re-polls, not because it happened to poll earlier and this was stale luck.
+pending = [{ kind: 'emerging', term: 'newly typed', target: null, notes: 3, mentions: 3, where: [] }];
+await new Promise(r => setTimeout(r, 850));
+ck('autosave fired', calls.some(c => c.body && JSON.parse(c.body).body === ta.value));
+ck('badge updated without any other action in between',
+   doc.querySelector('#linksBadge').textContent === '1' && !doc.querySelector('#linksBadge').hidden,
+   doc.querySelector('#linksBadge').textContent);
+
 console.log('\n── empty states ──');
 pending = []; dismissed = [];
 window.tephraLinks.close();

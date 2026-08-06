@@ -1067,6 +1067,11 @@ async function flush() {
     // survived the move and quietly undid it on every autosave.
     document.title = saved.title + ' — Tephra';
     loadList();
+    // Otherwise a phrase typed just now doesn't show up in Links until
+    // something unrelated (a vault switch, a full reload) happens to poll
+    // again -- the suggestion engine only sees what's on disk, and nothing
+    // was telling it disk content had changed.
+    window.tephraLinks?.poll();
   } catch (e) {
     state.dirty = true;
     mark('error', 'Not saved — retrying');
