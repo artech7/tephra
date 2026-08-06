@@ -13,6 +13,13 @@ let pending = [
     where: [{ slug: 'acl', title: 'ACLs' }, { slug: 'perm', title: 'Permissions' }, { slug: 'nfs', title: 'NFS' }] },
 ];
 let dismissed = [];
+// Note "n" is the one auto-opened at startup (state.notes[0]) and stays open
+// throughout this file. Its body simulates being one of the notes a suggestion
+// apply would rewrite on disk -- unlinked until /suggestions/apply for
+// "Kerberos" runs, then linked, so the test can tell whether the editor
+// actually refetched it afterward or kept showing the stale copy.
+let nBody = 'Mentions Kerberos in plain text.';
+let nHtml = '<p>Mentions Kerberos in plain text.</p>';
 const calls = [];
 window.fetch = async (u, o = {}) => {
   const p = String(u); calls.push({ p, body: o.body }); let b = {};
@@ -33,12 +40,17 @@ window.fetch = async (u, o = {}) => {
     const t = JSON.parse(o.body).term;
     pending = pending.filter(x => x.term !== t);
     dismissed = [{ term: t, at: new Date().toISOString(), note: 'applied' }, ...dismissed];
+    if (t === 'Kerberos') {
+      nBody = 'Mentions [[Kerberos]] in plain text.';
+      nHtml = '<p>Mentions <a class="wl" data-slug="kerberos" data-title="Kerberos">Kerberos</a> in plain text.</p>';
+    }
     b = { slug: 's', title: t, notes_updated: 3 };
   }
   else if (p.includes('/api/suggestions')) b = pending;
   else if (p.includes('/api/theme')) b = {};
   else if (p.includes('/api/repair/last')) b = { changed: 0 };
   else if (p.includes('/api/vault')) b = { vault: '/v/Tephra', recent: [], suggested_parent: '/v' };
+  else if (/\/api\/notes\/n$/.test(p)) b = { slug: 'n', title: 'N', body: nBody, tags: [], meta: {}, html: nHtml, links_out: 0, media: [], backlinks: [], suggestions: [], words: 0, updated: '2026-07-30T00:00:00Z', flags: 0, category_history: [] };
   else if (/\/api\/notes\/[\w-]+$/.test(p)) b = { slug: 'n', title: 'N', body: '', tags: [], meta: {}, html: '<p></p>', links_out: 0, media: [], backlinks: [], suggestions: [], words: 0, updated: '2026-07-30T00:00:00Z', flags: 0, category_history: [] };
   else if (p.includes('/api/notes')) b = [{ slug: 'n', title: 'N', tags: [], updated: '2026-07-30T00:00:00Z', backlinks: 0, links_out: 0, size: 1, kind: 'note', flags: 0 }];
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
@@ -119,11 +131,27 @@ await new Promise(r => setTimeout(r, 30));
 ck('and returns to the queue', terms().includes('access control'), terms().join(','));
 
 console.log('\n── approving ──');
+// apply_suggestion rewrites every note containing the term on disk,
+// including the one open in the editor right now if it's one of them --
+// tephraReloadList() (called via refresh() below) is what's responsible for
+// reopening the current note afterward, so its own stale body doesn't linger.
+// Land back on note "n" (an earlier step navigated away to "ldap") so this
+// exercises the scenario where the open note is one of the ones about to
+// get touched, not one that was never affected to begin with.
+await window.tephraOpenNote('n');
+await new Promise(r => setTimeout(r, 30));
+ck('note "n" open and still showing the stale, unlinked body',
+   doc.querySelector('#noteBody').innerHTML === nHtml && !nHtml.includes('<a'),
+   doc.querySelector('#noteBody').innerHTML);
+
 const kerb = cards().find(c => c.querySelector('.lv-term').textContent === 'Kerberos');
 await kerb.querySelector('.lv-btn.yes').onclick();
 await new Promise(r => setTimeout(r, 70));
 ck('applied and reported', lastToast().includes('Linked “Kerberos” across 3 notes'), lastToast());
 ck('gone from the queue', !terms().includes('Kerberos'), terms().join(','));
+ck('the open note refetched and now shows the link, not the stale body',
+   doc.querySelector('#noteBody').innerHTML.includes('data-slug="kerberos"'),
+   doc.querySelector('#noteBody').innerHTML);
 doc.querySelector('.lv-tabs button[data-tab="dismissed"]').onclick();
 await new Promise(r => setTimeout(r, 30));
 ck('shows as linked, not dismissed',

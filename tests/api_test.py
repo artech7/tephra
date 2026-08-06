@@ -151,6 +151,69 @@ with TestClient(app) as c:
             body = c.get(f"/api/notes/{sl}").json()["body"]
             check(f"{sl}: linked, not left as manual work", "[[Test Bed]]" in body, body)
 
+    print("\n── a single significant word can be a phrase too ──")
+    # "Actuation" alone -- previously never a candidate at all, since only
+    # 2- and 3-word windows were extracted. A lone word needs a stricter bar
+    # than a multi-word phrase (any common noun would otherwise clear
+    # MIN_DOCS in any vault about anything), so this also checks that an
+    # ordinary lowercase word recurring just as often is NOT suggested.
+    act_notes = []
+    for i, body in enumerate([
+        "The Actuation happened faster than expected today.",
+        "We need better Actuation across the whole system.",
+        "Actuation was logged at 3ms this run.",
+    ]):
+        sl = c.post("/api/notes", json={"title": f"Bench Log {i}"}).json()["slug"]
+        c.put(f"/api/notes/{sl}", json={"body": body})
+        act_notes.append(sl)
+    for i in range(3):
+        sl = c.post("/api/notes", json={"title": f"Chatter {i}"}).json()["slug"]
+        c.put(f"/api/notes/{sl}", json={"body": "The system handles this data process well."})
+
+    sugg = c.get("/api/suggestions", params={"limit": 100}).json()
+    act = next((s for s in sugg if s["term"].lower() == "actuation"), None)
+    check("a consistently-capitalized single word surfaces", act is not None,
+          [s["term"] for s in sugg])
+    noisy = [s["term"] for s in sugg if s["term"].lower() in ("system", "process", "data", "handles")]
+    check("but an ordinary lowercase word recurring just as often does not",
+          not noisy, noisy)
+    if act:
+        res = c.post("/api/suggestions/apply", json={"term": act["term"], "target": act["target"]}).json()
+        check("linked across all three notes", res["notes_updated"] == 3, res)
+        for sl in act_notes:
+            body = c.get(f"/api/notes/{sl}").json()["body"]
+            check(f"{sl}: linked", "[[Actuation]]" in body, body)
+
+    print("\n── apply_suggestion is not fooled by a stale index ──")
+    # Regression for a real bug report: a suggestion's toast said "Linked
+    # across 1 note" when 4 notes actually had the phrase. The index is
+    # supposed to always track disk (reindex_note runs on every save), but
+    # "supposed to" is not a guarantee, and this is the one place a gap
+    # between them is not an acceptable tradeoff -- so simulate one directly
+    # (delete rows the app itself never asked to delete) rather than trying
+    # to reproduce whatever caused it upstream, and confirm the endpoint
+    # heals itself before doing the bulk rewrite.
+    drift_notes = []
+    for i in range(4):
+        sl = c.post("/api/notes", json={"title": f"Drift {i}"}).json()["slug"]
+        c.put(f"/api/notes/{sl}", json={"body": f"Findings mention Coolant Loop clearly in note {i}."})
+        drift_notes.append(sl)
+    con = app.state.db
+    for sl in drift_notes[1:]:
+        con.execute("DELETE FROM notes WHERE slug=?", (sl,))
+    con.commit()
+    still_indexed = {r["slug"] for r in con.execute("SELECT slug FROM notes").fetchall()}
+    check("drift actually simulated (3 of 4 no longer in the index)",
+          len(still_indexed & set(drift_notes)) == 1, still_indexed & set(drift_notes))
+
+    r = c.post("/api/suggestions/apply", json={"term": "coolant loop", "target": None})
+    check("apply succeeds", r.status_code == 200, r.text[:120])
+    res = r.json()
+    check("all four notes touched despite the stale index", res["notes_updated"] == 4, res)
+    for sl in drift_notes:
+        body = c.get(f"/api/notes/{sl}").json()["body"]
+        check(f"{sl}: linked despite having fallen out of the index", "[[Coolant Loop]]" in body, body)
+
     print("\n── dismissing a suggestion sticks ──")
     for i, body in enumerate([
         "The remote host answers on tcp 443 every time.",

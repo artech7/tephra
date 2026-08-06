@@ -491,7 +491,7 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
         text = re.sub(r"[^\w\s-]", " ", text)
         words = text.split()
         seen_here = set()
-        for n in (3, 2):
+        for n in (3, 2, 1):
             for i in range(len(words) - n + 1):
                 gram = words[i:i + n]
                 low = [w.lower() for w in gram]
@@ -542,7 +542,17 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
                 return bool(lw[:i] + lw[i + len(sw):])   # True iff there is an extra word
         return False
 
-    cands = [k for k, n in df.items() if n >= MIN_DOCS]
+    # A single word carries far less evidence of intentionality than a
+    # recurring multi-word phrase does -- "system" or "process" would clear
+    # MIN_DOCS in any vault about anything. This is exactly the "reads like a
+    # proper noun" half of the comment above, which caps[] was already being
+    # computed for but nothing was actually checking: a lone word only
+    # qualifies if it was capitalized *every* time, the same load-bearing
+    # signal that separates "Actuation" (a term) from "the" (not one).
+    cands = [
+        k for k, n in df.items()
+        if n >= MIN_DOCS and (" " in k or (caps[k] == n and len(k) >= 4))
+    ]
     cands.sort(key=lambda k: (-df[k], -len(k)))
     kept: list[str] = []
     for k in cands:
@@ -705,7 +715,17 @@ def audit_links(con) -> dict:
 
 def apply_suggestion(con, term: str, target_slug: str | None) -> dict:
     """Link every plain-text mention of `term`. Creates the page first when
-    it doesn't exist yet, so accepting a suggestion is one action."""
+    it doesn't exist yet, so accepting a suggestion is one action.
+
+    Rebuilds the index from disk first. This is the one place staleness is
+    not an acceptable tradeoff: everything else the index backs (search,
+    the graph, backlinks) is allowed to lag a save cycle behind disk, but
+    "link every mention" is a promise, and the index -- built incrementally,
+    one reindex_note() per save -- is the derived, disposable copy; the
+    vault's files are the actual source of truth. A full rescan is not free,
+    but this runs once per deliberate accept-click, not per keystroke.
+    """
+    rebuild(con)
     if not target_slug:
         existing = con.execute(
             "SELECT slug FROM notes WHERE lower(title)=?", (term.lower(),)
