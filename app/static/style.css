@@ -178,6 +178,14 @@ body.crucible .side{left:-100%;right:100%}
 .embed-media audio{width:100%;margin:18px}
 .embed-cap{padding:11px 15px;display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10.5px;color:var(--muted);border-top:1px solid var(--edge)}
 .embed-cap .kind{padding:2.5px 7px;border-radius:5px;letter-spacing:.06em;background:rgba(var(--violet),.2);border:1px solid rgba(var(--violet),.34);color:#E0D5FF}
+/* the caption bar: click the text to edit it in place. Data-caption empty
+   means "showing the filename fallback" -- text-transform lowercase there
+   only, so a real caption (mixed case, sentences) reads differently from
+   the bare filename it's standing in for. */
+.embed-cap-text{flex:1;min-width:0;cursor:text;padding:2px 4px;margin:-2px -4px;border-radius:5px;transition:background .15s var(--ease)}
+.embed-cap-text:hover{background:rgba(255,255,255,.08)}
+.embed-cap-text[data-caption=""]{text-transform:lowercase;opacity:.75}
+.embed-cap-input{flex:1;min-width:0;font:inherit;color:inherit;background:rgba(0,0,0,.28);border:1px solid rgba(var(--acc),.5);border-radius:5px;padding:2px 4px;margin:-2px -4px;outline:none}
 .embed.missing{border:1px dashed rgba(var(--apricot),.5);background:rgba(var(--apricot),.06)}
 .embed.missing .kind{background:rgba(var(--apricot),.2);border-color:rgba(var(--apricot),.4);color:#FFD2B8}
 

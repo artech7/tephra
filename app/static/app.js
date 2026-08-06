@@ -1125,6 +1125,7 @@ async function setEditing(on) {
 
 $('#noteBody').addEventListener('click', (e) => {
   if (e.target.closest('a')) return;   // links win over entering edit mode
+  if (e.target.closest('.embed-cap')) return;   // caption click/edit wins too
   // A resize drag's mouseup fires a click right after it, but targeted
   // wherever the pointer ended up -- usually over the image, not the handle
   // -- so this can't be caught by looking at the click's own target.
@@ -1287,6 +1288,19 @@ function setEmbedWidth(body, index, widthPx) {
   });
 }
 
+function setEmbedCaption(body, index, caption) {
+  let i = -1;
+  return body.replace(EMBED_RE_G, (whole, name, extra) => {
+    i++;
+    if (i !== index) return whole;
+    const [, size] = splitEmbedExtra(extra);
+    const fields = [name.trim()];
+    if (caption) fields.push(caption);
+    if (size) fields.push(size);
+    return `![[${fields.join('|')}]]`;
+  });
+}
+
 /* Reordering works on the same "rows are adjacent lines" structure
    app/render.py's own grouping is built on: parse the body into groups of
    embeds (each group = one row, or a lone standalone embed) with the
@@ -1400,14 +1414,32 @@ function enhanceEmbeds() {
         fig.appendChild(h);
       }
     }
+    const capText = fig.querySelector('.embed-cap-text');
+    if (capText && !capText.dataset.captionWired) {
+      capText.dataset.captionWired = '1';
+      capText.addEventListener('click', (e) => {
+        // Not just tidiness: starting the edit replaces capText with an
+        // <input>, detaching capText from the tree before this event finishes
+        // bubbling -- the #noteBody handler's `closest('.embed-cap')` guard
+        // can't find an ancestor from a detached node, so without this it'd
+        // still call setEditing(true), which focuses #noteSrc and blurs the
+        // input away before a single character gets typed.
+        e.stopPropagation();
+        startCaptionEdit(fig, capText);
+      });
+    }
     if (fig.dataset.reorderWired) continue;
     fig.dataset.reorderWired = '1';
     fig.draggable = true;
     fig.addEventListener('dragstart', (e) => {
       // A resize handle already preventDefault()s its own mousedown, which
       // should already stop native drag from starting on it -- this is a
-      // second line of defense, not the primary guard.
+      // second line of defense, not the primary guard. The caption text is
+      // a click target of its own (to edit it, or just to place a cursor in
+      // it), and a native figure-drag starting underneath it would hijack
+      // that gesture into a reorder instead.
       if (e.target.closest('.embed-handle')) { e.preventDefault(); return; }
+      if (e.target.closest('.embed-cap-text, .embed-cap-input')) { e.preventDefault(); return; }
       e.dataTransfer.setData('text/plain', String(fig.dataset.embedIndex));
       e.dataTransfer.effectAllowed = 'move';
       fig.classList.add('dragging');
@@ -1442,6 +1474,53 @@ function enhanceEmbeds() {
 function dropSide(e, fig) {
   const r = fig.getBoundingClientRect();
   return (e.clientX - r.left) < r.width / 2 ? 'before' : 'after';
+}
+
+/* ══ IMAGE CAPTION ═════════════════════════════════════
+   Click the caption bar to edit it in place. Swaps in a real <input> rather
+   than making the span contenteditable -- one less cross-browser paste/
+   Enter-inserts-<br> surface to deal with, and it's the same pattern
+   #noteTitle already uses. The caption lives in the ![[name|caption|size]]
+   source, same as width does, so it survives reload and reads sanely
+   outside Tephra. ═══════════════════════════════════════ */
+function startCaptionEdit(fig, capText) {
+  const original = capText.dataset.caption || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'embed-cap-input';
+  input.value = original;
+  input.placeholder = 'Add a caption…';
+  capText.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const finish = (save) => {
+    input.removeEventListener('blur', onBlur);
+    input.removeEventListener('keydown', onKeydown);
+    if (save) commitCaption(fig, capText, input.value.trim());
+    else capText.textContent = original || capText.dataset.fallback || '';
+    input.replaceWith(capText);
+  };
+  function onBlur() { finish(true); }
+  function onKeydown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  }
+  input.addEventListener('blur', onBlur);
+  input.addEventListener('keydown', onKeydown);
+}
+
+function commitCaption(fig, capText, newCaption) {
+  capText.dataset.caption = newCaption;
+  capText.textContent = newCaption || capText.dataset.fallback || '';
+  if (!state.note) return;
+  const idx = Number(fig.dataset.embedIndex);
+  if (Number.isNaN(idx)) return;
+  const newBody = setEmbedCaption(state.note.body, idx, newCaption);
+  if (newBody === state.note.body) return;
+  state.note.body = newBody;
+  $('#noteSrc').value = newBody;
+  touched();
 }
 
 let resizeState = null;

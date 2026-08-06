@@ -95,10 +95,17 @@ def _embed_html(name: str, caption: str | None, size: str | None, idx: int) -> s
     # data-embed-index is this embed's position among all embeds in the note,
     # in document order -- the frontend's drag-resize uses it to find and
     # rewrite the matching ![[...]] occurrence in the raw source.
+    # The caption was previously parsed and then only ever used as the
+    # image's invisible `alt` text -- typed it, never saw it. It's now the
+    # visible text in the bar under the embed, falling back to the filename
+    # when unset. data-caption/data-fallback let the frontend's click-to-edit
+    # tell "no caption yet" apart from "caption happens to equal filename".
+    cap_shown = html.escape(caption) if caption else html.escape(name)
     return (f'<figure class="embed g2{sized}" data-kind="{kind}" data-embed-index="{idx}"{style}>'
             f'<div class="embed-media">{inner}</div>'
             f'<figcaption class="embed-cap"><span class="kind">{kind.upper()}</span>'
-            f'{html.escape(name)}</figcaption></figure>')
+            f'<span class="embed-cap-text" data-caption="{html.escape(caption or "", quote=True)}" '
+            f'data-fallback="{html.escape(name, quote=True)}">{cap_shown}</span></figcaption></figure>')
 
 
 def _embed_runs(body: str, stash) -> tuple[str, list[str]]:

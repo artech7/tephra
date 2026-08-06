@@ -80,14 +80,22 @@ with TestClient(app) as c:
     h = rendered("![[busbar-layout.png|A caption]]")
     check("a lone non-numeric field stays a caption, not a size",
           'alt="A caption"' in h and "sized" not in h, h)
+    check("the caption is visible text under the embed, not just alt",
+          'data-caption="A caption"' in h and ">A caption</span>" in h, h)
 
     h = rendered("![[busbar-layout.png|A caption|300]]")
     check("caption and size together",
           'alt="A caption"' in h and 'style="width:300px"' in h, h)
+    check("caption still shown alongside a size",
+          'data-caption="A caption"' in h and ">A caption</span>" in h, h)
 
     h = rendered("![[busbar-layout.png|before|after]]")
     check("a caption containing a literal | stays a caption verbatim (backcompat)",
           'alt="before|after"' in h and "style=" not in h, h)
+
+    h = rendered("![[busbar-layout.png]]")
+    check("no caption falls back to the filename, shown as empty data-caption",
+          'data-caption=""' in h and ">busbar-layout.png</span>" in h, h)
 
     h = rendered("![[busbar-layout.png]]\n![[shunt-photo.png]]")
     check("adjacent embeds (no blank line) become one row",
