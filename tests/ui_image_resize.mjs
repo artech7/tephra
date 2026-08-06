@@ -96,6 +96,36 @@ const put = calls.filter(c => c.p.endsWith('/api/notes/n') && c.body).pop();
 ck('a save went out with the resized body', !!put && JSON.parse(put.body).body === '![[a.png|380]]',
    put && put.body);
 
+console.log('\n── a real drag\'s trailing click lands on the image, not the handle -- must still not open edit mode ──');
+// This is the actual bug this reproduces: after a real drag, the pointer is
+// usually no longer over the handle, so the browser's post-mouseup click
+// fires targeted at whatever *is* under it now -- typically the <img> (or
+// their common ancestor). A target-based guard (checking the click's own
+// e.target) cannot catch this; only a recency check can.
+fig.style.width = '';
+fig.getBoundingClientRect = () => ({ width: 300, height: 200, left: 0, top: 0, right: 300, bottom: 200 });
+const seHandle2 = fig.querySelector('.embed-handle.se');
+const img = fig.querySelector('img');
+seHandle2.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100 }));
+doc.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true, clientX: 160, clientY: 100 }));
+doc.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true, clientX: 160, clientY: 100 }));
+img.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));   // the browser's synthesized click, on the image
+await new Promise(r => setTimeout(r, 30));
+ck('the resize was applied', fig.style.width === '360px', fig.style.width);
+ck('edit mode was NOT entered despite the click landing on the image',
+   !doc.querySelector('#noteBody').hidden && doc.querySelector('#noteSrc').hidden);
+
+console.log('\n── a genuinely unrelated click still enters edit mode ──');
+await new Promise(r => setTimeout(r, 450));   // outside the post-resize suppression window
+doc.querySelector('#noteBody').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await new Promise(r => setTimeout(r, 30));
+ck('an ordinary click on the body still opens the editor',
+   doc.querySelector('#noteBody').hidden && !doc.querySelector('#noteSrc').hidden);
+// Back to preview by hand (not setEditing(false), which would refetch and
+// replace #noteBody's contents -- detaching `fig` from the rest of this file).
+doc.querySelector('#noteBody').hidden = false;
+doc.querySelector('#noteSrc').hidden = true;
+
 console.log('\n── dragging a corner from the left side shrinks moving right ──');
 fig.style.width = '';
 fig.getBoundingClientRect = () => ({ width: 300, height: 200, left: 0, top: 0, right: 300, bottom: 200 });

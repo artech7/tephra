@@ -1120,7 +1120,10 @@ async function setEditing(on) {
 
 $('#noteBody').addEventListener('click', (e) => {
   if (e.target.closest('a')) return;   // links win over entering edit mode
-  if (e.target.closest('.embed-handle')) return;   // so does a resize drag
+  // A resize drag's mouseup fires a click right after it, but targeted
+  // wherever the pointer ended up -- usually over the image, not the handle
+  // -- so this can't be caught by looking at the click's own target.
+  if (Date.now() - lastResizeAt < 400) return;
   setEditing(true);
 });
 $('#noteSrc').addEventListener('blur', () => setEditing(false));
@@ -1285,6 +1288,15 @@ function setEmbedWidth(body, index, widthPx) {
    shown to a viewer who never touches Tephra) free of them. */
 function enhanceEmbeds() {
   for (const fig of $('#noteBody').querySelectorAll('.embed[data-kind="image"]')) {
+    // The browser's own image drag-and-drop sits right under the handles
+    // (they're positioned on top of the <img>) and, left alone, wins the
+    // gesture: mousemove mostly stops firing once a native drag starts, so
+    // the resize captures only a sliver of the drag before it's cut short.
+    const img = fig.querySelector('img');
+    if (img) {
+      img.draggable = false;
+      img.addEventListener('dragstart', (e) => e.preventDefault());
+    }
     if (fig.querySelector('.embed-handle')) continue;
     for (const corner of ['nw', 'ne', 'sw', 'se']) {
       const h = document.createElement('span');
@@ -1296,11 +1308,20 @@ function enhanceEmbeds() {
 }
 
 let resizeState = null;
+// A resize ends with a mouseup, which the browser follows with a synthesized
+// click -- but targeted whereever the pointer physically ended up (usually
+// over the image itself after a real drag, not the handle), so a click-target
+// check can't reliably catch it. This is checked by timestamp instead, in
+// the #noteBody click handler below.
+let lastResizeAt = 0;
 
 function startResize(e, fig, corner) {
   e.preventDefault();
   e.stopPropagation();
   fig.classList.add('resizing', 'sized');
+  // Otherwise dragging across the note body selects its text on the way,
+  // which both looks wrong and can itself derail the drag in some browsers.
+  document.body.classList.add('resize-live');
   resizeState = {
     fig, corner, startX: e.clientX, slug: state.slug,
     startW: fig.getBoundingClientRect().width,
@@ -1327,9 +1348,15 @@ function onResizeMove(e) {
 async function onResizeUp() {
   document.removeEventListener('mousemove', onResizeMove);
   document.removeEventListener('mouseup', onResizeUp);
+  document.body.classList.remove('resize-live');
   if (!resizeState) return;
   const { fig, slug, startW, lastW } = resizeState;
   resizeState = null;
+  // The mouseup that ends a drag is always followed by a synthesized click,
+  // wherever the pointer physically landed -- almost never still over the
+  // handle after a real drag -- so the #noteBody click handler suppresses
+  // by recency instead of by checking that click's target.
+  lastResizeAt = Date.now();
   fig.classList.remove('resizing');
   // A note switch mid-drag (e.g. a keyboard shortcut while the button is
   // still down) must not write this resize into whatever note is open now.
