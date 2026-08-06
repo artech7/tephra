@@ -1282,6 +1282,94 @@ function setEmbedWidth(body, index, widthPx) {
   });
 }
 
+/* Reordering works on the same "rows are adjacent lines" structure
+   app/render.py's own grouping is built on: parse the body into groups of
+   embeds (each group = one row, or a lone standalone embed) with the
+   arbitrary text between groups kept verbatim, move one embed by its stable
+   id, then rejoin. Group members are tracked by id rather than position so
+   a move is never ambiguous even when two embeds share the same filename. */
+function parseEmbedGroups(body) {
+  const matches = [...body.matchAll(EMBED_RE_G)];
+  if (!matches.length) return { fillers: [body], groups: [] };
+  const fillers = [body.slice(0, matches[0].index)];
+  const groups = [[{ id: 0, text: matches[0][0] }]];
+  let cursor = matches[0].index + matches[0][0].length;
+  for (let i = 1; i < matches.length; i++) {
+    const m = matches[i];
+    const gap = body.slice(cursor, m.index);
+    if (/^[ \t]*\n?[ \t]*$/.test(gap)) {
+      groups[groups.length - 1].push({ id: i, text: m[0] });
+    } else {
+      fillers.push(gap);
+      groups.push([{ id: i, text: m[0] }]);
+    }
+    cursor = m.index + m[0].length;
+  }
+  fillers.push(body.slice(cursor));
+  return { fillers, groups };
+}
+
+function assembleEmbedGroups(fillers, groups) {
+  let out = fillers[0] || '';
+  for (let i = 0; i < groups.length; i++) {
+    out += groups[i].map((e) => e.text).join('\n') + (fillers[i + 1] || '');
+  }
+  // Leading/trailing whitespace only -- matches what vault.dump() already
+  // does to every note on save regardless of how it was edited, so this
+  // isn't introducing new behavior, just not waiting for a round trip to see it.
+  return out.trim();
+}
+
+function moveEmbed(body, fromIdx, toIdx, side) {
+  const { fillers, groups } = parseEmbedGroups(body);
+  let fromGroupI = -1, fromPosI = -1, toGroupI = -1, toPosI = -1;
+  for (let gi = 0; gi < groups.length; gi++) {
+    for (let pi = 0; pi < groups[gi].length; pi++) {
+      if (groups[gi][pi].id === fromIdx) { fromGroupI = gi; fromPosI = pi; }
+      if (groups[gi][pi].id === toIdx) { toGroupI = gi; toPosI = pi; }
+    }
+  }
+  if (fromGroupI === -1 || toGroupI === -1 || fromIdx === toIdx) return body;
+
+  const [moved] = groups[fromGroupI].splice(fromPosI, 1);
+  // Removing an earlier member of the *same* group shifts every later
+  // position left by one, so the target position captured before the splice
+  // is now stale.
+  if (fromGroupI === toGroupI && fromPosI < toPosI) toPosI -= 1;
+
+  if (groups[fromGroupI].length === 0) {
+    // The source's row is gone -- close the gap by merging the filler text
+    // that used to sit on either side of it into one. Collapsed to at most
+    // one blank line so the merge itself can't stack up extra blank lines;
+    // scoped to just this junction, not a blanket rewrite of the whole note.
+    const merged = ((fillers[fromGroupI] || '') + (fillers[fromGroupI + 1] || '')).replace(/\n{3,}/g, '\n\n');
+    fillers.splice(fromGroupI, 2, merged);
+    groups.splice(fromGroupI, 1);
+    if (fromGroupI < toGroupI) toGroupI -= 1;
+  }
+
+  groups[toGroupI].splice(side === 'before' ? toPosI : toPosI + 1, 0, moved);
+  return assembleEmbedGroups(fillers, groups);
+}
+
+async function commitEmbedMove(fromIdx, toIdx, side) {
+  if (!state.note) return;
+  const newBody = moveEmbed(state.note.body, fromIdx, toIdx, side);
+  if (newBody === state.note.body) return;
+  state.note.body = newBody;
+  $('#noteSrc').value = newBody;
+  state.dirty = true;
+  await flush();
+  // A reorder restructures the DOM (rows gained or lost a member) rather
+  // than tweaking one figure's own style in place, so -- unlike a resize --
+  // this re-renders from the server's own layout logic instead of trying to
+  // reproduce app/render.py's grouping rules a second time in JS.
+  const note = await api('/notes/' + encodeURIComponent(state.slug));
+  state.note = note;
+  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+  enhanceEmbeds();
+}
+
 /* Handles are injected client-side rather than rendered server-side: they
    are pure UI chrome, only relevant while looking at the live preview, and
    keeping them out of app/render.py keeps the saved HTML (and the note
@@ -1292,19 +1380,63 @@ function enhanceEmbeds() {
     // (they're positioned on top of the <img>) and, left alone, wins the
     // gesture: mousemove mostly stops firing once a native drag starts, so
     // the resize captures only a sliver of the drag before it's cut short.
+    // Reordering below uses the *figure* as the native drag source instead,
+    // which the image opting out here lets the browser fall back to.
     const img = fig.querySelector('img');
     if (img) {
       img.draggable = false;
       img.addEventListener('dragstart', (e) => e.preventDefault());
     }
-    if (fig.querySelector('.embed-handle')) continue;
-    for (const corner of ['nw', 'ne', 'sw', 'se']) {
-      const h = document.createElement('span');
-      h.className = `embed-handle ${corner}`;
-      h.addEventListener('mousedown', (e) => startResize(e, fig, corner));
-      fig.appendChild(h);
+    if (!fig.querySelector('.embed-handle')) {
+      for (const corner of ['nw', 'ne', 'sw', 'se']) {
+        const h = document.createElement('span');
+        h.className = `embed-handle ${corner}`;
+        h.addEventListener('mousedown', (e) => startResize(e, fig, corner));
+        fig.appendChild(h);
+      }
     }
+    if (fig.dataset.reorderWired) continue;
+    fig.dataset.reorderWired = '1';
+    fig.draggable = true;
+    fig.addEventListener('dragstart', (e) => {
+      // A resize handle already preventDefault()s its own mousedown, which
+      // should already stop native drag from starting on it -- this is a
+      // second line of defense, not the primary guard.
+      if (e.target.closest('.embed-handle')) { e.preventDefault(); return; }
+      e.dataTransfer.setData('text/plain', String(fig.dataset.embedIndex));
+      e.dataTransfer.effectAllowed = 'move';
+      fig.classList.add('dragging');
+    });
+    fig.addEventListener('dragend', () => {
+      fig.classList.remove('dragging');
+      for (const f of $('#noteBody').querySelectorAll('.drop-before,.drop-after')) {
+        f.classList.remove('drop-before', 'drop-after');
+      }
+    });
+    fig.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const before = dropSide(e, fig) === 'before';
+      fig.classList.toggle('drop-before', before);
+      fig.classList.toggle('drop-after', !before);
+    });
+    fig.addEventListener('dragleave', (e) => {
+      if (fig.contains(e.relatedTarget)) return;   // still inside, e.g. over the caption
+      fig.classList.remove('drop-before', 'drop-after');
+    });
+    fig.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fig.classList.remove('drop-before', 'drop-after');
+      const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+      const toIdx = Number(fig.dataset.embedIndex);
+      if (Number.isNaN(fromIdx) || Number.isNaN(toIdx) || fromIdx === toIdx) return;
+      commitEmbedMove(fromIdx, toIdx, dropSide(e, fig));
+    });
   }
+}
+
+function dropSide(e, fig) {
+  const r = fig.getBoundingClientRect();
+  return (e.clientX - r.left) < r.width / 2 ? 'before' : 'after';
 }
 
 let resizeState = null;

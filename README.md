@@ -125,6 +125,14 @@ line between them, and they lay out as a row instead of stacked:
 
 A blank line between two embeds keeps them stacked, same as today.
 
+**Rearranging.** Drag an image (by anywhere on it except a resize corner)
+and drop it on another — the left half of the target inserts before it, the
+right half inserts after, joining that image's row if it's part of one.
+Building a grid is just doing this a few times: drop images next to each
+other to form a row, drop one onto a different row to move it there. Saves
+immediately, not on the usual autosave delay, since a drop is a deliberate,
+discrete action rather than a keystroke.
+
 **Saving is automatic.** There is no save button. Typing debounces for 700 ms
 then writes; switching notes, leaving the tab, or closing the window flushes
 immediately. Writes are atomic (temp file + rename), so an interrupted save

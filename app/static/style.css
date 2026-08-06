@@ -200,6 +200,15 @@ body.crucible .side{left:-100%;right:100%}
 .embed-handle.ne{top:7px;right:7px;cursor:nesw-resize}
 .embed-handle.sw{bottom:7px;left:7px;cursor:nesw-resize}
 .embed.resizing .embed-handle{opacity:1}
+.embed[data-kind="image"]{cursor:grab}
+.embed[data-kind="image"].dragging{cursor:grabbing;opacity:.35}
+
+/* Drop position indicator -- an inset bar rather than an overhanging one,
+   same overflow:hidden reason as the resize handles above. */
+.embed.drop-before::before,.embed.drop-after::after{content:'';position:absolute;
+  top:0;bottom:0;width:4px;border-radius:2px;background:rgb(var(--acc));z-index:3}
+.embed.drop-before::before{left:0}
+.embed.drop-after::after{right:0}
 
 /* Set on <body> for the duration of a drag so the fast pointer movement
    can't select surrounding note text on the way. */
