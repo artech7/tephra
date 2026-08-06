@@ -85,7 +85,12 @@ def _embed_html(name: str, caption: str | None, size: str | None, idx: int) -> s
     else:
         return (f'<a class="filechip g2" href="{url}" download>'
                 f'<span class="ic"></span>{html.escape(name)}</a>')
-    style = f' style="width:{html.escape(size, quote=True)}"' if size else ""
+    # The stored size is a bare number or a percentage (Obsidian's own
+    # `|400` convention -- no unit to type). CSS requires one; a bare
+    # `width:384` is invalid and browsers silently drop it, which read as
+    # the image "losing" its scale on every re-render from disk.
+    css_width = size if size and size.endswith("%") else f"{size}px" if size else None
+    style = f' style="width:{html.escape(css_width, quote=True)}"' if css_width else ""
     sized = " sized" if size else ""
     # data-embed-index is this embed's position among all embeds in the note,
     # in document order -- the frontend's drag-resize uses it to find and

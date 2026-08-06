@@ -72,7 +72,7 @@ with TestClient(app) as c:
 
     h = rendered("![[busbar-layout.png|400]]")
     check("bare number sizes the figure (px, Obsidian's own convention)",
-          'style="width:400"' in h and 'class="embed g2 sized"' in h, h)
+          'style="width:400px"' in h and 'class="embed g2 sized"' in h, h)
 
     h = rendered("![[busbar-layout.png|50%]]")
     check("percent size also works", 'style="width:50%"' in h, h)
@@ -83,7 +83,7 @@ with TestClient(app) as c:
 
     h = rendered("![[busbar-layout.png|A caption|300]]")
     check("caption and size together",
-          'alt="A caption"' in h and 'style="width:300"' in h, h)
+          'alt="A caption"' in h and 'style="width:300px"' in h, h)
 
     h = rendered("![[busbar-layout.png|before|after]]")
     check("a caption containing a literal | stays a caption verbatim (backcompat)",
