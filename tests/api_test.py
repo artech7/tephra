@@ -406,6 +406,27 @@ with TestClient(app) as c:
     check("a genuinely on-topic note in a trained vault still matches",
        guess5["category"] == "SAN & Fibre Channel" and guess5["method"] == "knn", guess5)
 
+    # A live report against a real 94-note vault: a note titled "Whaling
+    # History" landed on "Windows" at 53% confidence, low_confidence=False —
+    # sim_top alone (0.259) cleared MIN_SIM. The entire similarity turned out
+    # to come from exactly one shared word, "history", coincidentally
+    # prominent in an unrelated Windows note too. Short notes produce sparse
+    # vectors, and cosine similarity between two sparse vectors can be
+    # dominated by a single shared dimension — an aggregate threshold on its
+    # own can't tell that apart from genuine relatedness.
+    history_collision = st.Classifier()
+    history_collision.fit([
+        (st.feature_text("Windows Update History", None,
+            "The update history log shows recent patches applied to this machine automatically."),
+         "Windows"),
+        (st.feature_text("Grep Basics", None,
+            "Using grep and awk to filter log output from the command line shell."),
+         "Linux Commands"),
+    ])
+    guess6 = history_collision.predict(whale_note)
+    check("one coincidentally shared word does not out-vote real unrelatedness",
+       guess6["category"] != "Windows" and guess6["method"] == "content", guess6)
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

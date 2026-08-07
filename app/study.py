@@ -292,30 +292,37 @@ class Classifier:
         for vec, norm, cat in self.docs:
             small, big = (qvec, vec) if len(qvec) < len(vec) else (vec, qvec)
             dot = sum(w * big.get(t, 0.0) for t, w in small.items())
-            scored.append((dot / (qnorm * norm), cat))
-        scored.sort(reverse=True)
+            scored.append((dot / (qnorm * norm), cat, vec))
+        scored.sort(key=lambda s: s[0], reverse=True)
 
         # sim_top is the raw similarity of the single nearest trained example,
         # independent of how votes split among the top K — a genuine "is
         # anything in this vault even close" signal, unlike the margin below
         # (which measures a close contest between plausible candidates, not
-        # whether either candidate is actually relevant). Below the tuned bar,
-        # forcing the nearest-but-still-unrelated category onto a note (e.g. a
-        # whaling note landing on "Windows" because that's the least-distant
-        # of the vault's IT categories) is worse than admitting no real match
-        # exists and naming the note from its own words instead.
-        if scored[0][0] < self.MIN_SIM:
+        # whether either candidate is actually relevant). But on a short note,
+        # both vectors can be so sparse that ONE coincidentally shared rare
+        # word (e.g. "history", shared by a whaling note and an unrelated
+        # Windows event-log note) is enough to inflate cosine similarity past
+        # a raw threshold on its own — the exact same failure as the seed
+        # lexicon trusting a single keyword hit, just showing up in different
+        # math. So the nearest neighbour also has to share more than one real
+        # term before it counts as evidence, not just coincidence. Below
+        # either bar, forcing the nearest-but-unrelated category onto a note
+        # is worse than admitting no real match exists and naming the note
+        # from its own words instead.
+        sim_top, _, top_vec = scored[0]
+        shared_terms = sum(1 for t in qvec if t in top_vec)
+        if sim_top < self.MIN_SIM or shared_terms < 2:
             return self._content_guess(text)
 
         votes: dict[str, float] = defaultdict(float)
-        for sim, cat in scored[: self.K]:
+        for sim, cat, _ in scored[: self.K]:
             votes[cat] += sim
         ranked = sorted(votes.items(), key=lambda kv: -kv[1])
         total = sum(votes.values()) or 1.0
         top, top_score = ranked[0]
         runner = ranked[1][1] if len(ranked) > 1 else 0.0
         margin = (top_score - runner) / total
-        sim_top = scored[0][0]
 
         return {
             "category": top,

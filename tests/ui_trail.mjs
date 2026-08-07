@@ -38,6 +38,11 @@ window.fetch = async (u, o = {}) => {
   else if (p.includes('/api/repair/last')) b = { changed: 0 };
   else if (p.includes('/api/vault')) b = { vault: '/v/Tephra', recent: [], suggested_parent: '/v' };
   else if (/\/api\/notes\/icmp$/.test(p)) b = JSON.parse(JSON.stringify(note));
+  else if (/\/api\/notes\/plain$/.test(p)) b = {
+    slug: 'plain', title: 'Plain Note', body: '', tags: [], html: '<p>x</p>',
+    links_out: 0, media: [], backlinks: [], suggestions: [], words: 1,
+    updated: new Date().toISOString(), flags: 0, meta: {}, category_history: [],
+  };
   else if (p.includes('/api/notes')) b = [{ slug: 'icmp', title: 'ICMP', tags: ['study'], updated: note.updated, backlinks: 0, links_out: 0, size: 1, kind: 'study', flags: 0 }];
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
   else if (p.includes('/api/media')) b = [];
@@ -113,6 +118,17 @@ ck('names the current group', gc.querySelector('.gc-now').textContent === 'Linux
    gc.querySelector('.gc-now').textContent);
 ck('and where it came from', gc.querySelector('.gc-was').textContent.startsWith('was '),
    gc.querySelector('.gc-was').textContent);
+
+console.log('\n── switching to a different, uncategorised note clears the trail ──');
+// icmp's trail is populated and visible at this point (previous section).
+// #trailChip is one persistent element shared across notes — opening a note
+// that was never a study item must not leave the last note's trail showing.
+ck('trail still visible on icmp before switching', !trail().hidden);
+await window.tephraOpenNote('plain');
+await new Promise(r => setTimeout(r, 80));
+ck('trail is hidden on a note that was never a study item', trail().hidden);
+ck('the study-item button offers to make it one, not a leftover trail',
+   chip().textContent.includes('Make study item'), chip().textContent.trim());
 
 console.log('\n── a note with no history shows no trail ──');
 note = { ...note, category_history: [], meta: { study: 'true', category: 'OSI Model', category_source: 'import' } };

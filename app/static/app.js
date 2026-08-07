@@ -675,6 +675,12 @@ async function renderStudyChip(note) {
   host.innerHTML = '';
   const meta = note.meta || {};
   const on = String(meta.study || '').toLowerCase() === 'true';
+  // Unconditional: a note can carry category history from before it was
+  // last disabled, and #trailChip is a persistent element that otherwise
+  // keeps showing whatever the previously-open note left behind — the early
+  // return below meant a plain, never-categorised note could still be
+  // showing another note's "previously" trail.
+  renderCategoryTrail(note);
 
   if (!on) {
     const wrap = document.createElement('span');
@@ -863,7 +869,6 @@ async function renderStudyChip(note) {
     wrap.appendChild(tag);
   }
   host.appendChild(wrap);
-  renderCategoryTrail(note);
 }
 
 /* Where this note has been, newest first, each entry one click from being
