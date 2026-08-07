@@ -712,9 +712,12 @@ async function renderStudyChip(note) {
 
       const label = document.createElement('span');
       label.className = 'chiplabel';
-      label.textContent = guess.category
-        ? `Suggested${Number.isFinite(guess.confidence) ? `, ${Math.round(guess.confidence * 100)}% sure` : ''}`
-        : 'Study group';
+      // "content" means nothing in the vault or seed lexicon was a real
+      // match, so this is a name pulled from the note's own wording, not a
+      // probability — a percentage there would claim confidence that isn't real.
+      label.textContent = !guess.category ? 'Study group'
+        : guess.method === 'content' ? 'Suggested from this note’s own wording'
+        : `Suggested${Number.isFinite(guess.confidence) ? `, ${Math.round(guess.confidence * 100)}% sure` : ''}`;
       wrap.appendChild(label);
 
       const input = document.createElement('input');

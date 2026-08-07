@@ -77,6 +77,30 @@ def tokens(text: str) -> list[str]:
     return [w for w in _WORD.findall(text.lower()) if w not in _STOP and len(w) > 2]
 
 
+def suggest_name(text: str) -> str | None:
+    """Derive a candidate study-group name straight from a note's own words,
+    for when nothing in the vault or the seed lexicon is a real match.
+
+    `text` is expected to already be `feature_text()`'s title-weighted blend,
+    so a title's words repeat consecutively and naturally dominate — the
+    same "title carries nearly all the signal" assumption the classifier
+    itself is tuned on. A two-word phrase reads more like a category name
+    ("Bee Keeping") than a single word, so a repeated bigram wins over a
+    repeated single word; a self-paired bigram (an artifact of a one-word
+    title repeating against itself at the weighting seam) doesn't count.
+    """
+    words = tokens(text)
+    if not words:
+        return None
+    bigrams = Counter((a, b) for a, b in zip(words, words[1:]) if a != b)
+    if bigrams:
+        top_bg, bg_n = bigrams.most_common(1)[0]
+        if bg_n >= 2:
+            return " ".join(w.capitalize() for w in top_bg)
+    top_w, w_n = Counter(words).most_common(1)[0]
+    return top_w.capitalize() if w_n >= 2 else None
+
+
 # ── parsing ────────────────────────────────────────────────────────────────
 
 def is_study(note: vault.Note) -> bool:
@@ -253,7 +277,7 @@ class Classifier:
     def predict(self, text: str) -> dict:
         tf = Counter(tokens(text))
         if not self.docs:
-            return self._seed_guess(tf)
+            return self._seed_guess(tf, text)
 
         qvec, qnorm = self._vec(tf)
         if not qvec:
@@ -288,15 +312,22 @@ class Classifier:
                              for c, v in ranked[1:4]],
         }
 
-    def _seed_guess(self, tf: Counter) -> dict:
+    # A single coincidental word match isn't evidence a note is about that
+    # seed's topic — "get" or "log" turning up once in a beekeeping note
+    # shouldn't be enough to plant it under "Linux Commands". Two distinct
+    # keywords from the same seed is a much harder coincidence to hit by
+    # chance, so that's the bar for the seed lexicon to weigh in at all.
+    SEED_MIN_KEYWORDS = 2
+
+    def _seed_guess(self, tf: Counter, text: str) -> dict:
         scores = {}
         for cat, words in SEEDS.items():
-            hit = sum(tf[w] for w in words.split() if w in tf)
-            if hit:
-                scores[cat] = hit
+            matched = [w for w in words.split() if w in tf]
+            if len(matched) < self.SEED_MIN_KEYWORDS:
+                continue
+            scores[cat] = sum(tf[w] for w in matched)
         if not scores:
-            return {"category": None, "confidence": 0.0, "method": "seed",
-                    "low_confidence": True, "alternatives": []}
+            return self._content_guess(text)
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])
         total = sum(scores.values())
         return {
@@ -308,6 +339,15 @@ class Classifier:
             "alternatives": [{"category": c, "score": round(v / total, 3)}
                              for c, v in ranked[1:4]],
         }
+
+    def _content_guess(self, text: str) -> dict:
+        """Nothing in the seed lexicon or the user's own trained categories
+        is a real match — rather than force the note under an unrelated
+        label (an IT seed lexicon has nothing to say about a beekeeping or
+        model-aircraft note), derive a candidate name straight from the
+        note's own words."""
+        return {"category": suggest_name(text), "confidence": 0.0,
+                "method": "content", "low_confidence": True, "alternatives": []}
 
 
 _clf = Classifier()
