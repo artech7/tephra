@@ -17,3 +17,7 @@ dist/
 
 # node (jsdom for the ui_*.mjs suites)
 node_modules/
+
+# local docker-compose env and config-dir mount
+.env
+config/
