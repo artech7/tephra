@@ -1,4 +1,4 @@
-import os, io, json, shutil
+import os, io, json, re, shutil
 VAULT = os.environ.setdefault("TEPHRA_VAULT", "/tmp/tephra-test")
 shutil.rmtree(VAULT, ignore_errors=True)
 from fastapi.testclient import TestClient
@@ -56,11 +56,24 @@ with TestClient(app) as c:
     up = c.post("/api/media", files={"file": ("Busbar Layout.png", io.BytesIO(png), "image/png")}).json()
     check("uploaded + slugged", up["name"] == "busbar-layout.png" and up["kind"] == "image", up["name"])
     check("file on disk", os.path.isfile(f"{VAULT}/media/busbar-layout.png"))
-    c.put(f"/api/notes/{new['slug']}", json={"body": body + "\n![[busbar-layout.png]]\n\nhttps://victronenergy.com/inverters\n"})
+    c.put(f"/api/notes/{new['slug']}", json={"body": body +
+          "\n![[busbar-layout.png]]\n\nhttps://victronenergy.com/inverters\n\n"
+          "See the [install guide](https://victronenergy.com/install) first.\n"})
     emb = c.get(f"/api/notes/{new['slug']}").json()["html"]
     check("image embedded", '<img src="/media/busbar-layout.png"' in emb)
     check("bare url -> bookmark", 'class="bookmark' in emb)
     check("media served", c.get("/media/busbar-layout.png").status_code == 200)
+
+    print("\n── external links never trap navigation inside the app window ──")
+    # No back button in the desktop build (one pywebview window, no browser
+    # chrome) and no address bar in a kiosk-style browser tab either -- an
+    # external link that navigates the app's own window away is a dead end
+    # the user can only escape by closing Tephra. Every clickable external
+    # link needs target="_blank" so it opens elsewhere instead.
+    check("bookmark card opens in a new tab", re.search(
+        r'class="bookmark[^"]*"[^>]*target="_blank"', emb), emb)
+    check("inline markdown link also opens in a new tab", re.search(
+        r'<a href="https://victronenergy\.com/install" target="_blank" rel="noopener', emb), emb)
 
     print("\n── image sizing and rows ──")
     up2 = c.post("/api/media", files={"file": ("Shunt Photo.png", io.BytesIO(png), "image/png")}).json()

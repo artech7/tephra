@@ -147,6 +147,23 @@ def _embed_runs(body: str, stash) -> tuple[str, list[str]]:
     return "".join(out), used
 
 
+# Inline markdown links ([text](url)) and linkify's bare-URL autolinks both
+# come out of md.render() as a plain <a href="..."> with no target — clicking
+# one navigates Tephra's own window away to the external site. There's no
+# back button in the desktop build (a single pywebview window, no browser
+# chrome) and no address bar in a kiosk-style tab either, so that's a dead
+# end the user can only escape by closing the app. target="_blank" fixes
+# both: a normal browser tab opens a new tab, and pywebview's
+# OPEN_EXTERNAL_LINKS_IN_BROWSER (on by default) routes _blank navigation to
+# the system browser instead of taking over the app window. The one-line
+# bookmark card already sets this itself; this catches everything else.
+_EXTERNAL_LINK_RE = re.compile(r'<a href="(https?://[^"]*)"((?:(?!target=)[^>])*)>')
+
+
+def _open_externally(m: re.Match) -> str:
+    return f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer"{m.group(2)}>'
+
+
 def _bookmark_html(url: str) -> str:
     safe = html.escape(url, quote=True)
     host = re.sub(r"^www\.", "", url.split("/")[2]) if "//" in url else url
@@ -198,7 +215,7 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
     text = URL_LINE_RE.sub(lambda m: "\n\n" + stash(_bookmark_html(m.group(1))) + "\n\n",
                            text)
 
-    out = md.render(text)
+    out = _EXTERNAL_LINK_RE.sub(_open_externally, md.render(text))
 
     # Unwrap the <p> markdown puts around a block-level placeholder before
     # substituting, while the token is still a single predictable word.
