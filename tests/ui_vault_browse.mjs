@@ -65,11 +65,13 @@ await new Promise(r => setTimeout(r, 120));
 doc.querySelector('#vaultBtn').onclick();
 await new Promise(r => setTimeout(r, 60));
 
-console.log('── opening the browse panel ──');
-ck('starts hidden', doc.querySelector('#vaultBrowse').hidden);
-doc.querySelector('#vaultBrowseToggle').onclick();
+console.log('── opening the browse pane ──');
+ck('drawer opens on the Recent Vaults home', !doc.querySelector('#vaultHome').hidden);
+ck('open-existing pane starts hidden', doc.querySelector('#vaultOpenPane').hidden);
+doc.querySelector('#vaultGoOpen').onclick();
 await new Promise(r => setTimeout(r, 60));
-ck('toggled open', !doc.querySelector('#vaultBrowse').hidden);
+ck('home hides, open pane shows',
+   doc.querySelector('#vaultHome').hidden && !doc.querySelector('#vaultOpenPane').hidden);
 ck('defaults to suggested_parent (no path param)',
    calls.some(c => c.p === '/api/vault/browse'), calls.map(c => c.p).join(' | '));
 ck('shows the listed path', doc.querySelector('#vaultBrowsePath').textContent === '/Users/dylan/Documents',
@@ -103,17 +105,32 @@ await new Promise(r => setTimeout(r, 60));
 const opened = calls.filter(c => c.p.includes('/vault/open')).pop();
 ck('opened via /vault/open', !!opened);
 ck('opened the clicked entry\'s path', JSON.parse(opened.body).path === '/Users/dylan/Documents/Tephra');
-ck('closes the browse panel on success', doc.querySelector('#vaultBrowse').hidden);
+ck('returns to the Recent Vaults home on success',
+   !doc.querySelector('#vaultHome').hidden && doc.querySelector('#vaultOpenPane').hidden);
 
 console.log('\n── a containment failure explains itself instead of crashing ──');
-doc.querySelector('#vaultBrowseToggle').onclick();       // reopen
+doc.querySelector('#vaultGoOpen').onclick();       // reopen
 await new Promise(r => setTimeout(r, 60));
-window.eval("browseAt = { path: '/Users/dylan/Documents/Locked', parent: '/Users/dylan/Documents' };");
-await window.eval("renderBrowse('/Users/dylan/Documents/Locked')");
+await window.__tephraVaultInternals.openBrowser.render('/Users/dylan/Documents/Locked');
 await new Promise(r => setTimeout(r, 60));
 ck('shows the server detail rather than throwing',
    doc.querySelector('#vaultBrowseList').textContent.includes('outside the browse root'),
    doc.querySelector('#vaultBrowseList').textContent);
+
+console.log('\n── the back button returns to Recent Vaults ──');
+doc.querySelector('#vaultOpenBack').onclick();
+await new Promise(r => setTimeout(r, 60));
+ck('home shown again', !doc.querySelector('#vaultHome').hidden && doc.querySelector('#vaultOpenPane').hidden);
+
+console.log('\n── pasting a path is the documented fallback ──');
+doc.querySelector('#vaultGoOpen').onclick();
+await new Promise(r => setTimeout(r, 60));
+doc.querySelector('#vaultPathInput').value = '/Users/dylan/Documents/Elsewhere';
+await doc.querySelector('#vaultPathOpenBtn').onclick();
+await new Promise(r => setTimeout(r, 60));
+const pasted = calls.filter(c => c.p.includes('/vault/open')).pop();
+ck('opened the typed path', JSON.parse(pasted.body).path === '/Users/dylan/Documents/Elsewhere');
+ck('returns home on success', !doc.querySelector('#vaultHome').hidden);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

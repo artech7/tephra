@@ -154,53 +154,89 @@
 <aside id="vaults">
   <div class="th-head"><h4>Vaults</h4><button class="mini" id="vaultClose">×</button></div>
   <div class="th-body">
-    <div class="th-sect">
-      <div class="th-l"><span>Open</span></div>
-      <div id="vaultList"></div>
-      <div class="th-row" id="renameRow" hidden>
-        <input type="text" id="renameInput" class="th-input" spellcheck="false"
-               placeholder="New folder name">
-        <button class="sv-btn primary" id="renameSave">Save</button>
-        <button class="sv-btn" id="renameCancel">Cancel</button>
-      </div>
-    </div>
-    <div class="th-sect">
-      <div class="th-l"><span>New or existing</span></div>
-      <input type="text" id="vaultPath" class="th-input" placeholder="~/Documents/Tephra-Storage" spellcheck="false">
-      <div class="th-row">
-        <button class="sv-btn primary" id="vaultCreate">Create</button>
-        <button class="sv-btn" id="vaultOpen">Open existing</button>
-      </div>
-      <div class="th-row">
-        <button class="sv-btn" id="vaultBrowseToggle">Browse folders…</button>
-      </div>
-      <div id="vaultBrowse" hidden>
-        <div class="th-l">
-          <span id="vaultBrowsePath"></span>
-          <button class="mini" id="vaultBrowseUp" title="Up one level">↑</button>
+
+    <div id="vaultHome">
+      <div class="th-sect">
+        <div class="th-l"><span>Recent Vaults</span></div>
+        <div id="vaultList"></div>
+        <div class="th-row" id="renameRow" hidden>
+          <input type="text" id="renameInput" class="th-input" spellcheck="false"
+                 placeholder="New folder name">
+          <button class="sv-btn primary" id="renameSave">Save</button>
+          <button class="sv-btn" id="renameCancel">Cancel</button>
         </div>
-        <div id="vaultBrowseList"></div>
       </div>
-      <div class="th-note" id="vaultMsg">Each vault is a self-contained folder — its own notes, media, study progress and theme.</div>
+      <div class="th-sect">
+        <div class="th-l"><span>Open or Create</span></div>
+        <div class="th-row">
+          <button class="sv-btn primary" id="vaultGoOpen">Open existing…</button>
+          <button class="sv-btn" id="vaultGoCreate">Create new…</button>
+        </div>
+        <div class="th-note" id="vaultMsg">Each vault is a self-contained folder — its own notes, media, study progress and theme.</div>
+      </div>
     </div>
 
-    <div class="th-sect">
-      <div class="th-l"><span>Content check</span></div>
-      <div id="auditResult" class="th-note">Not checked yet.</div>
-      <div class="th-row">
-        <button class="sv-btn" id="auditRun">Check</button>
-        <button class="sv-btn primary" id="repairRun" disabled>Repair</button>
+    <div id="vaultOpenPane" hidden>
+      <button class="vaultback" id="vaultOpenBack">← Recent Vaults</button>
+      <div class="th-l"><span>Open a Vault</span></div>
+      <div class="th-l brw-l">
+        <span id="vaultBrowsePath" class="brw-path"></span>
+        <button class="mini" id="vaultBrowseUp" title="Up one level">↑</button>
       </div>
-      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown.</div>
+      <div id="vaultBrowseList" class="brw-list"></div>
+      <details class="vaultfallback">
+        <summary>Paste a path instead</summary>
+        <div class="th-row">
+          <input type="text" id="vaultPathInput" class="th-input" placeholder="~/Documents/Tephra-Storage" spellcheck="false">
+          <button class="sv-btn primary" id="vaultPathOpenBtn">Open</button>
+        </div>
+      </details>
+      <div class="th-note" id="vaultOpenMsg"></div>
     </div>
-    <div class="th-sect">
-      <div class="th-l"><span>Maintenance</span></div>
-      <div class="th-row">
-        <button class="sv-btn" id="btnAudit">Check links</button>
-        <button class="sv-btn" id="btnReindex">Rebuild index</button>
+
+    <div id="vaultWizard" hidden>
+      <button class="vaultback" id="vaultWizBack">← Recent Vaults</button>
+      <div class="th-l"><span>Create a Vault</span></div>
+      <div class="wiz-dots"><i class="on" data-n="1"></i><i data-n="2"></i><i data-n="3"></i></div>
+
+      <div class="wiz-pane" data-n="1">
+        <div class="th-l"><span>1 · Location</span></div>
+        <div class="th-l brw-l">
+          <span id="wizBrowsePath" class="brw-path"></span>
+          <button class="mini" id="wizBrowseUp" title="Up one level">↑</button>
+        </div>
+        <div id="wizBrowseList" class="brw-list"></div>
+        <details class="vaultfallback">
+          <summary>Type a location instead</summary>
+          <div class="th-row">
+            <input type="text" id="wizPathInput" class="th-input" placeholder="~/Documents" spellcheck="false">
+            <button class="sv-btn" id="wizPathGo">Go</button>
+          </div>
+        </details>
+        <div class="th-row"><button class="sv-btn primary" id="wizNext1">Use this folder</button></div>
       </div>
-      <div class="th-note" id="maintMsg">Checks for malformed links and markup that leaked into quiz blocks.</div>
+
+      <div class="wiz-pane" data-n="2" hidden>
+        <div class="th-l"><span>2 · Name</span></div>
+        <input type="text" id="wizName" class="th-input" placeholder="My Vault" spellcheck="false">
+        <div class="th-note" id="wizPathPreview"></div>
+        <div class="th-row">
+          <button class="sv-btn" id="wizBack2">Back</button>
+          <button class="sv-btn primary" id="wizNext2">Next</button>
+        </div>
+      </div>
+
+      <div class="wiz-pane" data-n="3" hidden>
+        <div class="th-l"><span>3 · Confirm</span></div>
+        <div class="th-note" id="wizConfirmPath"></div>
+        <div class="th-row">
+          <button class="sv-btn" id="wizBack3">Back</button>
+          <button class="sv-btn primary" id="wizCreateBtn">Create Vault</button>
+        </div>
+      </div>
+      <div class="th-note" id="vaultWizMsg"></div>
     </div>
+
   </div>
 </aside>
 
@@ -262,6 +298,19 @@
       <div class="th-l"><span>Window inset</span><b id="vInset">20px</b></div>
       <input type="range" id="rInset" min="0" max="56" value="20">
       <button class="th-reset" id="thReset">Reset to defaults</button>
+    </div>
+
+    <div class="th-sect">
+      <div class="th-l"><span>Vault Health</span></div>
+      <div id="auditResult" class="th-note">Not checked yet.</div>
+      <div class="th-row">
+        <button class="sv-btn" id="auditRun">Check links</button>
+        <button class="sv-btn primary" id="repairRun" disabled>Repair</button>
+      </div>
+      <div class="th-row">
+        <button class="sv-btn" id="btnReindex">Rebuild index</button>
+      </div>
+      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown. Rebuild index if the note count ever looks wrong.</div>
     </div>
   </div>
 </aside>

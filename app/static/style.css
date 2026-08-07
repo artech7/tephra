@@ -692,10 +692,31 @@ input.sv-select{cursor:text}
 .vaultrow.missing{opacity:.5}
 .vaultname{font-size:12.5px;font-weight:500}
 .vaultpath{font-family:var(--mono);font-size:9.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#vaultBrowse{margin-top:9px}
-#vaultBrowsePath{font-family:var(--mono);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;
+
+/* ── vault drawer: Open-existing and Create-new panes ── */
+#vaultOpenPane,#vaultWizard{padding-top:14px}
+.vaultback{display:flex;align-items:center;gap:6px;font:inherit;font-family:var(--mono);
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
+  background:none;border:0;padding:0 0 14px;cursor:pointer;transition:.2s var(--ease)}
+.vaultback:hover{color:var(--paper)}
+.brw-l{margin-top:2px}
+.brw-path{font-family:var(--mono);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;flex:1;margin-right:8px}
-#vaultBrowseList{max-height:220px;overflow-y:auto}
+.brw-list{max-height:260px;overflow-y:auto;margin-bottom:4px}
+.vaultfallback{margin-top:12px;border-radius:12px;border:1px solid var(--edge);
+  background:rgba(255,255,255,.04);padding:9px 12px}
+.vaultfallback summary{cursor:pointer;font-size:11.5px;color:var(--muted);list-style:none}
+.vaultfallback summary::-webkit-details-marker{display:none}
+.vaultfallback summary:before{content:'▸ ';color:var(--accent)}
+.vaultfallback[open] summary:before{content:'▾ '}
+.vaultfallback summary:hover{color:var(--paper)}
+.vaultfallback .th-row{margin-top:10px}
+
+/* ── create-vault wizard ── */
+.wiz-dots{display:flex;gap:6px;margin:2px 0 18px}
+.wiz-dots i{flex:1;height:3px;border-radius:3px;background:rgba(255,255,255,.12);transition:.3s var(--ease)}
+.wiz-dots i.on{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+#wizPathPreview.warn{color:#FFC9C9}
 
 /* ── format reference on the importer ── */
 .sv-formats{width:100%;text-align:left;border-radius:12px;border:1px solid var(--edge);
@@ -746,11 +767,7 @@ input.sv-select{cursor:text}
 .mused{position:absolute;bottom:3px;left:3px;z-index:2;padding:0 5px;border-radius:6px;
   font-family:var(--mono);font-size:8.5px;color:#fff;background:rgba(0,0,0,.7);
   border:1px solid var(--edge);pointer-events:none}
-#maintMsg code{font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.4);
-  border:1px solid var(--edge);border-radius:5px;padding:1px 5px;color:#FFD2B8;
-  display:inline-block;max-width:100%;overflow-wrap:anywhere}
-
-/* ── content check ── */
+/* ── vault health (audit / repair / reindex), in the settings drawer ── */
 .auditsample{margin-top:8px;display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:9.5px;line-height:1.5}
 .auditsample .abefore,.auditsample .aafter{padding:5px 7px;border-radius:6px;word-break:break-all}
 .auditsample .abefore{background:rgba(255,120,120,.13);border:1px solid rgba(255,120,120,.3);color:#FFC9C9}

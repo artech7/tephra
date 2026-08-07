@@ -1802,14 +1802,10 @@ async function renderVaults() {
       box.appendChild(forget);
     }
   }
-  if (!$('#vaultPath').value) {
-    $('#vaultPath').placeholder = `${data.suggested_parent}/Tephra-…`;
-  }
 }
 
-async function switchVault(endpoint, path) {
-  const msg = $('#vaultMsg');
-  msg.textContent = 'Switching…';
+async function switchVault(endpoint, path, msgEl = $('#vaultMsg')) {
+  msgEl.textContent = 'Switching…';
   try {
     const r = await api(endpoint, { method: 'POST', body: JSON.stringify({ path }) });
     // Theme is per-vault, so re-read it rather than carrying the old one over.
@@ -1826,14 +1822,15 @@ async function switchVault(endpoint, path) {
     await showVaultName();
   window.tephraLinks?.poll();
     window.tephraStudy?.refresh();
-    msg.textContent = `Now in ${r.vault}` + (r.created ? ' (new)' : '');
+    msgEl.textContent = `Now in ${r.vault}` + (r.created ? ' (new)' : '');
     toast(r.created ? `Created vault at ${r.vault}` : `Opened ${r.vault}`);
-    $('#vaultPath').value = '';
+    return true;
   } catch (e) {
     let detail = String((e && e.message) || e);
     try { detail = JSON.parse(detail).detail || detail; } catch {}
-    msg.textContent = detail;
+    msgEl.textContent = detail;
     toast(detail.slice(0, 160), 6000);
+    return false;
   }
 }
 
@@ -1868,71 +1865,157 @@ $('#vaultCrumb').onclick = () => $('#vaultBtn').click();
 $('#vaultBtn').onclick = () => {
   vaultsEl().classList.toggle('on');
   $('#theme').classList.remove('on');
-  if (vaultsEl().classList.contains('on')) renderVaults();
+  if (vaultsEl().classList.contains('on')) showVaultHome();
 };
 $('#vaultClose').onclick = () => vaultsEl().classList.remove('on');
-$('#vaultCreate').onclick = () => {
-  const p = $('#vaultPath').value.trim();
-  if (!p) return ($('#vaultMsg').textContent = 'Type a folder path first.');
-  switchVault('/vault/create', p);
-};
-$('#vaultOpen').onclick = () => {
-  const p = $('#vaultPath').value.trim();
-  if (!p) return ($('#vaultMsg').textContent = 'Type a folder path first.');
-  switchVault('/vault/open', p);
-};
-$('#vaultPath').onkeydown = (e) => { if (e.key === 'Enter') $('#vaultOpen').click(); };
 
-/* Browse modal: a directory listing scoped server-side to vault.browse_root()
-   (parent of the current vault, by default). The text field above stays the
-   escape hatch for any vault living outside that root. */
-let browseAt = { path: null, parent: null };
+/* The drawer is three panes, only one visible at a time: the Recent Vaults
+   home, an Open-existing browser, and a Create wizard. Reopening the drawer
+   always lands back on the home pane, so a half-finished create/open never
+   lingers as confusing state the next time it's opened. */
+function showVaultHome() {
+  $('#vaultHome').hidden = false;
+  $('#vaultOpenPane').hidden = true;
+  $('#vaultWizard').hidden = true;
+  renderVaults();
+}
+function showVaultOpenPane() {
+  $('#vaultHome').hidden = true;
+  $('#vaultOpenPane').hidden = false;
+  $('#vaultWizard').hidden = true;
+  $('#vaultOpenMsg').textContent = '';
+  $('#vaultPathInput').value = '';
+  openBrowser.render();
+}
+function showVaultWizard() {
+  $('#vaultHome').hidden = true;
+  $('#vaultOpenPane').hidden = true;
+  $('#vaultWizard').hidden = false;
+  $('#vaultWizMsg').textContent = '';
+  wizState = { parent: null, entries: [], fullPath: null };
+  $('#wizName').value = '';
+  $('#wizPathInput').value = '';
+  goWizStep(1);
+  wizBrowser.render();
+}
+$('#vaultGoOpen').onclick = showVaultOpenPane;
+$('#vaultOpenBack').onclick = showVaultHome;
+$('#vaultGoCreate').onclick = showVaultWizard;
+$('#vaultWizBack').onclick = showVaultHome;
 
-async function renderBrowse(path) {
-  const box = $('#vaultBrowseList');
-  box.textContent = 'Loading…';
-  let data;
-  try {
-    data = await api('/vault/browse' + (path ? `?path=${encodeURIComponent(path)}` : ''));
-  } catch (e) {
-    let detail = String((e && e.message) || e);
-    try { detail = JSON.parse(detail).detail || detail; } catch {}
-    box.textContent = detail;
-    return;
+/* Directory browser, scoped server-side to vault.browse_root() (parent of the
+   current vault, by default). Shared by the Open pane and the wizard's
+   location step — each gets its own instance so browsing one never disturbs
+   the other's position. */
+function makeBrowser({ listEl, pathEl, upBtn, onPick }) {
+  let at = { path: null, parent: null, entries: [] };
+  async function render(path) {
+    listEl.textContent = 'Loading…';
+    let data;
+    try {
+      data = await api('/vault/browse' + (path ? `?path=${encodeURIComponent(path)}` : ''));
+    } catch (e) {
+      let detail = String((e && e.message) || e);
+      try { detail = JSON.parse(detail).detail || detail; } catch {}
+      listEl.textContent = detail;
+      return;
+    }
+    at = { path: data.path, parent: data.parent, entries: data.entries };
+    pathEl.textContent = data.path;
+    upBtn.disabled = data.parent === data.path;
+    listEl.innerHTML = '';
+    if (!data.entries.length) {
+      listEl.innerHTML = '<div class="th-note">No subfolders here.</div>';
+      return;
+    }
+    for (const entry of data.entries) {
+      const row = document.createElement('button');
+      row.className = 'vaultrow';
+      row.innerHTML = `<span class="vaultname"></span><span class="vaultpath"></span>`;
+      row.querySelector('.vaultname').textContent = entry.name + (entry.is_vault ? '  ·  vault' : '');
+      row.querySelector('.vaultpath').textContent = entry.path;
+      row.onclick = () => onPick(entry, render);
+      listEl.appendChild(row);
+    }
   }
-  browseAt = { path: data.path, parent: data.parent };
-  $('#vaultBrowsePath').textContent = data.path;
-  $('#vaultBrowseUp').disabled = data.parent === data.path;
-  box.innerHTML = '';
-  if (!data.entries.length) {
-    box.innerHTML = '<div class="th-note">No subfolders here.</div>';
-    return;
-  }
-  for (const entry of data.entries) {
-    const row = document.createElement('button');
-    row.className = 'vaultrow';
-    row.innerHTML = `<span class="vaultname"></span><span class="vaultpath"></span>`;
-    row.querySelector('.vaultname').textContent = entry.name + (entry.is_vault ? '  ·  vault' : '');
-    row.querySelector('.vaultpath').textContent = entry.path;
-    row.onclick = async () => {
-      if (entry.is_vault) {
-        await switchVault('/vault/open', entry.path);
-        $('#vaultBrowse').hidden = true;
-      } else {
-        renderBrowse(entry.path);
-      }
-    };
-    box.appendChild(row);
-  }
+  upBtn.onclick = () => { if (at.parent && at.parent !== at.path) render(at.parent); };
+  return { render, current: () => at };
 }
 
-$('#vaultBrowseToggle').onclick = () => {
-  const box = $('#vaultBrowse');
-  box.hidden = !box.hidden;
-  if (!box.hidden) renderBrowse();
+const openBrowser = makeBrowser({
+  listEl: $('#vaultBrowseList'), pathEl: $('#vaultBrowsePath'), upBtn: $('#vaultBrowseUp'),
+  onPick: async (entry, render) => {
+    if (entry.is_vault) {
+      if (await switchVault('/vault/open', entry.path, $('#vaultOpenMsg'))) showVaultHome();
+    } else {
+      render(entry.path);
+    }
+  },
+});
+$('#vaultPathOpenBtn').onclick = async () => {
+  const p = $('#vaultPathInput').value.trim();
+  if (!p) return ($('#vaultOpenMsg').textContent = 'Type a folder path first.');
+  if (await switchVault('/vault/open', p, $('#vaultOpenMsg'))) showVaultHome();
 };
-$('#vaultBrowseUp').onclick = () => {
-  if (browseAt.parent && browseAt.parent !== browseAt.path) renderBrowse(browseAt.parent);
+$('#vaultPathInput').onkeydown = (e) => { if (e.key === 'Enter') $('#vaultPathOpenBtn').click(); };
+
+/* Create wizard: pick a location by browsing (or typing one), name the new
+   vault with a live path preview, then confirm. Location and name are kept
+   apart so a typo in the name doesn't mean re-navigating the whole tree. */
+let wizState = { parent: null, entries: [], fullPath: null };
+
+const wizBrowser = makeBrowser({
+  listEl: $('#wizBrowseList'), pathEl: $('#wizBrowsePath'), upBtn: $('#wizBrowseUp'),
+  onPick: (entry, render) => render(entry.path),
+});
+$('#wizPathGo').onclick = () => {
+  const p = $('#wizPathInput').value.trim();
+  if (p) wizBrowser.render(p);
+};
+$('#wizPathInput').onkeydown = (e) => { if (e.key === 'Enter') $('#wizPathGo').click(); };
+
+// Test hook: `const` bindings created inside one window.eval() call aren't
+// visible to a later, separate eval() in jsdom, so tests that need to drive
+// the browsers directly (e.g. to hit a 403 without a matching fixture folder)
+// go through this instead. See graph.js's __tephraGraphInternals.
+window.__tephraVaultInternals = { openBrowser, wizBrowser };
+
+function goWizStep(n) {
+  document.querySelectorAll('.wiz-pane').forEach((p) => { p.hidden = +p.dataset.n !== n; });
+  document.querySelectorAll('.wiz-dots i').forEach((i) => i.classList.toggle('on', +i.dataset.n <= n));
+  if (n === 2) { wizPreviewPath(); $('#wizName').focus(); }
+  if (n === 3) { $('#wizConfirmPath').textContent = wizState.fullPath; }
+}
+
+function wizPreviewPath() {
+  const name = $('#wizName').value.trim();
+  const parent = (wizState.parent || '').replace(/\/+$/, '');
+  const preview = $('#wizPathPreview');
+  if (!name) { preview.textContent = parent ? `${parent}/…` : ''; preview.classList.remove('warn'); return; }
+  preview.textContent = `${parent}/${name}`;
+  const collides = wizState.entries.some((e) => e.name.toLowerCase() === name.toLowerCase());
+  preview.classList.toggle('warn', collides);
+  if (collides) preview.textContent += '  ·  a folder with this name already exists here';
+}
+$('#wizName').oninput = wizPreviewPath;
+
+$('#wizNext1').onclick = () => {
+  const at = wizBrowser.current();
+  if (!at.path) return;
+  wizState.parent = at.path;
+  wizState.entries = at.entries;
+  goWizStep(2);
+};
+$('#wizBack2').onclick = () => goWizStep(1);
+$('#wizNext2').onclick = () => {
+  const name = $('#wizName').value.trim();
+  if (!name) { $('#vaultWizMsg').textContent = 'Type a vault name first.'; return; }
+  wizState.fullPath = `${wizState.parent.replace(/\/+$/, '')}/${name}`;
+  goWizStep(3);
+};
+$('#wizBack3').onclick = () => goWizStep(2);
+$('#wizCreateBtn').onclick = async () => {
+  if (await switchVault('/vault/create', wizState.fullPath, $('#vaultWizMsg'))) showVaultHome();
 };
 
 /* Summarise a repair report in one line. Counts, not jargon: "3 nested links"
@@ -1953,9 +2036,9 @@ function describeRepair(r) {
   return msg;
 }
 
-/* Content check. The auto-linker that produced nested links is fixed, but a
-   vault it already damaged stays damaged until something rewrites it — so this
-   has to be reachable, not just an endpoint. */
+/* Vault Health, in the settings drawer: the auto-linker that produced nested
+   links is fixed, but a vault it already damaged stays damaged until
+   something rewrites it — so this has to be reachable, not just an endpoint. */
 $('#auditRun').onclick = async () => {
   const out = $('#auditResult');
   out.textContent = 'Checking…';
@@ -1999,52 +2082,14 @@ $('#repairRun').onclick = async () => {
   } catch { out.textContent = 'Repair failed.'; }
 };
 
-/* Link maintenance. Audit is read-only and always safe; repair rewrites the
-   markdown, so it is only offered once something is actually found. */
-$('#btnAudit').onclick = async () => {
-  const msg = $('#maintMsg');
-  msg.textContent = 'Checking…';
-  try {
-    const a = await api('/audit');
-    if (a.clean) { msg.textContent = 'All links look correct.'; return; }
-    const worst = a.issues[0];
-    msg.innerHTML = '';
-    msg.appendChild(document.createTextNode(
-      `${a.issues.length} note${a.issues.length === 1 ? '' : 's'} affected. `
-      + `For example ${worst.title}: `));
-    const code = document.createElement('code');
-    code.textContent = (worst.sample || '').slice(0, 60);
-    msg.appendChild(code);
-    const fix = document.createElement('button');
-    fix.className = 'sv-btn primary';
-    fix.style.marginTop = '10px';
-    fix.textContent = `Repair ${a.issues.length} note${a.issues.length === 1 ? '' : 's'}`;
-    fix.onclick = async () => {
-      fix.disabled = true;
-      fix.textContent = 'Repairing…';
-      try {
-        const r = await api('/repair', { method: 'POST' });
-        toast(describeRepair(r), 6000);
-        msg.textContent = `Repaired ${r.changed} of ${r.scanned} notes.`;
-        await loadList();
-        await loadGraph();
-        if (state.slug) await openNote(state.slug, false);
-        window.tephraStudy?.refresh();
-      } catch { msg.textContent = 'Repair failed.'; }
-    };
-    msg.appendChild(document.createElement('br'));
-    msg.appendChild(fix);
-  } catch { msg.textContent = 'Could not run the check.'; }
-};
-
 $('#btnReindex').onclick = async () => {
-  const msg = $('#maintMsg');
-  msg.textContent = 'Rebuilding…';
+  const out = $('#auditResult');
+  out.textContent = 'Rebuilding…';
   try {
     const r = await api('/reindex', { method: 'POST' });
     await loadList(); await loadGraph(); await loadMedia();
-    msg.textContent = `Reindexed ${r.notes} notes.`;
-  } catch { msg.textContent = 'Reindex failed.'; }
+    out.textContent = `Reindexed ${r.notes} notes.`;
+  } catch { out.textContent = 'Reindex failed.'; }
 };
 
 /* ══ AMBIENT AURORA ══════════════════════════════════════════ */

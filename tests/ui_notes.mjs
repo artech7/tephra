@@ -48,8 +48,9 @@ console.log('── every control app.js wires exists in the markup ──');
 // Four separate bugs in this project were a silent string-replace leaving the
 // markup without an element the code then wired, throwing on null.
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
-               '#vaultClose', '#vaultCreate', '#vaultOpen', '#vaultPath',
-               '#btnAudit', '#btnReindex', '#themeBtn', '#newNote', '#openPalette'];
+               '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
+               '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
+               '#btnReindex', '#themeBtn', '#newNote', '#openPalette'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
 
