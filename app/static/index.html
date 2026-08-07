@@ -6,7 +6,7 @@
 <title>Tephra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..700&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..700&family=Space+Grotesk:wght@400..600&family=Fraunces:opsz,wght@9..144,400..600&family=Inter:wght@400..600&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=Lora:wght@400..600&family=Source+Serif+4:opsz,wght@8..60,400..600&family=JetBrains+Mono:wght@400;500&family=IBM+Plex+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233FE0AD'/%3E%3C/svg%3E">
 </head>
@@ -280,6 +280,28 @@
     </div>
 
     <div class="th-sect">
+      <div class="th-l"><span>Typeface — display</span></div>
+      <div class="fontrow" id="fontDisplay">
+        <div class="fopt" data-font="Bricolage Grotesque" style="font-family:'Bricolage Grotesque'">Aa</div>
+        <div class="fopt" data-font="Space Grotesk" style="font-family:'Space Grotesk'">Aa</div>
+        <div class="fopt" data-font="Fraunces" style="font-family:'Fraunces'">Aa</div>
+        <div class="fopt" data-font="Inter" style="font-family:'Inter'">Aa</div>
+      </div>
+      <div class="th-l" style="margin-top:14px"><span>Typeface — body</span></div>
+      <div class="fontrow" id="fontSerif">
+        <div class="fopt" data-font="Newsreader" style="font-family:'Newsreader'">Aa</div>
+        <div class="fopt" data-font="Lora" style="font-family:'Lora'">Aa</div>
+        <div class="fopt" data-font="Source Serif 4" style="font-family:'Source Serif 4'">Aa</div>
+      </div>
+      <div class="th-l" style="margin-top:14px"><span>Typeface — mono</span></div>
+      <div class="fontrow" id="fontMono">
+        <div class="fopt" data-font="JetBrains Mono" style="font-family:'JetBrains Mono'">Aa</div>
+        <div class="fopt" data-font="IBM Plex Mono" style="font-family:'IBM Plex Mono'">Aa</div>
+        <div class="fopt" data-font="Space Mono" style="font-family:'Space Mono'">Aa</div>
+      </div>
+    </div>
+
+    <div class="th-sect">
       <div class="th-l"><span>Text contrast</span><b id="vInk">36%</b></div>
       <input type="range" id="rContrast" min="-34" max="42" value="0">
       <div class="th-note">Tracks blur, frost and dim automatically — this nudges the result.</div>
@@ -303,6 +325,22 @@
     <div class="th-sect">
       <div class="th-l"><span>Window inset</span><b id="vInset">20px</b></div>
       <input type="range" id="rInset" min="0" max="56" value="20">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Corner radius</span><b id="vRadius">28px</b></div>
+      <input type="range" id="rRadius" min="8" max="40" value="28">
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Glass shine</span><b id="vShine">34%</b></div>
+      <input type="range" id="rShine" min="10" max="70" value="34">
+      <div class="th-note">Edge highlight strength — how brightly the rim of each glass pane catches light.</div>
+    </div>
+    <div class="th-sect">
+      <div class="tglrow">
+        <span>Dynamic glass</span>
+        <div class="tgl" id="dynGlass"><i></i></div>
+      </div>
+      <div class="th-note">The drawer, search palette and hover card shift and catch light as the cursor moves — like Liquid Glass. Off follows your system's reduced-motion setting automatically.</div>
       <button class="th-reset" id="thReset">Reset to defaults</button>
     </div>
 

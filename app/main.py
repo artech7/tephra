@@ -963,6 +963,8 @@ DEFAULT_THEME = {
     "acc": "63,224,173", "wall": "aurora", "wallUrl": None,
     "blur": 30, "frost": 55, "sat": 200, "scrim": 26,
     "inset": 20, "contrast": 0, "auto": True,
+    "radius": 28, "shine": 34, "dynamic": True,
+    "font_display": "Bricolage Grotesque", "font_serif": "Newsreader", "font_mono": "JetBrains Mono",
     # UI state that should follow the vault rather than the browser
     "note_sort": "updated", "note_tag": "", "media_open": {},
 }

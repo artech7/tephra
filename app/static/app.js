@@ -59,9 +59,11 @@ window.tephraReloadList = async () => {
    with the notes and survives container rebuilds.
    ═══════════════════════════════════════════════════════════ */
 const DEFAULTS = { acc: '63,224,173', wall: 'aurora', wallUrl: null, blur: 30, frost: 55,
-  sat: 200, scrim: 26, inset: 20, contrast: 0, auto: false,
+  sat: 200, scrim: 26, inset: 20, contrast: 0, auto: false, radius: 28, shine: 34, dynamic: true,
+  font_display: 'Bricolage Grotesque', font_serif: 'Newsreader', font_mono: 'JetBrains Mono',
   note_sort: 'updated', note_tag: '', media_open: {} };
 let T = { ...DEFAULTS };
+const FONT_FALLBACK = { display: "system-ui,sans-serif", serif: "Georgia,serif", mono: "ui-monospace,monospace" };
 
 const WALLS = {
   aurora: null,
@@ -116,7 +118,15 @@ function applyTheme() {
   R.style.setProperty('--sat', T.sat + '%');
   R.style.setProperty('--scrim', (T.scrim / 100).toFixed(2));
   R.style.setProperty('--inset', T.inset + 'px');
-  R.style.setProperty('--radius', Math.max(8, Math.min(32, T.inset * 1.4 + 8)) + 'px');
+  R.style.setProperty('--radius', T.radius + 'px');
+
+  const shineA = T.shine / 100;
+  R.style.setProperty('--edge-hi', `rgba(255,255,255,${shineA.toFixed(3)})`);
+  R.style.setProperty('--edge', `rgba(255,255,255,${(shineA * 0.38).toFixed(3)})`);
+
+  R.style.setProperty('--display', `'${T.font_display}',${FONT_FALLBACK.display}`);
+  R.style.setProperty('--serif', `'${T.font_serif}',${FONT_FALLBACK.serif}`);
+  R.style.setProperty('--mono', `'${T.font_mono}',${FONT_FALLBACK.mono}`);
 
   // Contrast is derived: the less the frost, blur and dim are doing,
   // the more the ink layer has to do to keep text legible.
@@ -130,6 +140,8 @@ function applyTheme() {
   $('#vSat').textContent = T.sat + '%';
   $('#vScrim').textContent = T.scrim + '%';
   $('#vInset').textContent = T.inset + 'px';
+  $('#vRadius').textContent = T.radius + 'px';
+  $('#vShine').textContent = T.shine + '%';
   $('#vAcc').textContent = hex(T.acc).toUpperCase();
   $('#lgW').style.background = hex(T.acc);
   $('#autoAcc').toggleAttribute('data-on', !!T.auto);
@@ -150,8 +162,52 @@ function applyTheme() {
   $('#accPick').value = hex(T.acc);
 
   if ($('#noteSort')) $('#noteSort').value = state.sort;
-  ['rBlur:blur', 'rFrost:frost', 'rSat:sat', 'rScrim:scrim', 'rInset:inset', 'rContrast:contrast']
+  ['rBlur:blur', 'rFrost:frost', 'rSat:sat', 'rScrim:scrim', 'rInset:inset', 'rContrast:contrast', 'rRadius:radius', 'rShine:shine']
     .forEach((pair) => { const [id, key] = pair.split(':'); $('#' + id).value = T[key]; });
+
+  [['fontDisplay', 'font_display'], ['fontSerif', 'font_serif'], ['fontMono', 'font_mono']].forEach(([id, key]) => {
+    $('#' + id).querySelectorAll('.fopt').forEach((o) => o.toggleAttribute('data-on', o.dataset.font === T[key]));
+  });
+  $('#dynGlass').toggleAttribute('data-on', !!T.dynamic);
+  ensureDynamic();
+}
+
+/* ══ DYNAMIC GLASS ═══════════════════════════════════════════
+   Pointer position drives --px/--py (-1..1), which the CSS uses to nudge
+   floating panes and sweep a specular highlight across every glass surface
+   — the parallax lives only on panes that own their own backdrop-filter
+   (never on an ancestor of one; see the .shell comment for why that breaks
+   WebKit). A single rAF loop lerps toward the pointer so it reads as glass
+   catching light, not input lag. */
+let dynActive = false, dynTargetX = 0, dynTargetY = 0, dynX = 0, dynY = 0, dynRAF = null;
+function dynPointer(e) {
+  dynTargetX = (e.clientX / window.innerWidth) * 2 - 1;
+  dynTargetY = (e.clientY / window.innerHeight) * 2 - 1;
+}
+function dynTick() {
+  dynX += (dynTargetX - dynX) * 0.06;
+  dynY += (dynTargetY - dynY) * 0.06;
+  R.style.setProperty('--px', dynX.toFixed(4));
+  R.style.setProperty('--py', dynY.toFixed(4));
+  dynRAF = requestAnimationFrame(dynTick);
+}
+function ensureDynamic() {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const want = !!T.dynamic && !reduced;
+  document.body.classList.toggle('glass-dyn', want);
+  if (want === dynActive) return;
+  dynActive = want;
+  if (want) {
+    window.addEventListener('pointermove', dynPointer);
+    if (!dynRAF) dynTick();
+  } else {
+    window.removeEventListener('pointermove', dynPointer);
+    if (dynRAF) cancelAnimationFrame(dynRAF);
+    dynRAF = null;
+    dynX = dynY = dynTargetX = dynTargetY = 0;
+    R.style.setProperty('--px', '0');
+    R.style.setProperty('--py', '0');
+  }
 }
 
 let themeT;
@@ -1726,8 +1782,12 @@ $('#wallFile').onchange = async (e) => {
 document.querySelectorAll('.sw[data-acc]').forEach((s) => (s.onclick = () => setTheme({ acc: s.dataset.acc, auto: false })));
 $('#accPick').oninput = (e) => setTheme({ acc: rgb(e.target.value), auto: false });
 $('#autoAcc').onclick = () => setTheme({ auto: !T.auto });
-[['rContrast', 'contrast'], ['rSat', 'sat'], ['rBlur', 'blur'], ['rFrost', 'frost'], ['rScrim', 'scrim'], ['rInset', 'inset']]
+[['rContrast', 'contrast'], ['rSat', 'sat'], ['rBlur', 'blur'], ['rFrost', 'frost'], ['rScrim', 'scrim'], ['rInset', 'inset'], ['rRadius', 'radius'], ['rShine', 'shine']]
   .forEach(([id, key]) => ($('#' + id).oninput = (e) => setTheme({ [key]: +e.target.value })));
+[['fontDisplay', 'font_display'], ['fontSerif', 'font_serif'], ['fontMono', 'font_mono']].forEach(([id, key]) => {
+  $('#' + id).querySelectorAll('.fopt').forEach((o) => (o.onclick = () => setTheme({ [key]: o.dataset.font })));
+});
+$('#dynGlass').onclick = () => setTheme({ dynamic: !T.dynamic });
 $('#thReset').onclick = () => setTheme({ ...DEFAULTS, wallUrl: T.wallUrl });
 
 /* ══ VAULTS ═════════════════════════════════════
