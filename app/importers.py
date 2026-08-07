@@ -135,8 +135,9 @@ def _norm_topic(raw: dict) -> dict | None:
 
 
 def _attach_loose_quiz(topics: list[dict], quiz: list[dict]) -> None:
-    """A flat quiz array referencing topics by id or title — the shape the
-    original FB guide uses, and the one most exports produce."""
+    """A flat quiz array referencing topics by id or title — the shape most
+    exports produce, since it lets the quiz and topic data live as separate
+    tables instead of nesting one inside the other."""
     by_id = {t["id"].lower(): t for t in topics if t["id"]}
     by_title = {t["title"].lower(): t for t in topics}
     for q in quiz or []:
