@@ -370,6 +370,42 @@ with TestClient(app) as c:
     check("an empty note has nothing to guess and says so plainly, not oddly",
        blank["category"] == "Untitled", blank)
 
+    print("\n── trained k-NN also refuses to force an unrelated category ──")
+    # Once a vault has confirmed categories, predict() moves past the seed
+    # tier into k-NN — which had the identical bug: a note with nothing in
+    # common with any trained example still got forced onto whichever one
+    # happened to be least distant (a whaling note landing on "Windows"
+    # because that's the vault's least-unrelated IT category).
+    trained = st.Classifier()
+    trained.fit([
+        (st.feature_text("Zoning Basics", None,
+            "Soft zoning by WWPN in the fibre channel fabric, unlike hard zoning by port."),
+         "SAN & Fibre Channel"),
+        (st.feature_text("LUN Masking", None,
+            "Masking a lun to a specific initiator wwpn keeps other hosts from seeing it."),
+         "SAN & Fibre Channel"),
+        (st.feature_text("Grep Basics", None,
+            "Using grep and awk to filter log output from the command line shell."),
+         "Linux Commands"),
+        (st.feature_text("Systemctl Cheatsheet", None,
+            "systemctl start, stop, and restart a service, journalctl to read its log."),
+         "Linux Commands"),
+    ])
+    whale_note = st.feature_text("Whaling History", None,
+        "Whaling is the hunting of whales for their products such as meat and blubber, "
+        "which was turned into oil important to the Industrial Revolution.")
+    guess4 = trained.predict(whale_note)
+    check("an unrelated note is not forced into the nearest existing category",
+       guess4["method"] == "content", guess4)
+    check("and gets a name derived from its own words instead",
+       guess4["category"] is not None and "whal" in guess4["category"].lower(), guess4)
+
+    san_note = st.feature_text("Fabric Zoning Notes", None,
+        "Reviewed the fibre channel fabric zoning config, WWPN based, soft zoning throughout.")
+    guess5 = trained.predict(san_note)
+    check("a genuinely on-topic note in a trained vault still matches",
+       guess5["category"] == "SAN & Fibre Channel" and guess5["method"] == "knn", guess5)
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

@@ -281,8 +281,12 @@ class Classifier:
 
         qvec, qnorm = self._vec(tf)
         if not qvec:
-            return {"category": None, "confidence": 0.0, "method": "empty",
-                    "alternatives": []}
+            # Every one of this note's words is either a stopword or simply
+            # doesn't appear anywhere in the trained vocabulary — the
+            # strongest possible "nothing here is related" signal, whether
+            # that's because the note is nearly blank or because it shares
+            # no vocabulary at all with what's been trained on.
+            return self._content_guess(text)
 
         scored = []
         for vec, norm, cat in self.docs:
@@ -290,6 +294,18 @@ class Classifier:
             dot = sum(w * big.get(t, 0.0) for t, w in small.items())
             scored.append((dot / (qnorm * norm), cat))
         scored.sort(reverse=True)
+
+        # sim_top is the raw similarity of the single nearest trained example,
+        # independent of how votes split among the top K — a genuine "is
+        # anything in this vault even close" signal, unlike the margin below
+        # (which measures a close contest between plausible candidates, not
+        # whether either candidate is actually relevant). Below the tuned bar,
+        # forcing the nearest-but-still-unrelated category onto a note (e.g. a
+        # whaling note landing on "Windows" because that's the least-distant
+        # of the vault's IT categories) is worse than admitting no real match
+        # exists and naming the note from its own words instead.
+        if scored[0][0] < self.MIN_SIM:
+            return self._content_guess(text)
 
         votes: dict[str, float] = defaultdict(float)
         for sim, cat in scored[: self.K]:
