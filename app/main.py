@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import fb_import
+from . import guide_import
 from . import importers
 from . import settings as cfg
 from . import index as idx
@@ -708,10 +708,10 @@ def vault_info():
 
 @app.post("/api/study/import")
 async def study_import(file: UploadFile = File(...), dry_run: bool = False):
-    """Import the standalone guide into *this* vault.
+    """Import a standalone study guide into *this* vault.
 
-    Takes the fb_study_guide.py upload, parses it as data, writes the notes,
-    and reindexes so everything appears without a restart. No path argument
+    Takes the uploaded guide file, parses it as data, writes the notes, and
+    reindexes so everything appears without a restart. No path argument
     means no way to import into the wrong directory.
     """
     raw = await file.read()
@@ -722,8 +722,8 @@ async def study_import(file: UploadFile = File(...), dry_run: bool = False):
     except UnicodeDecodeError:
         raise HTTPException(400, "could not read that as text")
     try:
-        summary = fb_import.run_import(source, dry_run=dry_run,
-                                       filename=file.filename or "guide")
+        summary = guide_import.run_import(source, dry_run=dry_run,
+                                          filename=file.filename or "guide")
     except importers.ImportError_ as exc:
         raise HTTPException(400, str(exc))
     except ValueError as exc:

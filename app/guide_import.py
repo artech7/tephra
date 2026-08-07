@@ -1,5 +1,5 @@
 """
-Importing the standalone FB Study Guide.
+Importing a standalone study guide as a set of notes.
 
 This lives in `app/` rather than `tools/` so the running server can call it.
 That matters: a CLI importer has to be *told* which vault to write to, and
