@@ -313,58 +313,32 @@ with TestClient(app) as c:
     check("shows up in known_categories",
        "Brand New Study Group" in c.get("/api/study").json()["known_categories"])
 
-    print("\n── seed dismissal ──")
-    before = c.get("/api/study").json()
-    check("starter categories start visible", "OSI Model" in before["known_categories"],
-       before["known_categories"])
-    check("and listed as unused", "OSI Model" in before["unused_seeds"])
-    d = c.post("/api/study/seeds", json={"category": "OSI Model", "dismissed": True}).json()
-    check("dismiss records it", "OSI Model" in d["dismissed_seeds"])
-    after = c.get("/api/study").json()
-    check("dismissed seed drops out of known_categories",
-       "OSI Model" not in after["known_categories"])
-    check("dismissed seed drops out of unused_seeds",
-       "OSI Model" not in after["unused_seeds"])
-    restore = c.post("/api/study/seeds",
-                     json={"category": "OSI Model", "dismissed": False}).json()
-    check("restoring un-hides it", "OSI Model" not in restore["dismissed_seeds"])
-    check("back in known_categories",
-       "OSI Model" in c.get("/api/study").json()["known_categories"])
-    check("rejects a non-seed name",
-       c.post("/api/study/seeds", json={"category": "Not A Real Seed"}).status_code == 400)
-
     print("\n── cold-start suggestion is topic-agnostic ──")
     # A fresh Classifier with nothing fitted, exercised directly — this is
     # the same "before any labelled items exist" state a brand-new vault (or
     # a vault about a topic with no confirmed categories yet) starts from.
+    # There is no built-in topic lexicon: a vault can be about anything, so
+    # every cold-start guess is derived straight from the note's own words.
     clf = st.Classifier()
     beekeeping = st.feature_text("Hive Inspection — Spring Check", None,
         "Checked the brood frames today. The queen is laying well and the hive "
         "looks healthy. Added a new super since the bees are running out of room "
         "in the hive. Next hive inspection in two weeks.")
     guess = clf.predict(beekeeping)
-    check("an off-topic note is never forced into an IT seed category",
-       guess["category"] not in st.SEEDS, guess)
     check("falls back to a name derived from the note's own words",
        guess["method"] == "content" and guess["category"] is not None and
        any(w in guess["category"].lower() for w in ("hive", "inspection", "spring", "check", "bee")),
        guess)
 
+    # Even a note on a topic the old built-in IT lexicon used to recognise
+    # (DNS, in this case) gets the same content-derived treatment now — no
+    # hardcoded category is waiting to claim it.
     dns_note = st.feature_text("DNS Resolver Behaviour", None,
         "Notes on how a dns resolver walks a zone from the root down. A resolver "
         "caches each record it gets until its ttl expires, then asks again.")
     guess2 = clf.predict(dns_note)
-    check("a genuinely on-topic note still gets a real seed match",
-       guess2["category"] == "DNS & Name Resolution" and guess2["method"] == "seed", guess2)
-
-    # "error" is a Log Analysis seed keyword, but one coincidental word in an
-    # otherwise unrelated note used to be enough to "win" a category outright
-    # (and at 100% confidence, since it was the only score in the running).
-    diary = st.feature_text("Personal Diary", None,
-        "Today I made an error at work but recovered quickly and felt proud of it.")
-    guess3 = clf.predict(diary)
-    check("one coincidental seed keyword is not enough to win a category",
-       guess3["category"] != "Log Analysis" and guess3["method"] == "content", guess3)
+    check("no built-in category exists to claim an on-topic-for-IT note either",
+       guess2["method"] == "content" and "dns" in guess2["category"].lower(), guess2)
 
     blank = clf.predict(st.feature_text("Untitled", None, ""))
     check("an empty note has nothing to guess and says so plainly, not oddly",

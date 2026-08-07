@@ -138,34 +138,6 @@
       n.onclick = () => { S.category = c.category; resetBrowse(); renderCats(); render(); };
       box.appendChild(n);
     }
-    renderSeeds(box);
-  }
-
-  /* Built-in starter categories with nothing in them yet. Dismissing one is
-     just a display filter — nothing is deleted, and typing the same name
-     into "+ New study group…" brings it straight back as a real category. */
-  function renderSeeds(box) {
-    const seeds = S.data.unused_seeds || [];
-    if (!seeds.length) return;
-    box.appendChild(el('div', 'eyebrow sv-seed-head', 'Starter categories'));
-    for (const name of seeds) {
-      const row = el('div', 'node sv-seed');
-      row.innerHTML = `<span class="dot"></span><span class="t"></span>`;
-      row.querySelector('.t').textContent = name;
-      const hide = el('button', 'sv-seed-hide', '×');
-      hide.type = 'button';
-      hide.title = `Hide "${name}" from the study group picker`;
-      hide.onclick = async (e) => {
-        e.stopPropagation();
-        await api('/study/seeds', {
-          method: 'POST', body: JSON.stringify({ category: name, dismissed: true }),
-        });
-        S.data = await api('/study');
-        renderCats();
-      };
-      row.appendChild(hide);
-      box.appendChild(row);
-    }
   }
 
   /* Changing category clears the open card *and* any quiz in progress. Without

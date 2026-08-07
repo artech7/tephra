@@ -167,11 +167,6 @@ class StudyIn(BaseModel):
     question: str | None = None
 
 
-class SeedIn(BaseModel):
-    category: str
-    dismissed: bool = True
-
-
 class AnswerIn(BaseModel):
     qid: str
     correct: bool
@@ -452,8 +447,6 @@ def _study_payload() -> dict:
         seen += rec["seen"]
         right += rec["right"]
 
-    dismissed = prog["settings"].get("dismissed_seeds", [])
-
     return {
         "items": [{
             "slug": it["slug"], "title": it["title"], "category": it["category"],
@@ -463,8 +456,7 @@ def _study_payload() -> dict:
             "flags": sum(1 for q in it["quiz"] if q["id"] in flagged),
         } for it in sorted(items, key=lambda x: (x["category"] or "~", x["title"]))],
         "categories": sorted(cats.values(), key=lambda c: c["category"]),
-        "known_categories": st.known_categories(items, dismissed),
-        "unused_seeds": st.unused_seeds(items, dismissed),
+        "known_categories": st.known_categories(items),
         "progress": {"answered": seen, "correct": right, "flagged": len(flagged)},
         "settings": prog.get("settings", {"quiz_count": st.DEFAULT_QUIZ_COUNT}),
         "max_quiz": st.MAX_QUIZ_COUNT,
@@ -905,16 +897,6 @@ def study_reclassify():
             changed.append({"slug": it["slug"], "from": it["category"],
                             "to": guess["category"]})
     return {"changed": changed, "checked": sum(1 for i in items if i["source"] == "auto")}
-
-
-@app.post("/api/study/seeds")
-def study_dismiss_seed(payload: SeedIn):
-    """Hide (or restore) a built-in starter category from the picker. Only
-    the seed lexicon's own names are valid — this never touches a real,
-    in-use category."""
-    if payload.category not in st.SEEDS:
-        raise HTTPException(400, "not a starter category")
-    return {"dismissed_seeds": st.set_seed_dismissed(payload.category, payload.dismissed)}
 
 
 @app.get("/api/study/quiz")

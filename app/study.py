@@ -7,15 +7,16 @@ a markdown section inside it. That keeps the whole feature inside the same
 promise as the rest of Tephra — your content is readable files, and the app is
 a lens over them.
 
-Categorisation is three-tier, checked in order:
+Categorisation is two-tier, checked in order:
 
   1. `category_source: manual` or `import`  — ground truth, never re-guessed.
   2. k-NN over those ground-truth items      — learns *your* taxonomy.
-  3. Seed keyword lexicon                    — cold start only, before any
-                                               labelled items exist.
 
-Tier 2 is what makes corrections compound: fixing one category shifts every
-similar item, because the corrected item joins the training set.
+Before anything is labelled, or when a note has no vocabulary in common with
+what's been trained, a category name is derived from the note's own words
+instead of guessed — a vault can be about anything, so nothing here assumes
+a topic. Tier 2 is what makes corrections compound: fixing one category
+shifts every similar item, because the corrected item joins the training set.
 """
 from __future__ import annotations
 
@@ -36,23 +37,6 @@ OPT_LINE = re.compile(r"^-\s*(\[[ xX]\]\s*)?(.+?)\s*$")
 WHY_LINE = re.compile(r"^Why:\s*(.+?)\s*$", re.M)
 
 TRUTHY = {"true", "yes", "1", "on"}
-
-# Cold-start only. Once anything is labelled, k-NN outranks this.
-SEEDS = {
-    "Networking Fundamentals": "tcp udp icmp ping port handshake mtu packet arp dhcp ttl socket",
-    "Switching & Layer 2/3": "vlan trunk stp spanning switch mac routing gateway subnet lacp",
-    "DNS & Name Resolution": "dns resolver record ptr cname zone nslookup dig ttl authoritative",
-    "SAN & Fibre Channel": "san fibre channel wwpn wwnn lun zoning hba fabric initiator target",
-    "File Protocols": "nfs smb cifs mount export share protocol lock oplock",
-    "Permissions & Identity": "permission chmod chown acl posix kerberos ldap sid uid gid ticket spn",
-    "Linux Commands": "bash grep awk sed systemctl journalctl df du ps top command shell",
-    "Log Analysis": "log syslog timestamp parse query filter aggregate error pattern",
-    "Wireshark & Packet Analysis": "wireshark capture pcap tshark filter display packet trace",
-    "Windows": "windows registry powershell active directory domain gpo event viewer",
-    "Monitoring & Management": "snmp oid mib trap poll monitor alert threshold",
-    "OSI Model": "osi layer encapsulation model physical presentation session",
-    "Troubleshooting Method": "troubleshoot method isolate hypothesis reproduce escalate scope",
-}
 
 CODE_FENCE = re.compile(r"```.*?```", re.S)
 
@@ -79,7 +63,7 @@ def tokens(text: str) -> list[str]:
 
 def suggest_name(text: str) -> str | None:
     """Derive a candidate study-group name straight from a note's own words,
-    for when nothing in the vault or the seed lexicon is a real match.
+    for when nothing in the vault is a real match yet.
 
     `text` is expected to already be `feature_text()`'s title-weighted blend,
     so a title's words repeat consecutively and naturally dominate — the
@@ -275,10 +259,10 @@ class Classifier:
         return vec, norm
 
     def predict(self, text: str) -> dict:
-        tf = Counter(tokens(text))
         if not self.docs:
-            return self._seed_guess(tf, text)
+            return self._content_guess(text)
 
+        tf = Counter(tokens(text))
         qvec, qnorm = self._vec(tf)
         if not qvec:
             # Every one of this note's words is either a stopword or simply
@@ -303,13 +287,11 @@ class Classifier:
         # both vectors can be so sparse that ONE coincidentally shared rare
         # word (e.g. "history", shared by a whaling note and an unrelated
         # Windows event-log note) is enough to inflate cosine similarity past
-        # a raw threshold on its own — the exact same failure as the seed
-        # lexicon trusting a single keyword hit, just showing up in different
-        # math. So the nearest neighbour also has to share more than one real
-        # term before it counts as evidence, not just coincidence. Below
-        # either bar, forcing the nearest-but-unrelated category onto a note
-        # is worse than admitting no real match exists and naming the note
-        # from its own words instead.
+        # a raw threshold on its own. So the nearest neighbour also has to
+        # share more than one real term before it counts as evidence, not
+        # just coincidence. Below either bar, forcing the nearest-but-unrelated
+        # category onto a note is worse than admitting no real match exists
+        # and naming the note from its own words instead.
         sim_top, _, top_vec = scored[0]
         shared_terms = sum(1 for t in qvec if t in top_vec)
         if sim_top < self.MIN_SIM or shared_terms < 2:
@@ -335,40 +317,12 @@ class Classifier:
                              for c, v in ranked[1:4]],
         }
 
-    # A single coincidental word match isn't evidence a note is about that
-    # seed's topic — "get" or "log" turning up once in a beekeeping note
-    # shouldn't be enough to plant it under "Linux Commands". Two distinct
-    # keywords from the same seed is a much harder coincidence to hit by
-    # chance, so that's the bar for the seed lexicon to weigh in at all.
-    SEED_MIN_KEYWORDS = 2
-
-    def _seed_guess(self, tf: Counter, text: str) -> dict:
-        scores = {}
-        for cat, words in SEEDS.items():
-            matched = [w for w in words.split() if w in tf]
-            if len(matched) < self.SEED_MIN_KEYWORDS:
-                continue
-            scores[cat] = sum(tf[w] for w in matched)
-        if not scores:
-            return self._content_guess(text)
-        ranked = sorted(scores.items(), key=lambda kv: -kv[1])
-        total = sum(scores.values())
-        return {
-            "category": ranked[0][0],
-            "confidence": round(ranked[0][1] / total, 3),
-            "low_confidence": len(ranked) > 1 and
-            (ranked[0][1] - ranked[1][1]) / total < 0.2,
-            "method": "seed",
-            "alternatives": [{"category": c, "score": round(v / total, 3)}
-                             for c, v in ranked[1:4]],
-        }
-
     def _content_guess(self, text: str) -> dict:
-        """Nothing in the seed lexicon or the user's own trained categories
-        is a real match — rather than force the note under an unrelated
-        label (an IT seed lexicon has nothing to say about a beekeeping or
-        model-aircraft note), derive a candidate name straight from the
-        note's own words."""
+        """Nothing in the user's own trained categories is a real match —
+        rather than force the note under an unrelated label, derive a
+        candidate name straight from the note's own words. This is also
+        the whole story before anything has been labelled at all: a vault
+        can be about any topic, so cold start assumes nothing."""
         return {"category": suggest_name(text), "confidence": 0.0,
                 "method": "content", "low_confidence": True, "alternatives": []}
 
@@ -415,18 +369,8 @@ def classify_note(note: vault.Note, items: list[dict] | None = None) -> dict:
     return clf.predict(feature_text(note.title, note.meta.get("question"), prose))
 
 
-def known_categories(items: list[dict], dismissed=()) -> list[str]:
-    cats = {it["category"] for it in items if it["category"]}
-    return sorted(cats | (set(SEEDS) - set(dismissed)))
-
-
-def unused_seeds(items: list[dict], dismissed=()) -> list[str]:
-    """Starter categories with no notes in them yet and not already hidden —
-    what the sidebar offers to dismiss. A dismissed seed that gained notes
-    (e.g. by being typed as a new study group) drops out on its own without
-    needing to be un-dismissed."""
-    cats = {it["category"] for it in items if it["category"]}
-    return sorted(c for c in SEEDS if c not in cats and c not in set(dismissed))
+def known_categories(items: list[dict]) -> list[str]:
+    return sorted({it["category"] for it in items if it["category"]})
 
 
 # ── progress ───────────────────────────────────────────────────────────────
@@ -444,12 +388,11 @@ def load_progress() -> dict:
             data.setdefault("flagged", [])
             data.setdefault("settings", {})
             data["settings"].setdefault("quiz_count", DEFAULT_QUIZ_COUNT)
-            data["settings"].setdefault("dismissed_seeds", [])
             return data
         except Exception:
             pass
     return {"answers": {}, "flagged": [],
-            "settings": {"quiz_count": DEFAULT_QUIZ_COUNT, "dismissed_seeds": []}}
+            "settings": {"quiz_count": DEFAULT_QUIZ_COUNT}}
 
 
 def save_progress(data: dict) -> None:
@@ -539,18 +482,6 @@ def set_quiz_count(n: int) -> int:
     data["settings"]["quiz_count"] = n
     save_progress(data)
     return n
-
-
-def set_seed_dismissed(name: str, dismissed: bool) -> list[str]:
-    """Hides (or restores) one of the built-in starter categories from the
-    picker. Purely a display filter: SEEDS itself is untouched, so cold-start
-    classification is unaffected."""
-    data = load_progress()
-    hidden = set(data["settings"]["dismissed_seeds"])
-    hidden.add(name) if dismissed else hidden.discard(name)
-    data["settings"]["dismissed_seeds"] = sorted(hidden)
-    save_progress(data)
-    return data["settings"]["dismissed_seeds"]
 
 
 def set_flag(qid: str, flagged: bool) -> list[str]:
