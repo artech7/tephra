@@ -606,7 +606,7 @@
     const wrap = el('div', 'sv-empty');
     wrap.appendChild(el('h2', null, 'No study items yet'));
     wrap.appendChild(el('p', 'sv-topic-q',
-      'Import your standalone FB Study Guide, or mark any note as a study item from the editor.'));
+      'Import a study guide file, or mark any note as a study item from the editor.'));
 
     const drop = el('div', 'sv-drop');
     drop.innerHTML = `<span class="sv-drop-t">Import study guide</span>
