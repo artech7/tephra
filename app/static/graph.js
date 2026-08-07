@@ -131,7 +131,7 @@
     // linearly to buy circumference where the crowding actually is.
     const power = opts.power || 1.45;
     const n = nodes.length;
-    if (!n) return;
+    if (!n) return { parent: [] };
     const adj = new Map(nodes.map((_, i) => [i, []]));
     for (const [a, b] of links) {
       if (adj.has(a) && adj.has(b)) { adj.get(a).push(b); adj.get(b).push(a); }
@@ -207,6 +207,79 @@
       place(r, cursor, cursor + share);
       cursor += share;
     }
+    // Exposed so cross-branch links can be routed along the hierarchy
+    // (hierarchical edge bundling) instead of drawn as straight lines that
+    // cut across the radial layout.
+    return { parent };
+  }
+
+  /* ── hierarchical edge bundling ──────────────────────────────────────
+     A tidy tree only has zero crossings for its own spanning-tree edges.
+     Every other link in the graph (the "cross" links: a related topic in
+     a different category, a prerequisite, etc.) still wants to be drawn,
+     and a straight line for those cuts across the clean radial structure.
+     Routing them along the tree instead — up to the lowest common
+     ancestor of the two endpoints and back down — turns that clutter into
+     curves that follow the hierarchy, and lets shared stretches of path
+     visually merge into thicker bundles instead of a hairball.
+     ───────────────────────────────────────────────────────────────────── */
+  function treePath(parent, a, b) {
+    const upA = [a];
+    for (let c = a; parent[c] !== -1 && parent[c] !== undefined; ) { c = parent[c]; upA.push(c); }
+    const upB = [b];
+    for (let c = b; parent[c] !== -1 && parent[c] !== undefined; ) { c = parent[c]; upB.push(c); }
+    const indexInA = new Map(upA.map((node, i) => [node, i]));
+    let lcaA = -1, lcaB = -1;
+    for (let j = 0; j < upB.length; j++) {
+      if (indexInA.has(upB[j])) { lcaA = indexInA.get(upB[j]); lcaB = j; break; }
+    }
+    if (lcaA === -1) return [a, b];               // no shared ancestor — just draw it straight
+    return [...upA.slice(0, lcaA + 1), ...upB.slice(0, lcaB).reverse()];
+  }
+
+  // Blend the tree path toward a straight line between its endpoints.
+  // beta=1 hugs the hierarchy exactly; beta=0 is a plain straight edge.
+  // The first and last points are always the real node positions, whatever
+  // beta is — only the middle of the curve bows toward the tree.
+  function blendPath(nodes, path, beta) {
+    const n = path.length;
+    const a = nodes[path[0]], b = nodes[path[n - 1]];
+    return path.map((idx, i) => {
+      const p = nodes[idx];
+      const t = n > 1 ? i / (n - 1) : 0;
+      const lx = a.x + (b.x - a.x) * t, ly = a.y + (b.y - a.y) * t;
+      return { x: beta * p.x + (1 - beta) * lx, y: beta * p.y + (1 - beta) * ly };
+    });
+  }
+
+  const bundleKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const BUNDLE_BETA = 0.82;   // 0 = straight line, 1 = hugs the hierarchy exactly
+
+  // One bundle entry per non-tree link whose path is long enough to bend;
+  // direct parent-child links (already the tree's own edges) are left out
+  // since a 2-point "path" is just the straight line anyway.
+  function buildBundles(nodes, links, parent) {
+    const bundles = new Map();
+    for (const [a, b] of links) {
+      if (parent[a] === b || parent[b] === a) continue;
+      const path = treePath(parent, a, b);
+      if (path.length > 2) bundles.set(bundleKey(a, b), path);
+    }
+    return bundles;
+  }
+
+  function strokeSmoothPath(ctx, pts) {
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    if (pts.length === 2) { ctx.lineTo(pts[1].x, pts[1].y); ctx.stroke(); return; }
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2, my = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    const prev = pts[pts.length - 2], last = pts[pts.length - 1];
+    ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
+    ctx.stroke();
   }
 
   /* ── view transform helpers ── */
@@ -225,7 +298,10 @@
     return best;
   }
 
-  window.__tephraGraphInternals = { createSim, hitTest, toScreen, toWorld, tidyTree, W, H, TUNING };
+  window.__tephraGraphInternals = {
+    createSim, hitTest, toScreen, toWorld, tidyTree, W, H, TUNING,
+    treePath, blendPath, buildBundles, bundleKey,
+  };
 
   /* ── the interactive view ── */
   const $ = (s) => document.querySelector(s);
@@ -238,7 +314,7 @@
     adj: new Map(), selected: null, hover: null,
     view: { k: 1, tx: 0, ty: 0 }, filter: '',
     layout: 'cluster', showStubs: true, showLeaves: true, labels: 'auto',
-    dragging: null, panning: null, moved: false, frame: null,
+    dragging: null, panning: null, moved: false, frame: null, bundles: null,
   };
 
   const radiusOf = (d) =>
@@ -301,10 +377,12 @@
 
     if (G.layout === 'tree') {
       G.sim = null;
-      tidyTree(nodes, links);
+      const { parent } = tidyTree(nodes, links);
+      G.bundles = buildBundles(nodes, links, parent);
       if (!keepView) { G.userMoved = false; fit(); }
       redraw();
     } else {
+      G.bundles = null;
       G.sim = createSim(nodes, links);
       if (!keepView) G.userMoved = false;
       start();
@@ -362,17 +440,29 @@
     const matches = (d) => !G.filter ||
       (d.label || '').toLowerCase().includes(G.filter);
 
-    // edges
+    // edges — in tree layout, any link that isn't a direct parent-child
+    // edge is routed along the hierarchy (hierarchical edge bundling)
+    // instead of drawn straight, so cross-branch links follow the tree's
+    // shape rather than cutting across it. Low, uniform alpha means
+    // stretches shared by several bundled edges naturally read brighter
+    // from the overlap, without any extra bookkeeping.
     for (const [a, b] of G.raw.links) {
       const p = G.raw.nodes[a], q = G.raw.nodes[b];
       if (!p || !q) continue;
       const lit = near && (near.has(a) && near.has(b));
       const dim = near && !lit;
+      const bundle = G.bundles && G.bundles.get(bundleKey(a, b));
       ctx.strokeStyle = lit ? `rgba(${accent},.6)` : dim
-        ? 'rgba(255,255,255,.035)' : 'rgba(255,255,255,.10)';
+        ? 'rgba(255,255,255,.035)' : (bundle ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.10)');
       ctx.lineWidth = lit ? 1.6 : 0.8;
-      const [ax, ay] = toScreen(p.x, p.y, v), [bx, by] = toScreen(q.x, q.y, v);
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      if (bundle) {
+        const pts = blendPath(G.raw.nodes, bundle, BUNDLE_BETA)
+          .map(({ x, y }) => { const [sx, sy] = toScreen(x, y, v); return { x: sx, y: sy }; });
+        strokeSmoothPath(ctx, pts);
+      } else {
+        const [ax, ay] = toScreen(p.x, p.y, v), [bx, by] = toScreen(q.x, q.y, v);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
     }
 
     // nodes
