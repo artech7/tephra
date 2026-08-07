@@ -16,7 +16,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-VAULT = Path(os.environ.get("TEPHRA_VAULT", "/vault"))
+# TEPHRA_VAULT is an explicit, this-launch override (set by --vault or the
+# desktop launcher) and always wins — main.py's lifespan deliberately skips
+# the remembered vault whenever it's present. TEPHRA_DEFAULT_VAULT is a
+# lower-priority *bootstrap* default: where to look before any vault has
+# ever been chosen or remembered. A container always has some environment
+# variable set for its default vault, so collapsing both into TEPHRA_VAULT
+# would permanently block "the last vault you had open wins" under any
+# deployment that sets one — which is exactly what happened here.
+VAULT = Path(os.environ.get("TEPHRA_VAULT") or os.environ.get("TEPHRA_DEFAULT_VAULT") or "/vault")
 NOTES = VAULT / "notes"
 MEDIA = VAULT / "media"
 INDEX_DIR = VAULT / ".index"

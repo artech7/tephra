@@ -17,7 +17,12 @@ services:
       # Settings and recents list — without this, vault choice resets on restart.
       - ./config:/config
     environment:
-      TEPHRA_VAULT: /vaults/Tephra
+      # Bootstrap default only, for the very first boot before anything has
+      # been remembered yet. TEPHRA_VAULT (not TEPHRA_DEFAULT_VAULT) would
+      # instead pin every boot to this vault forever — main.py's lifespan
+      # treats TEPHRA_VAULT as an explicit override and skips restoring
+      # whatever vault was last open specifically because it's set.
+      TEPHRA_DEFAULT_VAULT: /vaults/Tephra
       XDG_CONFIG_HOME: /config
       TEPHRA_MAX_UPLOAD_MB: "200"
     healthcheck:
