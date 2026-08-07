@@ -36,6 +36,36 @@
 html,body{height:100%}
 body{background:#050C0E;color:var(--paper);font-family:var(--display);font-size:15px;overflow:hidden;-webkit-font-smoothing:antialiased}
 
+/* ══ BOOT SPLASH ═════════════════════════════════════════════
+   Purely cosmetic — the app is already assembling itself underneath
+   the whole time. One CSS animation on a timer, not JS tied to boot()
+   finishing, so it can't hang open if something else on the page
+   errors, and it always runs the same ~5s regardless of load speed. */
+#bootSplash{position:fixed;inset:0;z-index:999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+  background:radial-gradient(120% 90% at 50% 32%,#0E2E28 0%,#071815 46%,#040A0C 100%);
+  animation:boot-fade 5s var(--ease) forwards}
+.boot-mark{width:48px;height:48px;border-radius:16px;
+  background:conic-gradient(from 0deg,var(--accent),rgb(var(--violet)),rgb(var(--apricot)),var(--accent));
+  animation:boot-spin 2.6s var(--ease) infinite}
+.boot-word{font-family:var(--display);font-weight:600;font-size:18px;letter-spacing:-.02em;color:var(--paper);opacity:.9}
+.boot-load{display:flex;gap:6px;margin-top:2px}
+.boot-load span{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite}
+.boot-load span:nth-child(2){animation-delay:.15s}
+.boot-load span:nth-child(3){animation-delay:.3s}
+@keyframes boot-spin{
+  0%{transform:rotate(0deg) scale(1);box-shadow:0 0 22px -4px var(--accent)}
+  50%{transform:rotate(180deg) scale(1.08);box-shadow:0 0 40px -2px var(--accent)}
+  100%{transform:rotate(360deg) scale(1);box-shadow:0 0 22px -4px var(--accent)}
+}
+/* Held fully opaque for most of the 5s, then fades — visibility (not just
+   opacity) drops at the very end so it stops intercepting clicks without
+   needing a separate pointer-events transition. */
+@keyframes boot-fade{
+  0%,82%{opacity:1;visibility:visible}
+  100%{opacity:0;visibility:hidden}
+}
+
 /* ── wallpaper stack: siblings of the shell, never ancestors ── */
 #aurora{position:fixed;inset:-12%;width:124%;height:124%;filter:blur(72px) saturate(140%);z-index:0}
 #wall{position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;display:none}
