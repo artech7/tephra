@@ -14,7 +14,7 @@ import re
 
 from . import study, vault
 
-ROOT_NOTE = "FB Study Guide"
+DEFAULT_ROOT_NOTE = "Study Guide"
 
 
 def read_literals(source: str):
@@ -29,7 +29,21 @@ def tag_for(category: str) -> str:
     return words[0].lower() if len(words) == 1 else "".join(w[0] for w in words).lower()
 
 
-def run_import(source: str, dry_run: bool = False, filename: str = "guide.py") -> dict:
+def _title_from_filename(filename: str) -> str:
+    stem = re.sub(r"\.[^.]+$", "", filename or "")
+    words = re.split(r"[\s_\-]+", stem.strip())
+    words = [w for w in words if w]
+    return " ".join(w if w.isupper() else w.capitalize() for w in words)
+
+
+def root_title_for(filename: str, title: str | None = None) -> str:
+    """Explicit title wins; otherwise tidy the uploaded filename; otherwise a
+    generic fallback. Never assumes any particular guide."""
+    return (title or "").strip() or _title_from_filename(filename) or DEFAULT_ROOT_NOTE
+
+
+def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
+                title: str | None = None) -> dict:
     """Idempotent. Re-running updates notes in place and never clobbers a
     category the user corrected by hand.
 
@@ -38,6 +52,7 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py") -
     """
     from . import importers
     topics = importers.parse(filename, source)
+    root_note = root_title_for(filename, title)
     vault.ensure_dirs()
     existing = {n.slug: n for n in vault.all_notes()}
     title_to_slug = {n.title.strip().lower(): n.slug for n in existing.values()}
@@ -85,7 +100,7 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py") -
     # navigable wiki, and it is what the graph view renders.
     for category, titles in sorted(by_category.items()):
         slug = title_to_slug.get(category.lower()) or vault.unique_slug(category)
-        lines = [f"Study topics in **{category}**. Part of [[{ROOT_NOTE}]].", ""]
+        lines = [f"Study topics in **{category}**. Part of [[{root_note}]].", ""]
         lines += [f"- [[{t}]]" for t in sorted(titles)]
         if not dry_run:
             vault.write(vault.Note(
@@ -102,8 +117,9 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py") -
         root.append(f"- [[{category}]] — {len(titles)} "
                     f"topic{'s' if len(titles) != 1 else ''}")
     if not dry_run:
+        slug = title_to_slug.get(root_note.lower()) or vault.unique_slug(root_note)
         vault.write(vault.Note(
-            slug=vault.slugify(ROOT_NOTE), title=ROOT_NOTE, body="\n".join(root),
+            slug=slug, title=root_note, body="\n".join(root),
             tags=["study", "index"], meta={"study": "false", "study_index": "true"}))
 
     return {

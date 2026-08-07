@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -707,12 +707,14 @@ def vault_info():
 
 
 @app.post("/api/study/import")
-async def study_import(file: UploadFile = File(...), dry_run: bool = False):
+async def study_import(file: UploadFile = File(...), dry_run: bool = False,
+                        title: str | None = Form(None)):
     """Import a standalone study guide into *this* vault.
 
     Takes the uploaded guide file, parses it as data, writes the notes, and
     reindexes so everything appears without a restart. No path argument
-    means no way to import into the wrong directory.
+    means no way to import into the wrong directory. `title` optionally
+    names the guide's root note; unset, it's derived from the filename.
     """
     raw = await file.read()
     if len(raw) > 12 * 1024 * 1024:
@@ -723,7 +725,8 @@ async def study_import(file: UploadFile = File(...), dry_run: bool = False):
         raise HTTPException(400, "could not read that as text")
     try:
         summary = guide_import.run_import(source, dry_run=dry_run,
-                                          filename=file.filename or "guide")
+                                          filename=file.filename or "guide",
+                                          title=title)
     except importers.ImportError_ as exc:
         raise HTTPException(400, str(exc))
     except ValueError as exc:
