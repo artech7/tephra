@@ -95,7 +95,7 @@ await new Promise(r => setTimeout(r, 60));
 const warn = [...document.querySelectorAll('.sv-warn')].map(n => n.textContent).join(' ');
 ck('failure reason rendered in the view', warn.includes('not valid Python'), warn.slice(0, 60));
 ck('dropzone label restored after failure',
-   !document.querySelector('.sv-drop') || document.querySelector('.sv-drop-t')?.textContent === 'Import study guide');
+   !document.querySelector('.sv-drop') || document.querySelector('.sv-drop-t')?.textContent === 'Import/Merge study guide');
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

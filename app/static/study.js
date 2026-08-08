@@ -58,7 +58,7 @@
         <button data-mode="quiz"    aria-pressed="false">Quiz</button>
         <button data-mode="search"  aria-pressed="false">Search</button>
       </div>
-      <button class="sv-import" id="svImport" title="Import a study guide script">Import guide</button>
+      <button class="sv-import" id="svImport" title="Import or merge a study guide file into this vault">Import/Merge</button>
     </div>
     <div class="sv-body">
       <aside class="sv-cats"><div class="eyebrow"><span>Categories</span></div><div id="svCatList"></div></aside>
@@ -581,7 +581,7 @@
       'Import a study guide file, or mark any note as a study item from the editor.'));
 
     const drop = el('div', 'sv-drop');
-    drop.innerHTML = `<span class="sv-drop-t">Import study guide</span>
+    drop.innerHTML = `<span class="sv-drop-t">Import/Merge study guide</span>
       <span class="sv-drop-s">Click to choose, or drop a
         <code>.json</code> <code>.py</code> <code>.csv</code> <code>.md</code> file</span>`;
     drop.onclick = () => pickFile(drop);
@@ -674,7 +674,7 @@
       }
     } finally {
       if (host) host.classList.remove('busy');
-      if (label) label.textContent = 'Import study guide';
+      if (label) label.textContent = 'Import/Merge study guide';
     }
   }
 
