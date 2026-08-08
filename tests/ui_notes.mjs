@@ -8,9 +8,9 @@ let ok = 0, fail = 0;
 const ck = (l, c, x = '') => { c ? (ok++, console.log(`  PASS  ${l} ${x}`)) : (fail++, console.log(`  FAIL  ${l} ${x}`)); };
 
 let notes = [
-  { slug: 'zeta',  title: 'Zeta note',  tags: ['note'],           updated: '2026-07-01T00:00:00Z', backlinks: 0, links_out: 5, size: 4000, kind: 'note' },
-  { slug: 'alpha', title: 'Alpha note', tags: ['study', 'nf'],    updated: '2026-07-29T00:00:00Z', backlinks: 9, links_out: 1, size: 100,  kind: 'study' },
-  { slug: 'mid',   title: 'Middle',     tags: ['study', 'index'], updated: '2026-07-15T00:00:00Z', backlinks: 3, links_out: 12, size: 900, kind: 'index' },
+  { slug: 'zeta',  title: 'Zeta note',  tags: ['note'],           updated: '2026-07-01T00:00:00Z', backlinks: 0, links_out: 5, size: 4000, kind: 'note',  favorite: false },
+  { slug: 'alpha', title: 'Alpha note', tags: ['study', 'nf'],    updated: '2026-07-29T00:00:00Z', backlinks: 9, links_out: 1, size: 100,  kind: 'study', favorite: false },
+  { slug: 'mid',   title: 'Middle',     tags: ['study', 'index'], updated: '2026-07-15T00:00:00Z', backlinks: 3, links_out: 12, size: 900, kind: 'index', favorite: false },
 ];
 let theme = {}, deleted = [];
 const calls = [];
@@ -19,16 +19,24 @@ window.fetch = async (u, o = {}) => {
   let b = {};
   if (p.includes('/api/theme')) { if (o.method === 'PUT') theme = JSON.parse(o.body); b = theme; }
   else if (o.method === 'DELETE') { const sl = p.split('/').pop(); deleted.push(sl); notes = notes.filter(n => n.slug !== sl); b = { ok: true }; }
+  else if (/\/api\/notes\/[\w-]+\/favorite$/.test(p)) { const sl = p.split('/').slice(-2)[0];
+    const n = notes.find(x => x.slug === sl); n.favorite = !n.favorite; b = { slug: sl, favorite: n.favorite }; }
   else if (/\/api\/notes\/[\w-]+$/.test(p)) { const sl = p.split('/').pop();
     const n = notes.find(x => x.slug === sl) || notes[0];
     if (o.method === 'PUT') { const payload = o.body ? JSON.parse(o.body) : {};
       if (payload.tags) n.tags = payload.tags; }
-    b = { slug: n.slug, title: n.title, body: '', tags: n.tags, meta: {}, html: '<p>x</p>', links_out: n.links_out, media: [], backlinks: [], suggestions: [], words: 1, updated: n.updated }; }
+    b = { slug: n.slug, title: n.title, body: '', tags: n.tags, favorite: n.favorite, meta: {}, html: '<p>x</p>', links_out: n.links_out, media: [], backlinks: [], suggestions: [], words: 1, updated: n.updated }; }
   else if (p.includes('/api/notes')) b = notes;
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
   else if (p.includes('/api/media')) b = [];
   else if (p.includes('/api/study')) b = { known_categories: [] };
-  return { ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) };
+  // Cloned, not returned live: a real fetch response is never the same
+  // object the "server" holds, and `b` here can alias straight into `notes`
+  // (the /api/notes list branch just assigns it). Without the clone, the
+  // client's optimistic update on a note and the mock's own read-then-flip
+  // for /favorite touch the identical object and the toggle cancels itself.
+  const clone = JSON.parse(JSON.stringify(b));
+  return { ok: true, status: 200, json: async () => clone, text: async () => JSON.stringify(clone) };
 };
 window.tephraStudy = { open: async () => {}, close: () => {}, isOpen: () => false, refresh: async () => {} };
 window.tephraGraph = { open: async () => {}, close: () => {}, isOpen: () => false };
@@ -50,7 +58,7 @@ console.log('── every control app.js wires exists in the markup ──');
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
                '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
                '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
-               '#btnReindex', '#themeBtn', '#newNote', '#openPalette'];
+               '#btnReindex', '#themeBtn', '#newNote', '#openPalette', '#favBtn'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
 
@@ -78,6 +86,48 @@ ck('trailing number relabels with sort',
    doc.querySelector('#noteList .node').title.includes('sorted by') === false ||
    doc.querySelector('#noteList .node').title.includes('backlinks'));
 ck('type shown via dot class', !!doc.querySelector('.node.kind-index') && !!doc.querySelector('.node.kind-study'));
+
+console.log('\n── favorites float to the top, under any sort ──');
+setSort('updated');
+const starBtn = (slug) => doc.querySelector(`#noteList .node[data-slug="${slug}"] .star`);
+ck('unfavorited notes show no lit star', ![...doc.querySelectorAll('#noteList .star')].some(s => s.classList.contains('on')));
+starBtn('zeta').onclick({ stopPropagation() {} });
+await new Promise(r => setTimeout(r, 10));
+ck('starring calls the toggle endpoint', calls.some(c => c.p.endsWith('/api/notes/zeta/favorite') && c.m === 'POST'));
+ck('zeta jumps to the top despite sorting by recently-edited (it is the oldest)',
+   titles()[0] === 'Zeta note', titles().join(','));
+ck('its star lights up', starBtn('zeta').classList.contains('on'));
+setSort('backlinks');
+ck('still pinned first under most-linked-to, where zeta (0 backlinks) would otherwise rank last',
+   titles()[0] === 'Zeta note', titles().join(','));
+setSort('title');
+ck('and under alphabetical, where zeta would otherwise sort last too',
+   titles()[0] === 'Zeta note', titles().join(','));
+starBtn('zeta').onclick({ stopPropagation() {} });
+await new Promise(r => setTimeout(r, 10));
+ck('unstarring drops it back into normal order', titles()[0] === 'Alpha note', titles().join(','));
+setSort('updated');
+
+console.log('\n── the doc header star mirrors and drives the same state ──');
+const favBtn = doc.querySelector('#favBtn');
+doc.querySelector('#noteList .node[data-slug="alpha"]').onclick();
+await new Promise(r => setTimeout(r, 20));
+ck('opening an unfavorited note shows an unlit header star', !favBtn.classList.contains('on'));
+favBtn.onclick();
+await new Promise(r => setTimeout(r, 10));
+ck('clicking it favorites the open note', favBtn.classList.contains('on'));
+ck('the sidebar row for the open note lights up too', starBtn('alpha').classList.contains('on'));
+ck('alpha is now pinned first', titles()[0] === 'Alpha note', titles().join(','));
+starBtn('alpha').onclick({ stopPropagation() {} });
+await new Promise(r => setTimeout(r, 10));
+ck('unstarring from the sidebar updates the open header star too', !favBtn.classList.contains('on'));
+
+// Back to the note and sort boot left in place, so the assertions further
+// down (persisted sort, tag editor's "boot opens zeta" check, etc.) still
+// see the state they expect.
+doc.querySelector('#noteList .node[data-slug="zeta"]').onclick();
+setSort('kind');
+await new Promise(r => setTimeout(r, 20));
 
 console.log('\n── the sort choice is remembered ──');
 await new Promise(r => setTimeout(r, 450));

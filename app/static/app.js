@@ -288,12 +288,56 @@ function allTags() {
   return [...new Set(state.notes.flatMap((n) => n.tags))].sort();
 }
 
+// The 5-point star used for both the sidebar row toggle and the doc header
+// button, kept as one literal so the two read as the same control.
+const STAR_SVG = '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">'
+  + '<path d="M12 3.4l2.65 5.53 6.02.73-4.42 4.16 1.18 5.94L12 16.9l-5.43 2.86 1.18-5.94-4.42-4.16 6.02-.73z"/></svg>';
+
+async function toggleFavorite(slug) {
+  const row = state.notes.find((n) => n.slug === slug);
+  const onOpenNote = state.note && state.slug === slug ? state.note : null;
+  const was = row ? row.favorite : !!onOpenNote?.favorite;
+  const next = !was;
+  if (row) row.favorite = next;
+  if (onOpenNote) onOpenNote.favorite = next;
+  renderList();
+  renderFavBtn(state.note);
+  if (next && state.slug === slug) {
+    const btn = $('#favBtn');
+    btn?.classList.remove('bump');
+    void btn?.offsetWidth;                 // restart the animation on repeat clicks
+    btn?.classList.add('bump');
+  }
+  try {
+    const res = await api('/notes/' + encodeURIComponent(slug) + '/favorite', { method: 'POST' });
+    if (row) row.favorite = res.favorite;
+    if (onOpenNote) onOpenNote.favorite = res.favorite;
+  } catch {
+    if (row) row.favorite = was;
+    if (onOpenNote) onOpenNote.favorite = was;
+    toast('Could not update favorite');
+  }
+  renderList();
+  renderFavBtn(state.note);
+}
+
+function renderFavBtn(note) {
+  const btn = $('#favBtn');
+  if (!btn) return;
+  const on = !!note?.favorite;
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? 'Favorited — click to remove from the top' : 'Favorite this note — pins it to the top';
+}
+
 function renderList() {
   const list = $('#noteList');
   const sort = SORTS[state.sort] ? state.sort : 'updated';
+  // Favorites always float to the top, regardless of the active sort --
+  // sort still decides the order within each group.
   const shown = state.notes
     .filter((n) => !state.tag || n.tags.includes(state.tag))
-    .sort(SORTS[sort]);
+    .sort((a, b) => (b.favorite - a.favorite) || SORTS[sort](a, b));
 
   $('#noteCount').textContent = state.tag || shown.length !== state.notes.length
     ? `${shown.length} of ${state.notes.length}`
@@ -320,11 +364,15 @@ function renderList() {
     const flagMark = n.flags
       ? `<span class="flagmark" title="${n.flags} flagged question${n.flags === 1 ? '' : 's'}">⚑</span>`
       : '';
-    el.innerHTML = `<span class="dot"></span><span class="t"></span>${flagMark}<span class="n">${num}</span>`;
+    el.innerHTML = `<button class="star${n.favorite ? ' on' : ''}" type="button">${STAR_SVG}</button>`
+      + `<span class="dot"></span><span class="t"></span>${flagMark}<span class="n">${num}</span>`;
     el.querySelector('.t').textContent = n.title;
     el.title = `${n.title}\n${n.kind} · ${n.backlinks} backlinks · ${n.links_out} links out`
       + (n.flags ? `\n${n.flags} flagged question${n.flags === 1 ? '' : 's'}` : '')
       + (metric ? `\nsorted by ${metric}` : '');
+    const star = el.querySelector('.star');
+    star.title = n.favorite ? 'Unfavorite' : 'Favorite — pin to the top';
+    star.onclick = (e) => { e.stopPropagation(); toggleFavorite(n.slug); };
     el.onclick = () => openNote(n.slug);
     list.appendChild(el);
   }
@@ -475,6 +523,7 @@ async function openNote(slug, push = true) {
   renderBacklinks(note.backlinks);
   renderGraphCrumb(note);
   renderTagRow(note);
+  renderFavBtn(note);
   renderStudyChip(note);
   renderFlagChip(note);
   renderDeleteButton();
@@ -1668,6 +1717,7 @@ function setView(v) {
 document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
 $('#noteSort').onchange = (e) => { state.sort = e.target.value; renderList(); saveTheme(); };
 $('#tagClear').onclick = () => { state.tag = ''; renderList(); saveTheme(); };
+$('#favBtn').onclick = () => { if (state.slug) toggleFavorite(state.slug); };
 $('#tephraBtn').onclick = () => setStudy(false);
 $('#crucibleBtn').onclick = () => setStudy(true);
 $('#gvClose').onclick = () => setView('write');

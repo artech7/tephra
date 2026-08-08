@@ -22,6 +22,13 @@ from . import vault
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = int(os.environ.get("TEPHRA_MAX_UPLOAD_MB", "200")) * 1024 * 1024
 
+# Favoriting reuses the tag mechanism -- same trick "study" and "index" already
+# play: it round-trips through frontmatter for free and is already indexed in
+# notes.tags, so pinning favorites to the top costs no schema change. It is
+# stripped back out of every outward-facing tag list so it never shows up as
+# an ordinary, removable tag chip -- the star is its only affordance.
+FAVORITE_TAG = "favorite"
+
 SEEDS = [
     ("Welcome to Tephra", ["start"], """Everything you type saves itself. There is no
 save button anywhere in this app, and there is not going to be one.
@@ -184,6 +191,15 @@ class SuggestIn(BaseModel):
 
 # ── notes ──────────────────────────────────────────────────────────────────
 
+def _note_dict(note: vault.Note) -> dict:
+    """note.to_dict(), with the favorite flag pulled out of the tag list it
+    actually lives in so it never renders as an ordinary tag chip."""
+    d = note.to_dict()
+    d["favorite"] = FAVORITE_TAG in d["tags"]
+    d["tags"] = [t for t in d["tags"] if t != FAVORITE_TAG]
+    return d
+
+
 @app.get("/api/notes")
 def list_notes():
     rows = db().execute(
@@ -197,6 +213,8 @@ def list_notes():
     out = []
     for r in rows:
         tags = [t for t in r["tags"].split(",") if t]
+        favorite = FAVORITE_TAG in tags
+        tags = [t for t in tags if t != FAVORITE_TAG]
         # Derived from tags rather than a new column: the importer and the
         # study toggle both maintain them, and it keeps the list query cheap.
         kind = "index" if "index" in tags else "study" if "study" in tags else "note"
@@ -204,7 +222,7 @@ def list_notes():
             "slug": r["slug"], "title": r["title"], "updated": r["updated"],
             "tags": tags, "backlinks": r["backlinks"],
             "links_out": r["links_out"], "size": r["size"], "kind": kind,
-            "flags": flags.get(r["slug"], 0),
+            "flags": flags.get(r["slug"], 0), "favorite": favorite,
         })
     return out
 
@@ -220,7 +238,7 @@ def get_note(slug: str):
     flagged_qs = [{"id": q["id"], "question": q["question"]}
                   for q in item["quiz"] if q["id"] in flagged]
     return {
-        **note.to_dict(),
+        **_note_dict(note),
         "flags": len(flagged_qs),
         "flagged_questions": flagged_qs,
         "category_history": st.parse_history(note.meta.get(st.HISTORY_KEY)),
@@ -240,7 +258,18 @@ def create_note(payload: NoteIn):
                       body=payload.body or "", tags=payload.tags or [])
     vault.write(note)
     idx.reindex_note(db(), note)
-    return note.to_dict()
+    return _note_dict(note)
+
+
+def _apply_tags(note: vault.Note, tags: list[str]) -> None:
+    """Set note.tags from a client payload, which never carries the favorite
+    tag (it's stripped out on the way out, so the star can be its only
+    affordance) -- so a plain overwrite here would silently unfavorite any
+    note whose other tags get edited. Re-add it if it was there before."""
+    was_favorite = FAVORITE_TAG in note.tags
+    note.tags = tags
+    if was_favorite and FAVORITE_TAG not in note.tags:
+        note.tags = sorted(set(note.tags) | {FAVORITE_TAG})
 
 
 @app.put("/api/notes/{slug}")
@@ -257,18 +286,18 @@ def save_note(slug: str, payload: NoteIn):
             if payload.body is not None:
                 renamed.body = payload.body
             if payload.tags is not None:
-                renamed.tags = payload.tags
+                _apply_tags(renamed, payload.tags)
             vault.write(renamed)
             idx.rebuild(db())          # a retitle can repoint links vault-wide
-            return {**renamed.to_dict(), "renamed_to": renamed.slug}
+            return {**_note_dict(renamed), "renamed_to": renamed.slug}
 
     if payload.body is not None:
         note.body = payload.body
     if payload.tags is not None:
-        note.tags = payload.tags
+        _apply_tags(note, payload.tags)
     vault.write(note)
     idx.reindex_note(db(), note)
-    return note.to_dict()
+    return _note_dict(note)
 
 
 @app.delete("/api/notes/{slug}")
@@ -277,6 +306,19 @@ def delete_note(slug: str):
         raise HTTPException(404, "note not found")
     idx.drop_note(db(), slug)
     return {"ok": True, "trashed": slug}
+
+
+@app.post("/api/notes/{slug}/favorite")
+def toggle_favorite(slug: str):
+    note = vault.read(slug)
+    if not note:
+        raise HTTPException(404, "note not found")
+    on = FAVORITE_TAG not in note.tags
+    note.tags = sorted(set(note.tags) | {FAVORITE_TAG}) if on \
+        else [t for t in note.tags if t != FAVORITE_TAG]
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    return {"slug": slug, "favorite": on}
 
 
 @app.post("/api/notes/{slug}/resolve")

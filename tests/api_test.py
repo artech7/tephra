@@ -314,6 +314,31 @@ with TestClient(app) as c:
     check("tag cloud reflects it",
        "solar" in {t for n in c.get("/api/notes").json() for t in n["tags"]})
 
+    print("\n── favorites ──")
+    fav = c.post("/api/notes", json={"title": "Favorite Me"}).json()
+    check("starts unfavorited", fav["favorite"] is False, fav)
+    check("list agrees", next(n for n in c.get("/api/notes").json()
+                              if n["slug"] == fav["slug"])["favorite"] is False)
+    r = c.post(f"/api/notes/{fav['slug']}/favorite").json()
+    check("toggle turns it on", r["favorite"] is True, r)
+    check("reflected on the note", c.get(f"/api/notes/{fav['slug']}").json()["favorite"] is True)
+    check("reflected in the list", next(n for n in c.get("/api/notes").json()
+                                        if n["slug"] == fav["slug"])["favorite"] is True)
+    check("never leaks into the tag list", "favorite" not in c.get(f"/api/notes/{fav['slug']}").json()["tags"])
+    check("stored as a plain tag on disk (no schema change)",
+       "favorite" in open(f"{VAULT}/notes/{fav['slug']}.md").read())
+    r2 = c.post(f"/api/notes/{fav['slug']}/favorite").json()
+    check("toggling again turns it off", r2["favorite"] is False, r2)
+
+    print("\n── editing other tags never unfavorites a note (the actual bug: PUT .../notes\n"
+          "   overwrites the whole tags array, and 'favorite' is hidden from every client-facing list) ──")
+    c.post(f"/api/notes/{fav['slug']}/favorite")   # back on
+    c.put(f"/api/notes/{fav['slug']}", json={"tags": ["gear"]})
+    after = c.get(f"/api/notes/{fav['slug']}").json()
+    check("favorite survives an unrelated tag edit", after["favorite"] is True, after)
+    check("the new tag still lands", after["tags"] == ["gear"], after["tags"])
+    check("and 'favorite' still never leaks out as a visible tag", "favorite" not in after["tags"])
+
     print("\n── manual study-group creation ──")
     ng = c.post("/api/notes", json={"title": "Freeform Group Note"}).json()["slug"]
     c.put(f"/api/notes/{ng}", json={"body": "Anything goes here."})
