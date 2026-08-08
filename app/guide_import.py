@@ -42,13 +42,37 @@ def root_title_for(filename: str, title: str | None = None) -> str:
     return (title or "").strip() or _title_from_filename(filename) or DEFAULT_ROOT_NOTE
 
 
+def _linked_titles(body: str) -> list[str]:
+    """Titles a generated index note already links to, read back out of its
+    own bullet list so a second guide can add to it rather than replace it."""
+    return re.findall(r"^- \[\[(.+?)\]\]", body, flags=re.M)
+
+
 def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
                 title: str | None = None) -> dict:
-    """Idempotent. Re-running updates notes in place and never clobbers a
-    category the user corrected by hand.
+    """Merges into the vault -- never overwrites a note it doesn't own.
 
-    Parsing is delegated by file type; everything below this line works on the
-    one normalised topic shape, so a new format needs no changes here.
+    A title (or id) match only updates an existing note when that note was
+    itself produced by a previous run of *this same guide* (tracked in
+    meta["import_of"]/meta["source_id"]/meta["import_title"]). Any other
+    title match -- a hand-written note, or one that came from a *different*
+    guide -- is a real collision: the incoming topic is kept under a
+    disambiguated title instead of clobbering it, and reported back so the
+    caller can tell the user.
+
+    Re-running the same guide stays idempotent even when that first run had
+    to disambiguate: matching is keyed on (root note, the topic's *own*
+    title as the source states it), not on whatever display title a past
+    collision produced, so a re-import finds its own note again instead of
+    piling up another one next to it. A category rename the user made by
+    hand still sticks.
+
+    Category and root index notes are pure navigation stubs this importer
+    owns outright, so two guides that happen to share a category name merge
+    onto one page instead of one replacing the other's links.
+
+    Parsing is delegated by file type; everything below this line works on
+    the one normalised topic shape, so a new format needs no changes here.
     """
     from . import importers
     topics = importers.parse(filename, source)
@@ -56,15 +80,48 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     vault.ensure_dirs()
     existing = {n.slug: n for n in vault.all_notes()}
     title_to_slug = {n.title.strip().lower(): n.slug for n in existing.values()}
+    id_to_slug = {n.meta.get("source_id"): n.slug for n in existing.values()
+                  if n.meta.get("source_id")}
+    # Notes this importer owns, keyed by the guide that made them and the
+    # topic's own (un-suffixed) title -- stable across whatever disambiguated
+    # display title a collision may have forced onto the note itself.
+    owned_by_key = {
+        (n.meta["import_of"], (n.meta.get("import_title") or n.title).strip().lower()): n.slug
+        for n in existing.values() if n.meta.get("import_of")
+    }
+    # Notes this importer owns and can safely regenerate outright: index
+    # pages, keyed by their current (possibly already-disambiguated) title.
+    owned_index_slug = {
+        n.title.strip().lower(): n.slug
+        for n in existing.values() if n.meta.get("study_index") == "true"
+    }
 
     created = updated = preserved = 0
+    collisions: list[str] = []
     by_category: dict[str, list[str]] = {}
 
     for t in topics:
-        title = t["title"]
+        title_ = t["title"]
         category = t["category"]
-        slug = title_to_slug.get(title.lower()) or vault.unique_slug(title)
-        prior = existing.get(slug)
+
+        match_slug = None
+        if t.get("id"):
+            cand = id_to_slug.get(t["id"])
+            if cand and existing[cand].meta.get("import_of") == root_note:
+                match_slug = cand
+        if match_slug is None:
+            match_slug = owned_by_key.get((root_note, title_.strip().lower()))
+        prior = existing.get(match_slug) if match_slug else None
+
+        collide_slug = title_to_slug.get(title_.lower())
+        needs_suffix = collide_slug is not None and collide_slug != match_slug
+        if needs_suffix:
+            if prior is None:
+                collisions.append(title_)
+            display_title = f"{title_} ({root_note})"
+        else:
+            display_title = title_
+        slug = match_slug or vault.unique_slug(display_title)
 
         qitems = t["quiz"]
         body = t["answer"]
@@ -76,6 +133,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
             "category": category,
             "category_source": "import",
             "question": t["question"],
+            "import_of": root_note,
+            "import_title": title_,
         }
         if t.get("id"):
             meta["source_id"] = t["id"]
@@ -85,28 +144,66 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
             preserved += 1
 
         note = vault.Note(
-            slug=slug, title=title, body=body,
+            slug=slug, title=display_title, body=body,
             tags=sorted({"study", tag_for(category)} | set(prior.tags if prior else [])),
             created=prior.created if prior else "",
             meta={**(prior.meta if prior else {}), **meta},
         )
-        by_category.setdefault(meta["category"], []).append(title)
+        by_category.setdefault(meta["category"], []).append(display_title)
         if not dry_run:
             vault.write(note)
         updated += 1 if prior else 0
         created += 0 if prior else 1
 
-    # Category indexes and a root note: this is what turns flat topics into a
-    # navigable wiki, and it is what the graph view renders.
+    # Category indexes: shared, importer-owned navigation pages. A plain
+    # category name already taken by a note we don't own is a real
+    # collision; one we do own gets its topic list unioned, not replaced.
+    category_title: dict[str, str] = {}
     for category, titles in sorted(by_category.items()):
-        slug = title_to_slug.get(category.lower()) or vault.unique_slug(category)
-        lines = [f"Study topics in **{category}**. Part of [[{root_note}]].", ""]
-        lines += [f"- [[{t}]]" for t in sorted(titles)]
+        cslug = (owned_index_slug.get(category.lower())
+                 or owned_index_slug.get(f"{category} ({root_note})".lower()))
+        cprior = existing.get(cslug) if cslug else None
+        collide_slug = title_to_slug.get(category.lower())
+        if cprior is None and collide_slug is not None and collide_slug != cslug:
+            collisions.append(category)
+            cat_title = f"{category} ({root_note})"
+            cslug = vault.unique_slug(cat_title)
+        elif cprior is not None:
+            cat_title = cprior.title
+        else:
+            cat_title = category
+            cslug = vault.unique_slug(category)
+        category_title[category] = cat_title
+
+        linked = set(_linked_titles(cprior.body)) if cprior else set()
+        all_titles = sorted(set(titles) | linked)
+        roots = sorted(set(cprior.meta.get("import_roots") or []) | {root_note}) if cprior else [root_note]
+
+        lines = [f"Study topics in **{cat_title}**. Part of "
+                 + ", ".join(f"[[{r}]]" for r in roots) + ".", ""]
+        lines += [f"- [[{t}]]" for t in all_titles]
         if not dry_run:
             vault.write(vault.Note(
-                slug=slug, title=category, body="\n".join(lines),
+                slug=cslug, title=cat_title, body="\n".join(lines),
                 tags=["study", "index"],
-                meta={"study": "false", "study_index": "true"}))
+                meta={"study": "false", "study_index": "true", "import_roots": roots}))
+
+    # Root note: one per guide, keyed by its own title, so two different
+    # guides never contend for it -- only a re-import of the same guide, or a
+    # hand-written note with the exact same title, can match here.
+    rslug = (owned_index_slug.get(root_note.lower())
+             or owned_index_slug.get(f"{root_note} (import)".lower()))
+    rprior = existing.get(rslug) if rslug else None
+    rcollide_slug = title_to_slug.get(root_note.lower())
+    if rprior is None and rcollide_slug is not None and rcollide_slug != rslug:
+        collisions.append(root_note)
+        root_title = f"{root_note} (import)"
+        rslug = vault.unique_slug(root_title)
+    elif rprior is not None:
+        root_title = rprior.title
+    else:
+        root_title = root_note
+        rslug = vault.unique_slug(root_note)
 
     root = [
         "Interactive study guide imported from the standalone app. "
@@ -114,12 +211,11 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         "", "## Categories", "",
     ]
     for category, titles in sorted(by_category.items()):
-        root.append(f"- [[{category}]] — {len(titles)} "
+        root.append(f"- [[{category_title[category]}]] — {len(titles)} "
                     f"topic{'s' if len(titles) != 1 else ''}")
     if not dry_run:
-        slug = title_to_slug.get(root_note.lower()) or vault.unique_slug(root_note)
         vault.write(vault.Note(
-            slug=slug, title=root_note, body="\n".join(root),
+            slug=rslug, title=root_title, body="\n".join(root),
             tags=["study", "index"], meta={"study": "false", "study_index": "true"}))
 
     return {
@@ -131,5 +227,6 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         "categories": len(by_category),
         "notes_total": created + updated + len(by_category) + 1,
         "manual_overrides_kept": preserved,
+        "collisions": collisions,
         "dry_run": dry_run,
     }

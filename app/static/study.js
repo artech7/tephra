@@ -655,7 +655,11 @@
     fd.append('file', file);
     try {
       const r = await api('/study/import', { method: 'POST', body: fd });
-      toast(`Imported ${r.topics} topics, ${r.questions} questions, ${r.categories} categories`);
+      let msg = `Imported ${r.topics} topics, ${r.questions} questions, ${r.categories} categories`;
+      if (r.collisions && r.collisions.length) {
+        msg += ` — ${r.collisions.length} matched an existing note by title and were kept separate`;
+      }
+      toast(msg, r.collisions && r.collisions.length ? 8000 : undefined);
       await refreshAll();
       if (window.tephraReloadList) window.tephraReloadList();
     } catch (e) {
