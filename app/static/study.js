@@ -583,7 +583,7 @@
     const drop = el('div', 'sv-drop');
     drop.innerHTML = `<span class="sv-drop-t">Import study guide</span>
       <span class="sv-drop-s">Click to choose, or drop a
-        <code>.json</code> <code>.py</code> <code>.csv</code> file</span>`;
+        <code>.json</code> <code>.py</code> <code>.csv</code> <code>.md</code> file</span>`;
     drop.onclick = () => pickFile(drop);
     wireDrop(drop);
     wrap.appendChild(drop);

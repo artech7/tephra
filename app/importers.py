@@ -279,6 +279,32 @@ def parse_csv(source: str) -> list[dict]:
     return topics
 
 
+def parse_markdown(source: str) -> list[dict]:
+    """A single hand-written Tephra note, in its own on-disk shape: YAML-ish
+    frontmatter plus a body with an optional `## Quiz` section.
+
+    One file is one topic -- for many topics in one upload, use JSON, Python
+    or CSV instead. Reuses vault's frontmatter parser and study's quiz parser
+    rather than re-implementing either, so a note round-trips through import
+    exactly as the app itself would read it off disk.
+    """
+    from . import study as _study
+    from . import vault as _vault
+    meta, body = _vault.parse(source)
+    title = str(meta.get("title") or "").strip()
+    if not title:
+        raise ImportError_("markdown note needs a `title:` field in its frontmatter")
+    prose, quiz_section = _study.split_quiz(body)
+    return [{
+        "id": str(meta.get("id") or "").strip(),
+        "title": title,
+        "category": str(meta.get("category") or "Uncategorised").strip() or "Uncategorised",
+        "question": str(meta.get("question") or "").strip(),
+        "answer": prose.strip(),
+        "quiz": _study.parse_quiz(quiz_section),
+    }]
+
+
 FORMATS = [
     {
         "id": "python", "label": "Python", "extensions": [".py"],
@@ -317,9 +343,11 @@ FORMATS = [
     },
     {
         "id": "markdown", "label": "Markdown", "extensions": [".md"],
-        "summary": "Tephra's own format. No import needed — drop files straight into "
-                   "vault/notes/ and reindex.",
-        "example": "---\ntitle: RAID levels\nstudy: true\ncategory: Storage\n"
+        "summary": "Tephra's own note shape: frontmatter plus a body, with an optional "
+                   "`## Quiz` section. One file is one topic — for many topics at once "
+                   "use JSON, Python or CSV instead. You can also skip the importer "
+                   "and drop the file straight into vault/notes/, then reindex.",
+        "example": "---\ntitle: RAID levels\ncategory: Storage\n"
                    "question: What are the common RAID levels?\n---\n\n"
                    "**RAID 0** stripes...\n\n## Quiz\n\n"
                    "Q: Which level has no redundancy?\n- [x] RAID 0\n- RAID 1\n"
@@ -327,8 +355,9 @@ FORMATS = [
     },
 ]
 
-PARSERS = {".py": parse_python, ".json": parse_json, ".csv": parse_csv, ".tsv": parse_csv}
-ACCEPTED = sorted(PARSERS) + [".md"]
+PARSERS = {".py": parse_python, ".json": parse_json, ".csv": parse_csv, ".tsv": parse_csv,
+           ".md": parse_markdown}
+ACCEPTED = sorted(PARSERS)
 
 
 def parse(filename: str, source: str) -> list[dict]:
