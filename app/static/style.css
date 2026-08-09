@@ -432,6 +432,18 @@ body[data-wall="aurora"] .newnote:hover{
   transform:translateX(calc(100% + var(--inset) + 14px));
   transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
 #theme.on{transform:translateX(0)}
+
+/* ══ VAULT HEALTH DRAWER ═════════════════════════════════════
+   Same right-edge slide-in as Appearance and Vaults, just wider -- the
+   duplicate list needs room for two titles, a delta and a delete action
+   per row that Appearance's narrow settings column was never meant to fit. */
+#health{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:380px;border-radius:var(--radius);
+  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
+  border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 46px 100px -34px rgba(0,0,0,.85);
+  transform:translateX(calc(100% + var(--inset) + 14px));
+  transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
+#health.on{transform:translateX(0)}
+
 .th-head{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
 .th-head h4{font-size:15px;font-weight:600;letter-spacing:-.02em}
 .th-body{overflow-y:auto;padding:4px 18px 20px}
@@ -853,6 +865,7 @@ input.sv-select{cursor:text}
 #vaults.on{transform:translateX(0)}
 .th-input{width:100%;font:inherit;font-size:12.5px;color:var(--paper);padding:8px 10px;
   border-radius:9px;background:rgba(0,0,0,.34);border:1px solid var(--edge);outline:none}
+#dupFilter{margin-top:9px}
 .th-input:focus{border-color:rgba(var(--acc),.55)}
 .th-input::placeholder{color:var(--faint)}
 .th-row{display:flex;gap:7px;margin-top:9px}
@@ -957,12 +970,27 @@ input.sv-select{cursor:text}
 .dc-part:disabled{cursor:default;color:var(--faint)}
 .dc-sep{color:var(--faint);font-size:10px}
 
-/* ── duplicate-notes report, in Vault Health ── */
-.duprow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--edge);font-size:11.5px;color:var(--faint)}
-.duprow:first-of-type{border-top:0}
-.duprow .dc-part{font-size:10.5px;letter-spacing:.04em;text-transform:none;color:var(--muted)}
-.duprow .dc-part:hover{color:#fff}
-.dupscore{margin-left:auto;font-family:var(--mono);font-size:10px;color:rgb(var(--apricot));flex:none}
+/* ── duplicate-notes report, in Vault Health ──
+   One card per pair rather than the old two-titles-and-an-arrow row: each
+   note is its own line (title truncates instead of wrapping), the more
+   recently edited one is marked NEWER, and each gets its own delete
+   action. quickDelete() gives every .dup-del the same arm-then-confirm
+   click twice pattern the note editor's own Delete button uses. */
+#dupList{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.dup-pair{padding:9px 10px;border-radius:11px;background:rgba(255,255,255,.045);border:1px solid var(--edge)}
+.dup-pct{font-family:var(--mono);font-size:10px;color:rgb(var(--apricot));margin-bottom:6px}
+.dup-note{display:flex;align-items:center;gap:6px;padding:3px 0}
+.dup-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:inherit;font-size:12px;text-align:left;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;transition:.2s var(--ease)}
+.dup-title:hover{color:#fff;text-decoration:underline}
+.dup-when{flex:none;font-family:var(--mono);font-size:9px;color:var(--faint)}
+.dup-badge{flex:none;font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;padding:1px 5px;border-radius:4px;
+  background:rgba(var(--acc),.18);border:1px solid rgba(var(--acc),.4);color:var(--accent)}
+.dup-del{flex:none;width:20px;height:20px;border-radius:6px;border:1px solid var(--edge);background:rgba(255,255,255,.05);
+  color:var(--faint);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s var(--ease)}
+.dup-del:hover{color:#fff;border-color:rgba(255,110,110,.5);background:rgba(255,110,110,.16)}
+.dup-del.armed{color:#fff;background:rgba(255,80,80,.55);border-color:rgba(255,80,80,.7)}
+.dup-del svg{width:11px;height:11px}
 
 /* topbar crumb now names the vault */
 #vaultCrumb{cursor:pointer;transition:color .2s var(--ease)}

@@ -254,6 +254,8 @@ function allTags() {
 // button, kept as one literal so the two read as the same control.
 const STAR_SVG = '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">'
   + '<path d="M12 3.4l2.65 5.53 6.02.73-4.42 4.16 1.18 5.94L12 16.9l-5.43 2.86 1.18-5.94-4.42-4.16 6.02-.73z"/></svg>';
+const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  + '<path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0v12a1 1 0 001 1h8a1 1 0 001-1V7"/></svg>';
 
 async function toggleFavorite(slug) {
   const row = state.notes.find((n) => n.slug === slug);
@@ -708,6 +710,37 @@ function renderDocCrumb(note) {
   });
 }
 
+// Shared by the note editor's own Delete chip and the duplicate-list delete
+// buttons: move a note to trash, refresh the derived state, and -- only if
+// the note deleted was the one on screen -- navigate away from it. Deleting
+// some other note from the duplicate list should never yank the editor out
+// from under whatever the user was actually looking at.
+async function deleteNoteBySlug(slug, title) {
+  try {
+    await api('/notes/' + encodeURIComponent(slug), { method: 'DELETE' });
+  } catch {
+    toast('Could not delete that');
+    return false;
+  }
+  const wasOpen = state.slug === slug;
+  if (wasOpen) state.dirty = false;          // don't autosave a deleted note
+  toast(`Moved “${title}” to the vault trash`);
+  await loadList();
+  await loadGraph();
+  if (wasOpen) {
+    const next = state.notes.find((n) => n.slug !== slug);
+    if (next) await openNote(next.slug);
+    else {
+      state.slug = null; state.note = null;
+      $('#noteTitle').value = '';
+      $('#docCrumb').hidden = true;
+      $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
+    }
+  }
+  window.tephraStudy?.refresh();
+  return true;
+}
+
 function renderDeleteButton() {
   const host = $('#deleteChip');
   if (!host) return;
@@ -730,26 +763,7 @@ function renderDeleteButton() {
       return;
     }
     disarm();
-    const gone = state.slug, title = state.note?.title || gone;
-    try {
-      await api('/notes/' + encodeURIComponent(gone), { method: 'DELETE' });
-    } catch {
-      toast('Could not delete that');
-      return;
-    }
-    state.dirty = false;                     // don't autosave a deleted note
-    toast(`Moved “${title}” to the vault trash`);
-    await loadList();
-    await loadGraph();
-    const next = state.notes.find((n) => n.slug !== gone);
-    if (next) await openNote(next.slug);
-    else {
-      state.slug = null; state.note = null;
-      $('#noteTitle').value = '';
-      $('#docCrumb').hidden = true;
-      $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
-    }
-    window.tephraStudy?.refresh();
+    await deleteNoteBySlug(state.slug, state.note?.title || state.slug);
   };
   host.appendChild(b);
 }
@@ -1777,6 +1791,7 @@ addEventListener('keydown', (e) => {
     // Graph on the way past.
     if (window.tephraStudy?.isOpen()) return setStudy(false);
     if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
+    if ($('#health').classList.contains('on')) return $('#health').classList.remove('on');
     if ($('#theme').classList.contains('on')) return $('#theme').classList.remove('on');
     setView('write');
   }
@@ -1789,7 +1804,8 @@ addEventListener('keydown', (e) => {
   }
   if (e.altKey && k === 'g') { e.preventDefault(); setView('graph'); }
   if (e.altKey && k === 'd') { e.preventDefault(); setView('study'); }
-  if (e.altKey && k === 't') { e.preventDefault(); $('#theme').classList.toggle('on'); }
+  if (e.altKey && k === 't') { e.preventDefault(); $('#themeBtn').click(); }
+  if (e.altKey && k === 'h') { e.preventDefault(); $('#healthBtn').click(); }
   if (e.altKey && k === 'v') { e.preventDefault(); $('#vaultBtn').click(); }
   if (e.altKey && k === 'n') { e.preventDefault(); $('#newNote').click(); }
 });
@@ -1803,8 +1819,16 @@ $('#newNote').onclick = async () => {
 };
 
 /* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
-$('#themeBtn').onclick = () => $('#theme').classList.toggle('on');
+$('#themeBtn').onclick = () => {
+  const on = $('#theme').classList.toggle('on');
+  if (on) { $('#health').classList.remove('on'); vaultsEl().classList.remove('on'); }
+};
 $('#themeClose').onclick = () => $('#theme').classList.remove('on');
+$('#healthBtn').onclick = () => {
+  const on = $('#health').classList.toggle('on');
+  if (on) { $('#theme').classList.remove('on'); vaultsEl().classList.remove('on'); }
+};
+$('#healthClose').onclick = () => $('#health').classList.remove('on');
 document.querySelectorAll('.wallopt[data-wall]').forEach((o) => (o.onclick = () => {
   const patch = { wall: o.dataset.wall };
   if (T.auto && o.dataset.acc) patch.acc = o.dataset.acc;
@@ -1973,6 +1997,7 @@ $('#vaultCrumb').onclick = () => $('#vaultBtn').click();
 $('#vaultBtn').onclick = () => {
   vaultsEl().classList.toggle('on');
   $('#theme').classList.remove('on');
+  $('#health').classList.remove('on');
   if (vaultsEl().classList.contains('on')) showVaultHome();
 };
 $('#vaultClose').onclick = () => vaultsEl().classList.remove('on');
@@ -2200,44 +2225,99 @@ $('#btnReindex').onclick = async () => {
   } catch { out.textContent = 'Reindex failed.'; }
 };
 
+// One note-line within a duplicate-pair card: title (click to open), how
+// long ago it was edited, a NEWER badge on whichever of the pair is more
+// recent, and a delete button using the same arm-then-confirm click-twice
+// pattern as the note editor's own Delete chip (see deleteNoteBySlug).
+function dupNoteRow(slug, title, updatedIso, isNewer) {
+  const row = document.createElement('div');
+  row.className = 'dup-note';
+  row.dataset.slug = slug;
+
+  const t = document.createElement('button');
+  t.className = 'dup-title'; t.textContent = title; t.title = 'Open ' + title;
+  t.onclick = () => openNote(slug);
+  row.appendChild(t);
+
+  if (isNewer) {
+    const badge = document.createElement('span');
+    badge.className = 'dup-badge'; badge.textContent = 'NEWER';
+    row.appendChild(badge);
+  }
+
+  const when = document.createElement('span');
+  when.className = 'dup-when'; when.textContent = fmtAgo(updatedIso);
+  row.appendChild(when);
+
+  const del = document.createElement('button');
+  del.className = 'dup-del'; del.title = 'Delete this note'; del.innerHTML = TRASH_SVG;
+  let armed = false, timer = null;
+  const disarm = () => { armed = false; del.classList.remove('armed'); del.title = 'Delete this note'; };
+  del.onclick = async (e) => {
+    e.stopPropagation();
+    if (!armed) {
+      armed = true; del.classList.add('armed'); del.title = 'Click again to delete';
+      timer = setTimeout(disarm, 4000);
+      return;
+    }
+    clearTimeout(timer); disarm();
+    if (!(await deleteNoteBySlug(slug, title))) return;
+    // The deleted note may appear in more than one pair -- drop every card
+    // that mentions it, not just the one clicked, so nothing stale is left
+    // pointing at a note that's now in the trash.
+    [...$('#dupList').querySelectorAll('.dup-note')]
+      .filter((n) => n.dataset.slug === slug)
+      .forEach((n) => n.closest('.dup-pair')?.remove());
+    updateDupCount();
+  };
+  row.appendChild(del);
+  return row;
+}
+
+function updateDupCount() {
+  const left = $('#dupList').children.length;
+  $('#dupFilter').hidden = left === 0;
+  if (left === 0) { $('#dupResult').textContent = 'No near-duplicate notes left.'; return; }
+  const shown = [...$('#dupList').children].filter((el) => el.style.display !== 'none').length;
+  $('#dupResult').textContent = shown === left
+    ? `${left} possible duplicate pair${left === 1 ? '' : 's'}.`
+    : `${shown} of ${left} possible duplicate pairs (filtered).`;
+}
+
+$('#dupFilter').oninput = (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  for (const card of $('#dupList').children) {
+    card.style.display = !q || card.textContent.toLowerCase().includes(q) ? '' : 'none';
+  }
+  updateDupCount();
+};
+
 $('#dupRun').onclick = async () => {
-  const out = $('#dupResult');
+  const out = $('#dupResult'), list = $('#dupList');
   // O(n^2) over every note's content -- on a vault of ~100 notes this is
   // real seconds, not instant, and a static "Scanning…" is indistinguishable
   // from hung. A running clock at least proves it's still alive.
   const startedAt = Date.now();
+  list.innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
   out.textContent = 'Scanning… 0s';
   const tick = setInterval(() => {
     out.textContent = `Scanning… ${Math.round((Date.now() - startedAt) / 1000)}s`;
   }, 1000);
   try {
     const { pairs } = await api('/duplicates');
-    out.innerHTML = '';
     if (!pairs.length) { out.textContent = 'No near-duplicate notes found.'; return; }
-    const head = document.createElement('div');
-    head.innerHTML = `<b>${pairs.length}</b> possible duplicate pair${pairs.length === 1 ? '' : 's'}:`;
-    out.appendChild(head);
-    for (const p of pairs.slice(0, 30)) {
-      const row = document.createElement('div');
-      row.className = 'duprow';
-      const a = document.createElement('button');
-      a.className = 'dc-part'; a.textContent = p.a_title; a.title = 'Open ' + p.a_title;
-      a.onclick = () => openNote(p.a_slug);
-      const b = document.createElement('button');
-      b.className = 'dc-part'; b.textContent = p.b_title; b.title = 'Open ' + p.b_title;
-      b.onclick = () => openNote(p.b_slug);
-      const pct = document.createElement('span');
-      pct.className = 'dupscore';
-      pct.textContent = Math.round(p.similarity * 100) + '%';
-      row.append(a, document.createTextNode(' ↔ '), b, pct);
-      out.appendChild(row);
+    for (const p of pairs) {
+      const card = document.createElement('div');
+      card.className = 'dup-pair';
+      const pct = document.createElement('div');
+      pct.className = 'dup-pct'; pct.textContent = Math.round(p.similarity * 100) + '% similar';
+      card.appendChild(pct);
+      const aNewer = (p.a_updated || '') > (p.b_updated || '');
+      card.appendChild(dupNoteRow(p.a_slug, p.a_title, p.a_updated, aNewer));
+      card.appendChild(dupNoteRow(p.b_slug, p.b_title, p.b_updated, !aNewer));
+      list.appendChild(card);
     }
-    if (pairs.length > 30) {
-      const more = document.createElement('div');
-      more.className = 'th-note';
-      more.textContent = `+ ${pairs.length - 30} more, closest shown first.`;
-      out.appendChild(more);
-    }
+    updateDupCount();
   } catch { out.textContent = 'Could not scan for duplicates.'; }
   finally { clearInterval(tick); }
 };

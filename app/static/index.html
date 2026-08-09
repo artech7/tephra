@@ -50,6 +50,10 @@
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
     </button>
+    <button class="iconbtn" id="healthBtn" title="Vault Health (⌥H)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-8 4 16 2-8h6"/></svg>
+    </button>
     <button class="iconbtn" id="themeBtn" title="Appearance (⌥T)">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 000-9 4.5 4.5 0 010-9z"/></svg>
     </button>
@@ -347,23 +351,37 @@
     <div class="th-sect">
       <button class="th-reset" id="thReset">Reset to defaults</button>
     </div>
+  </div>
+</aside>
 
+<aside id="health">
+  <div class="th-head"><h4>Vault Health</h4><button class="mini" id="healthClose">×</button></div>
+  <div class="th-body">
     <div class="th-sect">
-      <div class="th-l"><span>Vault Health</span></div>
+      <div class="th-l"><span>Links</span></div>
       <div id="auditResult" class="th-note">Not checked yet.</div>
       <div class="th-row">
         <button class="sv-btn" id="auditRun">Check links</button>
         <button class="sv-btn primary" id="repairRun" disabled>Repair</button>
       </div>
+      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown.</div>
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Index</span></div>
       <div class="th-row">
         <button class="sv-btn" id="btnReindex">Rebuild index</button>
       </div>
-      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown. Rebuild index if the note count ever looks wrong.</div>
+      <div class="th-note">Rebuild if the note count ever looks wrong — the index is derived and disposable, nothing on disk depends on it.</div>
+    </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Duplicates</span></div>
       <div id="dupResult" class="th-note">Duplicates not checked yet.</div>
       <div class="th-row">
         <button class="sv-btn" id="dupRun">Find duplicate notes</button>
       </div>
-      <div class="th-note">Compares every note's content and lists pairs that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Nothing is deleted automatically; open either note and use Delete.</div>
+      <input type="text" id="dupFilter" class="th-input" placeholder="Filter by title…" hidden>
+      <div id="dupList"></div>
+      <div class="th-note">Compares every note's content and lists pairs that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Delete either note right here; nothing happens automatically.</div>
     </div>
   </div>
 </aside>

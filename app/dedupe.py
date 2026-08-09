@@ -101,16 +101,17 @@ def scan_notes(notes: list) -> list[dict]:
     already makes); the length pre-filter in similarity() keeps the
     obviously-unrelated majority of pairs cheap.
     """
-    texts = [(n.slug, n.title, content_text(n.title, n.meta.get("question"), n.body))
+    texts = [(n.slug, n.title, n.updated,
+              content_text(n.title, n.meta.get("question"), n.body))
              for n in notes]
     out = []
     for i in range(len(texts)):
-        slug_a, title_a, text_a = texts[i]
-        for slug_b, title_b, text_b in texts[i + 1:]:
+        slug_a, title_a, updated_a, text_a = texts[i]
+        for slug_b, title_b, updated_b, text_b in texts[i + 1:]:
             r = similarity(text_a, text_b)
             if r >= REPORT_THRESHOLD:
-                out.append({"a_slug": slug_a, "a_title": title_a,
-                           "b_slug": slug_b, "b_title": title_b,
+                out.append({"a_slug": slug_a, "a_title": title_a, "a_updated": updated_a,
+                           "b_slug": slug_b, "b_title": title_b, "b_updated": updated_b,
                            "similarity": round(r, 3)})
     out.sort(key=lambda d: -d["similarity"])
     return out

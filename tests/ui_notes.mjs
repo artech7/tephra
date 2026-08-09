@@ -14,7 +14,14 @@ let notes = [
 ];
 let theme = {}, deleted = [];
 const dupPairs = [
-  { a_slug: 'zeta', a_title: 'Zeta note', b_slug: 'alpha', b_title: 'Alpha note', similarity: 0.962 },
+  { a_slug: 'zeta', a_title: 'Zeta note', a_updated: '2026-07-01T00:00:00Z',
+    b_slug: 'alpha', b_title: 'Alpha note', b_updated: '2026-07-29T00:00:00Z', similarity: 0.962 },
+  // Deliberately not in `notes` -- exists only so the delete test below can
+  // exercise a real DELETE round trip without touching the zeta/alpha/mid
+  // fixture the rest of this file's narrative (favorites, tag editing, the
+  // final "delete everything" pass) depends on staying intact.
+  { a_slug: 'dup-x', a_title: 'Scratch dup X', a_updated: '2026-06-01T00:00:00Z',
+    b_slug: 'dup-y', b_title: 'Scratch dup Y', b_updated: '2026-06-02T00:00:00Z', similarity: 0.911 },
 ];
 const calls = [];
 window.fetch = async (u, o = {}) => {
@@ -62,7 +69,8 @@ console.log('── every control app.js wires exists in the markup ──');
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
                '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
                '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
-               '#btnReindex', '#themeBtn', '#newNote', '#openPalette', '#favBtn', '#dupRun'];
+               '#btnReindex', '#themeBtn', '#healthBtn', '#healthClose', '#newNote',
+               '#openPalette', '#favBtn', '#dupRun', '#dupFilter'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
 
@@ -95,16 +103,37 @@ console.log('\n── vault health: find duplicate notes ──');
 doc.querySelector('#dupRun').onclick();
 await new Promise((r) => setTimeout(r, 20));
 ck('hit the duplicates endpoint', calls.some((c) => c.p.endsWith('/api/duplicates')));
-const dupOut = doc.querySelector('#dupResult');
-ck('reports the pair count', dupOut.textContent.includes('1'), dupOut.textContent);
-const dupRow = dupOut.querySelector('.duprow');
-ck('renders a row with both titles and the score',
-   !!dupRow && dupRow.textContent.includes('Zeta note') && dupRow.textContent.includes('Alpha note')
-   && dupRow.textContent.includes('96%'), dupRow && dupRow.textContent);
-const dupLink = [...dupOut.querySelectorAll('.dc-part')].find((b) => b.textContent === 'Alpha note');
+const dupResult = doc.querySelector('#dupResult');
+ck('reports the pair count', dupResult.textContent.includes('2'), dupResult.textContent);
+const dupList = doc.querySelector('#dupList');
+const dupCard = dupList.querySelector('.dup-pair');
+ck('renders a card with both titles and the score',
+   !!dupCard && dupCard.textContent.includes('Zeta note') && dupCard.textContent.includes('Alpha note')
+   && dupCard.textContent.includes('96%'), dupCard && dupCard.textContent);
+ck('the more recently edited note of the pair is marked NEWER',
+   !!dupCard.querySelector('.dup-note[data-slug="alpha"] .dup-badge')
+   && !dupCard.querySelector('.dup-note[data-slug="zeta"] .dup-badge'), dupCard.innerHTML);
+const dupLink = [...dupList.querySelectorAll('.dup-title')].find((b) => b.textContent === 'Alpha note');
 dupLink.onclick();
 await new Promise((r) => setTimeout(r, 20));
 ck('clicking a title in the report opens that note', doc.querySelector('#noteTitle').value === 'Alpha note');
+
+console.log('\n── vault health: delete straight from the duplicate list ──');
+const scratchDel = dupList.querySelector('.dup-note[data-slug="dup-x"] .dup-del');
+scratchDel.onclick({ stopPropagation() {} });
+ck('first click only arms it, nothing sent yet', !calls.some((c) => c.m === 'DELETE'));
+scratchDel.onclick({ stopPropagation() {} });
+await new Promise((r) => setTimeout(r, 20));
+ck('second click actually deletes', calls.some((c) => c.m === 'DELETE' && c.p.endsWith('/dup-x')));
+ck('the whole pair card is gone, not just the deleted note\'s row',
+   dupList.querySelectorAll('.dup-pair').length === 1);
+ck('the unrelated zeta/alpha pair is untouched',
+   !!dupList.querySelector('.dup-note[data-slug="zeta"]'), dupList.innerHTML);
+ck('result count updates to reflect one pair left', dupResult.textContent.includes('1'), dupResult.textContent);
+// Reset shared fixture state this test borrowed -- deleted/calls are
+// asserted by count (not just presence) further down, for the *next*
+// deletion this file does (via the note editor's own Delete chip).
+deleted.length = 0;
 
 console.log('\n── favorites float to the top, under any sort ──');
 setSort('updated');
