@@ -70,6 +70,7 @@ const WALLS = {
   slate: 'linear-gradient(150deg,#0E1C26 0%,#22384A 38%,#415C6E 72%,#16242E 100%)',
   ember: 'linear-gradient(150deg,#180B07 0%,#4E2317 40%,#9A4E2C 74%,#251009 100%)',
   bloom: 'linear-gradient(150deg,#1E0B26 0%,#4C1D46 40%,#8E3A62 72%,#25102A 100%)',
+  night: 'linear-gradient(160deg,#03050C 0%,#0A1130 35%,#161A45 65%,#050614 100%)',
 };
 
 const hex = (r) => '#' + r.split(',').map((n) => (+n).toString(16).padStart(2, '0')).join('');
@@ -147,6 +148,7 @@ function applyTheme() {
   $('#autoAcc').toggleAttribute('data-on', !!T.auto);
 
   const isAurora = T.wall === 'aurora';
+  document.body.dataset.wall = T.wall;
   $('#aurora').style.display = isAurora ? 'block' : 'none';
   $('#wall').style.display = isAurora ? 'none' : 'block';
   if (T.wall === 'custom' && T.wallUrl) $('#wall').style.backgroundImage = `url('${T.wallUrl}')`;
@@ -353,15 +355,20 @@ function renderList() {
   }
 }
 
-// A small glare that follows the cursor along whichever note row it's over
-// -- delegated on the list rather than per-row, so it survives renderList()
-// rebuilding the rows and never runs more than one row at a time.
+// A small glare + parallax shift that follows the cursor along whichever
+// note row it's over -- delegated on the list rather than per-row, so it
+// survives renderList() rebuilding the rows and never runs more than one
+// row at a time. The CSS only ever reads these custom properties inside
+// :hover, so a row keeps whatever value it was last given, but that's
+// harmless -- it stops being visible the instant the pointer leaves.
 if (!reduce) {
   $('#noteList').addEventListener('mousemove', (e) => {
     const row = e.target.closest('.node');
     if (!row) return;
     const r = row.getBoundingClientRect();
-    row.style.setProperty('--node-mx', (((e.clientX - r.left) / (r.width || 1)) * 100).toFixed(1) + '%');
+    const frac = (e.clientX - r.left) / (r.width || 1); // 0..1 across the row
+    row.style.setProperty('--node-mx', (frac * 100).toFixed(1) + '%');
+    row.style.setProperty('--node-shift', (frac - 0.5).toFixed(3));
   });
 }
 

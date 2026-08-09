@@ -76,6 +76,45 @@ body{background:#050C0E;color:var(--paper);font-family:var(--display);font-size:
 /* ── wallpaper stack: siblings of the shell, never ancestors ── */
 #aurora{position:fixed;inset:-12%;width:124%;height:124%;filter:blur(72px) saturate(140%);z-index:0}
 #wall{position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;display:none}
+/* Night sky: two star layers, each a fixed scatter of soft dots, twinkling
+   out of phase (one layer's animation starts half a cycle in) so the field
+   shimmers rather than blinking in unison. Lives on #wall itself, so it
+   only ever renders under the night wallpaper. */
+body[data-wall="night"] #wall::before,
+body[data-wall="night"] #wall::after{
+  content:'';position:absolute;inset:0;pointer-events:none;background-repeat:no-repeat;
+  animation:twinkle 7s ease-in-out infinite}
+body[data-wall="night"] #wall::before{background-image:
+  radial-gradient(1.4px 1.4px at 6% 10%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 14% 35%,#fff,transparent 70%),
+  radial-gradient(1.6px 1.6px at 9% 62%,#fff,transparent 70%),
+  radial-gradient(1.2px 1.2px at 21% 82%,#fff,transparent 70%),
+  radial-gradient(1.5px 1.5px at 33% 20%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 41% 55%,#fff,transparent 70%),
+  radial-gradient(1.7px 1.7px at 52% 12%,#fff,transparent 70%),
+  radial-gradient(1.2px 1.2px at 61% 40%,#fff,transparent 70%),
+  radial-gradient(1.4px 1.4px at 68% 70%,#fff,transparent 70%),
+  radial-gradient(1.6px 1.6px at 77% 25%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 85% 58%,#fff,transparent 70%),
+  radial-gradient(1.3px 1.3px at 93% 15%,#fff,transparent 70%)}
+body[data-wall="night"] #wall::after{animation-delay:-3.5s;background-image:
+  radial-gradient(1.2px 1.2px at 3% 45%,#fff,transparent 70%),
+  radial-gradient(1.5px 1.5px at 18% 8%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 27% 68%,#fff,transparent 70%),
+  radial-gradient(1.6px 1.6px at 36% 90%,#fff,transparent 70%),
+  radial-gradient(1.3px 1.3px at 45% 30%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 58% 78%,#fff,transparent 70%),
+  radial-gradient(1.7px 1.7px at 65% 5%,#fff,transparent 70%),
+  radial-gradient(1.2px 1.2px at 72% 48%,#fff,transparent 70%),
+  radial-gradient(1.4px 1.4px at 80% 85%,#fff,transparent 70%),
+  radial-gradient(1.1px 1.1px at 88% 33%,#fff,transparent 70%),
+  radial-gradient(1.6px 1.6px at 95% 65%,#fff,transparent 70%),
+  radial-gradient(1.2px 1.2px at 25% 48%,#fff,transparent 70%)}
+@keyframes twinkle{0%,100%{opacity:.25}50%{opacity:.75}}
+@media (prefers-reduced-motion: reduce){
+  body[data-wall="night"] #wall::before,
+  body[data-wall="night"] #wall::after{animation:none;opacity:.5}
+}
 #wallscrim{position:fixed;inset:0;z-index:1;pointer-events:none;background:radial-gradient(135% 100% at 50% 0%,transparent 30%,#000 100%);opacity:var(--scrim);transition:opacity .3s var(--ease)}
 #grain{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.11;mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
@@ -144,15 +183,25 @@ body.crucible .side{left:-100%;right:100%}
 .side-scroll{overflow-y:auto;display:flex;flex-direction:column;gap:15px;padding-right:2px;flex:1}
 .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:0 8px 8px;display:flex;justify-content:space-between}
 .tree{display:flex;flex-direction:column;gap:1px}
-/* Cursor-local glare while moving through the list: --node-mx (0-100%) is
-   written by JS only for whichever single row is under the pointer, so this
-   is one small highlight following one row at a time, not several panels
-   each chasing the pointer on their own. */
-.node{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;font-size:13.5px;color:#D3E4E1;cursor:pointer;border:1px solid transparent;transition:background-color .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease);
-  --node-mx:50%;background:radial-gradient(70px circle at var(--node-mx) 50%,rgba(255,255,255,.10),transparent 70%),transparent}
+/* Cursor-local glare + a slight parallax while moving through the list.
+   --node-mx (0-100%, glare position) and --node-shift (-0.5..0.5, offset)
+   are written by JS only for whichever row the pointer is over -- and,
+   critically, only ever READ inside :hover. A stale value left on a row the
+   cursor has since left renders nothing, because the rule that reads it
+   doesn't match anymore. (The previous version painted this at rest too,
+   so every row the cursor had ever crossed stayed lit permanently.) */
+.node{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;font-size:13.5px;color:#D3E4E1;cursor:pointer;border:1px solid transparent;
+  transition:background-color .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease),transform .2s var(--ease),box-shadow .2s var(--ease)}
 .node span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.node:hover{background:radial-gradient(70px circle at var(--node-mx) 50%,rgba(255,255,255,.16),transparent 70%),rgba(255,255,255,.07);color:var(--paper)}
-.node[aria-current]{background:radial-gradient(70px circle at var(--node-mx) 50%,rgba(255,255,255,.14),transparent 70%),rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;box-shadow:0 1px 0 var(--edge-hi) inset}
+.node:hover{
+  background:radial-gradient(70px circle at var(--node-mx,50%) 50%,rgba(255,255,255,.14),transparent 70%),rgba(255,255,255,.07);
+  color:var(--paper);
+  transform:translateX(calc(var(--node-shift,0) * 6px));
+  box-shadow:0 4px 12px -8px rgba(0,0,0,.5)}
+/* The dot shifts opposite the row and by less -- foreground moving against
+   background is what reads as parallax rather than just a nudge. */
+.node:hover .dot{transform:translateX(calc(var(--node-shift,0) * -3px))}
+.node[aria-current]{background:rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;box-shadow:0 1px 0 var(--edge-hi) inset}
 .node .dot{width:5px;height:5px;border-radius:50%;background:var(--faint);flex:none;transition:.24s var(--ease)}
 .node[aria-current] .dot{background:var(--accent);box-shadow:0 0 9px var(--accent)}
 .node .n{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);flex:none}
@@ -179,6 +228,28 @@ body.crucible .side{left:-100%;right:100%}
   border:1px solid rgba(var(--acc),.4);color:#fff;font:inherit;font-size:13px;font-weight:500;cursor:pointer;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 1px 0 rgba(255,255,255,.26) inset;transition:.25s var(--ease);flex:none}
 .newnote:hover{background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.6),transparent 55%),linear-gradient(180deg,rgba(var(--acc),.36),rgba(var(--acc),.17));transform:translateY(-1px)}
 .newnote:active{transform:translateY(0) scale(.97);filter:brightness(.96)}
+
+/* Under the Aurora wallpaper, New Note echoes the ambient canvas behind it
+   (#aurora cycles the same three hues) instead of sitting a flat solid
+   accent -- a slow color sweep rather than a static tint. */
+body[data-wall="aurora"] .newnote{
+  background-image:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.5),transparent 55%),
+    linear-gradient(115deg,rgba(63,224,173,.34),rgba(183,156,255,.30),rgba(255,157,110,.30),rgba(63,224,173,.34));
+  background-size:auto,320% 320%;
+  animation:aurora-sweep 14s ease-in-out infinite;
+}
+body[data-wall="aurora"] .newnote:hover{
+  background-image:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.6),transparent 55%),
+    linear-gradient(115deg,rgba(63,224,173,.44),rgba(183,156,255,.40),rgba(255,157,110,.40),rgba(63,224,173,.44));
+  background-size:auto,320% 320%;
+}
+@keyframes aurora-sweep{
+  0%,100%{background-position:0 0,0% 50%}
+  50%{background-position:0 0,100% 50%}
+}
+@media (prefers-reduced-motion: reduce){
+  body[data-wall="aurora"] .newnote{animation:none;background-position:0 0,50% 50%}
+}
 
 /* ══ EDITOR ══════════════════════════════════════════════════ */
 .editor{overflow:hidden;display:flex;flex-direction:column;min-width:0;position:relative;z-index:3}
