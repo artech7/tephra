@@ -2202,7 +2202,14 @@ $('#btnReindex').onclick = async () => {
 
 $('#dupRun').onclick = async () => {
   const out = $('#dupResult');
-  out.textContent = 'Scanning…';
+  // O(n^2) over every note's content -- on a vault of ~100 notes this is
+  // real seconds, not instant, and a static "Scanning…" is indistinguishable
+  // from hung. A running clock at least proves it's still alive.
+  const startedAt = Date.now();
+  out.textContent = 'Scanning… 0s';
+  const tick = setInterval(() => {
+    out.textContent = `Scanning… ${Math.round((Date.now() - startedAt) / 1000)}s`;
+  }, 1000);
   try {
     const { pairs } = await api('/duplicates');
     out.innerHTML = '';
@@ -2232,6 +2239,7 @@ $('#dupRun').onclick = async () => {
       out.appendChild(more);
     }
   } catch { out.textContent = 'Could not scan for duplicates.'; }
+  finally { clearInterval(tick); }
 };
 
 /* ══ AMBIENT AURORA ══════════════════════════════════════════ */
