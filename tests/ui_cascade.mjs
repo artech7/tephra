@@ -79,6 +79,7 @@ window.tephraApi = async (p) => {
   throw new Error(p);
 };
 window.tephraToast = () => {}; window.tephraOpenNote = () => {};
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 window.eval(fs.readFileSync(`${ROOT}/study.js`, 'utf8'));
 await window.tephraStudy.open();
 ck('Crucible header renders with no icon slot',

@@ -11,6 +11,30 @@
     if (text != null) n.textContent = text;
     return n;
   };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Flashcard tilt + glow: mouse position relative to the card drives a
+     small rotate3d and a specular highlight that slides across it, both
+     scoped to this one element's own mousemove/mouseleave -- never a
+     viewport-wide pointer listener, so it can't repeat the old dynamic-
+     glass mistake of several things tracking the cursor independently. */
+  function wireTilt(tiltEl, glowEl) {
+    tiltEl.addEventListener('mousemove', (e) => {
+      const b = tiltEl.getBoundingClientRect();
+      const cx = e.clientX - b.left - b.width / 2;
+      const cy = e.clientY - b.top - b.height / 2;
+      const dist = Math.sqrt(cx * cx + cy * cy);
+      const deg = Math.min(Math.log(dist + 1) * 2, 10);
+      tiltEl.style.transform =
+        `scale3d(1.025,1.025,1.025) rotate3d(${cy / 140},${-cx / 140},0,${deg}deg)`;
+      glowEl.style.background = `radial-gradient(circle at ${cx * 1.3 + b.width / 2}px `
+        + `${cy * 1.3 + b.height / 2}px, rgba(255,255,255,.18), transparent 60%)`;
+    });
+    tiltEl.addEventListener('mouseleave', () => {
+      tiltEl.style.transform = '';
+      glowEl.style.background = '';
+    });
+  }
 
   const S = {
     open: false, mode: 'browse', data: null,
@@ -322,28 +346,86 @@
     const it = S.cards[S.cardIx];
 
     const wrap = el('div', 'sv-card-stage');
-    const card = el('div', 'sv-flash' + (S.cardFlipped ? ' flipped' : ''));
-    card.appendChild(el('div', 'sv-c-cat', it.category || ''));
-    card.appendChild(el('div', 'sv-flash-q', S.cardFlipped ? it.title : it.question));
-    card.appendChild(el('div', 'sv-flash-hint',
-      S.cardFlipped ? 'the answer topic' : 'click to reveal'));
-    card.onclick = async () => {
-      S.cardFlipped = !S.cardFlipped;
-      render();
-      if (S.cardFlipped) {
-        // load the full answer lazily, only once flipped
-        const full = await api('/study/item/' + it.slug);
-        const box = document.querySelector('.sv-flash-body');
-        if (box) box.innerHTML = full.html;
-      }
-    };
-    wrap.appendChild(card);
 
-    if (S.cardFlipped) {
-      const b = el('div', 'body sv-flash-body');
-      b.innerHTML = '<p style="color:var(--faint)">Loading…</p>';
-      wrap.appendChild(b);
+    // The click-to-flip is handled entirely in place, below, rather than
+    // through the usual render() teardown-and-rebuild every other mode
+    // uses -- a fresh element can't transition from a previous state it
+    // never had, so a full re-render here would just snap to the flipped
+    // side instead of turning.
+    const tilt = el('div', 'sv-flash-tilt');
+    const flip = el('div', 'sv-flash-flip' + (S.cardFlipped ? ' flipped' : ''));
+
+    const front = el('div', 'sv-flash-face front');
+    front.appendChild(el('div', 'sv-c-cat', it.category || ''));
+    front.appendChild(el('div', 'sv-flash-q', it.question));
+    front.appendChild(el('div', 'sv-flash-hint', 'click to reveal'));
+
+    const back = el('div', 'sv-flash-face back');
+    back.appendChild(el('div', 'sv-c-cat', it.category || ''));
+    back.appendChild(el('div', 'sv-flash-title', it.title));
+    const answerBody = el('div', 'body sv-flash-answer');
+    answerBody.innerHTML = '<p style="color:var(--faint)">Loading…</p>';
+    back.appendChild(answerBody);
+    back.appendChild(el('div', 'sv-flash-hint', 'click to flip back'));
+
+    flip.append(front, back);
+    tilt.appendChild(flip);
+    const glow = el('div', 'sv-flash-glow');
+    tilt.appendChild(glow);
+    wrap.appendChild(tilt);
+
+    // Fetched once per card and cached on the item itself, so flipping
+    // back and forth never re-fetches -- matches the old lazy-load, just
+    // no longer re-requested on every flip.
+    async function ensureAnswerLoaded() {
+      if (it._html == null) {
+        try { it._html = (await api('/study/item/' + it.slug)).html; }
+        catch { it._html = '<p style="color:var(--faint)">Could not load.</p>'; }
+      }
+      answerBody.innerHTML = it._html;
+      resize();
     }
+
+    // Faces are position:absolute (so both can occupy the same spot for the
+    // flip), which means .sv-flash-flip needs an explicit height -- nothing
+    // here sizes to its content on its own. scrollHeight on the visible
+    // face still reports its true content height even while the face's own
+    // box is pinned to whatever height was last set, which is what lets
+    // this grow smoothly instead of jumping -- EXCEPT .sv-flash-answer has
+    // its own overflow-y:auto (for the rare answer too long even for the
+    // 62vh cap below), and a nested scroller absorbs its children's
+    // overflow rather than passing it up, so the answer's true height never
+    // reaches the face's own scrollHeight while that's active. Lifting the
+    // constraint for one measurement is simpler than computing the
+    // remaining chrome height by hand.
+    function resize() {
+      requestAnimationFrame(() => {
+        const face = S.cardFlipped ? back : front;
+        const scroller = face.querySelector('.sv-flash-answer');
+        let full;
+        if (scroller) {
+          const prevOverflow = scroller.style.overflowY, prevHeight = scroller.style.height;
+          scroller.style.overflowY = 'visible';
+          scroller.style.height = 'auto';
+          full = face.scrollHeight;
+          scroller.style.overflowY = prevOverflow;
+          scroller.style.height = prevHeight;
+        } else {
+          full = face.scrollHeight;
+        }
+        flip.style.height = Math.min(Math.max(full, 220), innerHeight * 0.62) + 'px';
+      });
+    }
+
+    tilt.onclick = () => {
+      S.cardFlipped = !S.cardFlipped;
+      flip.classList.toggle('flipped', S.cardFlipped);
+      if (S.cardFlipped) ensureAnswerLoaded();
+      resize();
+    };
+    if (!reduce) wireTilt(tilt, glow);
+    resize();
+    if (S.cardFlipped) ensureAnswerLoaded();
 
     const nav = el('div', 'sv-nav');
     const prev = el('button', 'sv-btn', '← Previous');

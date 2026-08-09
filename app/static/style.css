@@ -668,16 +668,39 @@ input.sv-select{cursor:text}
 .sv-qpeek-a{font-size:13px;color:var(--accent);margin-bottom:5px}
 .sv-qpeek-w{font-size:12.5px;color:var(--muted);line-height:1.5}
 
-.sv-card-stage{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
-.sv-flash{min-height:210px;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:30px;border-radius:20px;cursor:pointer;text-align:center;
-  background:rgba(255,255,255,.07);border:1px solid var(--edge);
-  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-  box-shadow:0 1px 0 var(--edge-hi) inset;transition:.35s var(--ease)}
-.sv-flash:hover{background:rgba(255,255,255,.10)}
-.sv-flash.flipped{border-color:rgba(var(--acc),.45)}
+.sv-card-stage{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px;perspective:1600px}
+
+/* ══ FLASHCARD: tilt + glow, flip to reveal ══════════════════
+   Three layers. .sv-flash-tilt catches the cursor and leans toward it
+   (wireTilt in study.js) -- its own perspective is what gives .sv-flash-flip
+   somewhere to rotate into. .sv-flash-flip is the thing that actually turns
+   over (transform-style:preserve-3d, rotateY on click); its height is set
+   from JS because two position:absolute faces stacked for the flip can't
+   size a parent on their own. Each .sv-flash-face is one side, hidden via
+   backface-visibility rather than display, which is what makes the turn
+   read as one object rotating instead of a content swap. */
+.sv-flash-tilt{position:relative;border-radius:20px;cursor:pointer;perspective:1200px;
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 10px 30px -14px rgba(0,0,0,.6);
+  transition:transform .3s ease-out,box-shadow .3s ease-out}
+.sv-flash-tilt:hover{transition-duration:.15s;box-shadow:0 1px 0 var(--edge-hi) inset,0 22px 50px -18px rgba(0,0,0,.7)}
+.sv-flash-flip{position:relative;width:100%;transform-style:preserve-3d;
+  transition:transform .6s cubic-bezier(.4,.15,.2,1),height .4s var(--ease)}
+.sv-flash-flip.flipped{transform:rotateY(180deg)}
+/* No backdrop-filter here on purpose -- this element carries its own 3D
+   transform (rotateY, for the back face) and backface-visibility, and
+   backdrop-filter under a transformed ancestor is the exact WebKit trap
+   .shell already routes around elsewhere in this file. Plain translucency
+   still reads as glass; it just doesn't blur what's behind it. */
+.sv-flash-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  display:flex;flex-direction:column;gap:12px;padding:30px;border-radius:20px;overflow:hidden;
+  background:rgba(255,255,255,.09);border:1px solid var(--edge)}
+.sv-flash-face.front{justify-content:center;text-align:center}
+.sv-flash-face.back{justify-content:flex-start;text-align:left;transform:rotateY(180deg);border-color:rgba(var(--acc),.4)}
+.sv-flash-glow{position:absolute;inset:0;border-radius:20px;pointer-events:none;z-index:2;transition:background .2s var(--ease)}
 .sv-flash-q{font-family:var(--serif);font-size:21px;line-height:1.45}
 .sv-flash-hint{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-.sv-flash-body{max-height:34vh;overflow-y:auto;padding:16px 18px;border-radius:14px;background:rgba(0,0,0,.24);border:1px solid var(--edge)}
+.sv-flash-title{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:-.01em;color:#fff}
+.sv-flash-answer{flex:1;overflow-y:auto;padding-right:6px;min-height:0}
 .sv-nav{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
 .sv-count{font-family:var(--mono);font-size:11px;color:var(--faint)}
 .sv-btn{font:inherit;font-size:13px;padding:9px 18px;border-radius:10px;cursor:pointer;color:var(--paper);background:rgba(255,255,255,.07);border:1px solid var(--edge);transition:.24s var(--ease)}

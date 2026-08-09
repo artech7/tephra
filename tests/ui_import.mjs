@@ -34,6 +34,7 @@ window.tephraApi = async (path, opts = {}) => {
 window.tephraToast = (m) => console.log(`        toast: ${m}`);
 window.tephraOpenNote = () => {};
 window.tephraReloadList = async () => { calls.push({ path: 'RELOAD_SIDEBAR' }); };
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
 window.eval(fs.readFileSync(`${ROOT}/study.js`, 'utf8'));
 

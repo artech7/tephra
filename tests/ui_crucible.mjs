@@ -83,6 +83,7 @@ window.tephraApi = async (p, opts = {}) => {
   throw new Error(p);
 };
 window.tephraToast = () => {}; window.tephraOpenNote = () => {};
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 window.eval(fs.readFileSync(`${ROOT}/study.js`, 'utf8'));
 
 ck('body clean before opening', !doc.body.classList.contains('crucible'));

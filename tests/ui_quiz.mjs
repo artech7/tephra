@@ -32,6 +32,7 @@ window.tephraApi = async (p, o = {}) => {
   throw new Error(p);
 };
 window.tephraToast = () => {}; window.tephraOpenNote = () => {};
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 window.eval(fs.readFileSync(`${ROOT}/study.js`, 'utf8'));
 
 const S = () => doc.querySelector('#studyview');
