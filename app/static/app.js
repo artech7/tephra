@@ -353,6 +353,18 @@ function renderList() {
   }
 }
 
+// A small glare that follows the cursor along whichever note row it's over
+// -- delegated on the list rather than per-row, so it survives renderList()
+// rebuilding the rows and never runs more than one row at a time.
+if (!reduce) {
+  $('#noteList').addEventListener('mousemove', (e) => {
+    const row = e.target.closest('.node');
+    if (!row) return;
+    const r = row.getBoundingClientRect();
+    row.style.setProperty('--node-mx', (((e.clientX - r.left) / (r.width || 1)) * 100).toFixed(1) + '%');
+  });
+}
+
 /* Media, grouped by type into collapsible sections. A flat grid of 100 files
    is unusable; the counts alone tell you what a vault holds. Each tile reveals
    a remove control on hover, and warns first if a note still embeds it. */
@@ -1128,7 +1140,27 @@ let lensFor = null;
 function hideLens() {
   clearTimeout(lensT);
   lensFor = null;
-  $('#lens').classList.remove('on');
+  const lens = $('#lens');
+  lens.classList.remove('on');
+  lens.style.setProperty('--lmx', 0);
+  lens.style.setProperty('--lmy', 0);
+}
+
+// Tilts the lens toward wherever the cursor sits over the link that opened
+// it (-1..1 on each axis) -- CSS turns this into a few degrees of rotation
+// and a sheen that slides across the card. Scoped to whichever single link
+// is currently hovered, so it can't repeat the old dynamic-glass mistake of
+// several panels each tracking the pointer independently.
+if (!reduce) {
+  document.addEventListener('mousemove', (e) => {
+    if (!lensFor) return;
+    const r = lensFor.getBoundingClientRect();
+    const nx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (r.width / 2 || 1)));
+    const ny = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (r.height / 2 || 1)));
+    const lens = $('#lens');
+    lens.style.setProperty('--lmx', nx.toFixed(3));
+    lens.style.setProperty('--lmy', ny.toFixed(3));
+  });
 }
 
 document.addEventListener('mouseover', async (e) => {
