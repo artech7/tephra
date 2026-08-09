@@ -155,7 +155,6 @@ function applyTheme() {
   $('#vRadius').textContent = T.radius + 'px';
   $('#vShine').textContent = T.shine + '%';
   $('#vAcc').textContent = hex(T.acc).toUpperCase();
-  $('#lgW').style.background = hex(T.acc);
   $('#autoAcc').toggleAttribute('data-on', !!T.auto);
 
   const isAurora = T.wall === 'aurora';

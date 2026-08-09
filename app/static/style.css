@@ -572,8 +572,22 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
 .pitem .pk{font-family:var(--mono);font-size:9px;letter-spacing:.09em;padding:3px 7px;border-radius:5px;color:var(--faint);background:rgba(255,255,255,.06);border:1px solid var(--edge);flex:none}
 .pitem .pt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pitem .parrow{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A graph needs reliable contrast for its own nodes/edges, which the shared
+   .pane treatment can't promise -- .pane samples whatever wallpaper is
+   live, and a busy one (a photo, Aurora's moving blobs) can wash out node
+   colors and make faint edges disappear entirely. This gets its own fixed,
+   controlled backdrop instead of inheriting one. */
+/* Two layers, not one gradient with a low-alpha first stop -- a single
+   radial-gradient that starts translucent leaves the center of the view
+   translucent too, showing whatever is behind #graphview itself (the note
+   underneath) rather than just tinting a backdrop. The accent glow sits on
+   top and fades to transparent, revealing the *second*, fully opaque
+   layer beneath it -- never the page. */
 #graphview{position:absolute;inset:0;z-index:4;border-radius:0;
-  opacity:0;pointer-events:none;transition:opacity .35s var(--ease);overflow:hidden}
+  opacity:0;pointer-events:none;transition:opacity .35s var(--ease);overflow:hidden;
+  background:radial-gradient(120% 85% at 50% 22%,rgba(var(--acc),.14) 0%,transparent 60%),
+             radial-gradient(130% 90% at 50% 30%,#0d1922 0%,#070f14 45%,#04080a 75%,#020405 100%);
+  backdrop-filter:none;-webkit-backdrop-filter:none}
 #graphview.on{opacity:1;pointer-events:auto}
 #graphview canvas{width:100%;height:100%;display:block;cursor:pointer}
 .gv-head{position:absolute;top:20px;left:24px;z-index:3;pointer-events:none}
@@ -581,8 +595,18 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
 .gv-head p{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:5px;letter-spacing:.05em}
 .gv-close{position:absolute;top:20px;right:20px;z-index:3;width:34px;height:34px;border-radius:11px;background:rgba(255,255,255,.11);border:1px solid var(--edge);color:var(--muted);cursor:pointer;font-size:15px}
 .gv-close:hover{color:var(--paper);background:rgba(255,255,255,.18)}
-.gv-legend{position:absolute;bottom:20px;left:24px;z-index:3;display:flex;gap:16px;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.gv-legend{position:absolute;bottom:20px;left:24px;right:24px;z-index:3;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;font-family:var(--mono);font-size:10px;color:var(--faint)}
 .gv-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px}
+/* One chip per category, colored to match how graph.js fills that
+   category's nodes -- built in JS (renderCatLegend), since the palette
+   assignment depends on which categories are actually in this vault. */
+.gv-cats{display:flex;flex-wrap:wrap;gap:5px 14px;max-width:70%}
+.gv-cats span{display:inline-flex;align-items:center;white-space:nowrap}
+.gv-legend-hint{flex:none;padding-bottom:1px}
+/* Stubs are drawn as a hollow dashed ring rather than a fixed color now
+   that fill color means category -- this explains that convention once,
+   generically, rather than repeating it per category. */
+.gv-stub-key i{background:none;border:1.3px dashed rgba(255,255,255,.55)}
 
 #toast{position:fixed;z-index:95;bottom:calc(var(--inset) + 18px);left:50%;transform:translateX(-50%) translateY(14px);
   padding:11px 18px;border-radius:12px;font-size:13px;opacity:0;pointer-events:none;transition:.32s var(--ease);white-space:nowrap}

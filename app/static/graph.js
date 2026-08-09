@@ -315,10 +315,49 @@
     view: { k: 1, tx: 0, ty: 0 }, filter: '',
     layout: 'cluster', showStubs: true, showLeaves: true, labels: 'auto',
     dragging: null, panning: null, moved: false, frame: null, bundles: null,
+    catColors: new Map(),
   };
 
   const radiusOf = (d) =>
     (d.kind === 'stub' ? 4.5 : 5.5) + Math.min(d.deg || 0, 10) * 0.9;
+
+  // Same seven accent swatches already offered in the theme drawer, so the
+  // graph never invents a color language of its own. Assignment is by a
+  // stable alphabetical sort of whatever categories are actually present in
+  // this vault -- not insertion/discovery order -- so a category keeps its
+  // color across a session regardless of which note happened to load first.
+  const CATEGORY_PALETTE = [
+    '63,224,173', '183,156,255', '255,157,110', '125,211,252',
+    '255,143,177', '198,242,78', '167,196,255',
+  ];
+  function buildCategoryColors(nodes) {
+    const cats = [...new Set(nodes.map((d) => d.category).filter(Boolean))].sort();
+    const map = new Map();
+    cats.forEach((c, i) => map.set(c, CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]));
+    return map;
+  }
+  const catColorOf = (d) => (d.category && G.catColors.get(d.category)) || '198,214,212';
+
+  // The color key: what would otherwise be silent (why is this node teal
+  // and that one pink?) made legible. Stubs get one shared explanation of
+  // the hollow-ring convention instead of their own color, since their
+  // fill still follows category like everything else.
+  function renderCatLegend() {
+    const host = $('#gvCatLegend');
+    if (!host) return;
+    host.innerHTML = '';
+    const cats = [...G.catColors.keys()];
+    for (const c of cats) {
+      const chip = document.createElement('span');
+      chip.innerHTML = `<i style="background:rgb(${G.catColors.get(c)})"></i>`;
+      chip.append(c);
+      host.appendChild(chip);
+    }
+    const stub = document.createElement('span');
+    stub.className = 'gv-stub-key';
+    stub.innerHTML = '<i></i>Not written yet';
+    host.appendChild(stub);
+  }
 
   function buildAdjacency() {
     G.adj = new Map();
@@ -367,6 +406,8 @@
       .map(([a, b]) => [remap.get(a), remap.get(b)]);
     G.raw = { nodes, links };
     buildAdjacency();
+    G.catColors = buildCategoryColors(nodes);
+    renderCatLegend();
 
     const s = $('#gvStats');
     if (s) {
@@ -452,9 +493,14 @@
       const lit = near && (near.has(a) && near.has(b));
       const dim = near && !lit;
       const bundle = G.bundles && G.bundles.get(bundleKey(a, b));
-      ctx.strokeStyle = lit ? `rgba(${accent},.6)` : dim
-        ? 'rgba(255,255,255,.035)' : (bundle ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.10)');
-      ctx.lineWidth = lit ? 1.6 : 0.8;
+      // An edge between two same-category notes is tinted with that
+      // category's color at rest -- clusters read as clusters through
+      // their connections too, not just through node color.
+      const shared = p.category && p.category === q.category ? G.catColors.get(p.category) : null;
+      ctx.strokeStyle = lit ? `rgba(${accent},.65)` : dim ? 'rgba(255,255,255,.035)'
+        : shared ? `rgba(${shared},${bundle ? .16 : .22})`
+        : (bundle ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.13)');
+      ctx.lineWidth = lit ? 1.7 : 0.85;
       if (bundle) {
         const pts = blendPath(G.raw.nodes, bundle, BUNDLE_BETA)
           .map(({ x, y }) => { const [sx, sy] = toScreen(x, y, v); return { x: sx, y: sy }; });
@@ -471,8 +517,9 @@
       const rr = radiusOf(d) * v.k;
       const lit = !near || near.has(d.i);
       const hit = matches(d);
-      const col = d.kind === 'stub' ? '255,157,110' : accent;
+      const col = catColorOf(d);
       const alpha = (lit ? 1 : 0.22) * (hit ? 1 : 0.25);
+      const isStub = d.kind === 'stub';
 
       if (lit && hit) {
         const g = ctx.createRadialGradient(x, y, 0, x, y, rr * 3.4);
@@ -481,13 +528,24 @@
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(x, y, rr * 3.4, 0, 7); ctx.fill();
       }
-      ctx.fillStyle = `rgba(${col},${0.95 * alpha})`;
-      ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
 
       const isSel = G.selected && d.i === G.selected.i;
-      ctx.strokeStyle = isSel ? '#fff' : `rgba(255,255,255,${0.55 * alpha})`;
-      ctx.lineWidth = isSel ? 2.5 : 1;
-      ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.stroke();
+      if (isStub) {
+        // Hollow and dashed, not a fixed color: "not written yet" is a
+        // shape cue now, so a stub's category is still legible from the
+        // color of its own ring instead of every stub looking the same.
+        ctx.setLineDash([2.2 * v.k, 2.2 * v.k]);
+        ctx.strokeStyle = `rgba(${col},${(isSel ? 1 : 0.85) * alpha})`;
+        ctx.lineWidth = isSel ? 2.5 : 1.4;
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = `rgba(${col},${0.95 * alpha})`;
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
+        ctx.strokeStyle = isSel ? '#fff' : `rgba(255,255,255,${0.55 * alpha})`;
+        ctx.lineWidth = isSel ? 2.5 : 1;
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.stroke();
+      }
 
       // Labels only where they are readable and useful: zoomed in, well
       // connected, hovered, selected, or matching a search.
