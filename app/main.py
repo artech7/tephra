@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import dedupe
 from . import guide_import
 from . import importers
 from . import settings as cfg
@@ -433,6 +434,16 @@ def apply_suggestion(payload: SuggestIn):
 def audit():
     """Read-only check for link damage — safe to call any time."""
     return idx.audit_links(db())
+
+
+@app.get("/api/duplicates")
+def find_duplicates():
+    """Vault-wide near-duplicate scan -- the same content check a guide
+    import runs against incoming topics, run here over every existing note
+    so duplicates already on disk (from a merge that predates this check,
+    or two guides that overlap) can be found and cleaned up by hand.
+    Read-only: nothing is deleted or merged automatically."""
+    return {"pairs": dedupe.scan_notes(vault.all_notes())}
 
 
 @app.get("/api/repair/last")
@@ -1005,7 +1016,7 @@ DEFAULT_THEME = {
     "acc": "63,224,173", "wall": "aurora", "wallUrl": None,
     "blur": 30, "frost": 55, "sat": 200, "scrim": 26,
     "inset": 20, "contrast": 0, "auto": True,
-    "radius": 28, "shine": 34, "dynamic": True,
+    "radius": 28, "shine": 34,
     "font_display": "Bricolage Grotesque", "font_serif": "Newsreader", "font_mono": "JetBrains Mono",
     # UI state that should follow the vault rather than the browser
     "note_sort": "updated", "note_tag": "", "media_open": {},

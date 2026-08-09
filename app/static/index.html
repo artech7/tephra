@@ -343,11 +343,6 @@
       <div class="th-note">Edge highlight strength — how brightly the rim of each glass pane catches light.</div>
     </div>
     <div class="th-sect">
-      <div class="tglrow">
-        <span>Dynamic glass</span>
-        <div class="tgl" id="dynGlass"><i></i></div>
-      </div>
-      <div class="th-note">The drawer, search palette and hover card shift and catch light as the cursor moves — like Liquid Glass. Off follows your system's reduced-motion setting automatically.</div>
       <button class="th-reset" id="thReset">Reset to defaults</button>
     </div>
 
@@ -362,6 +357,11 @@
         <button class="sv-btn" id="btnReindex">Rebuild index</button>
       </div>
       <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown. Rebuild index if the note count ever looks wrong.</div>
+      <div id="dupResult" class="th-note">Duplicates not checked yet.</div>
+      <div class="th-row">
+        <button class="sv-btn" id="dupRun">Find duplicate notes</button>
+      </div>
+      <div class="th-note">Compares every note's content and lists pairs that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Nothing is deleted automatically; open either note and use Delete.</div>
     </div>
   </div>
 </aside>

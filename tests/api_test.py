@@ -439,6 +439,92 @@ with TestClient(app) as c:
     check("one coincidentally shared word does not out-vote real unrelatedness",
        guess6["category"] != "Windows" and guess6["method"] == "content", guess6)
 
+    print("\n── near-duplicate detection on import ──")
+    # The bug this fixes: title matching alone lets the *same* content back
+    # in under a different title, from a different guide, or reworded --
+    # exactly what a re-merged export produces. These three answers are
+    # verified (via app.dedupe directly) to land in three different bands:
+    # a title-only reword stays >= AUTO_SKIP_THRESHOLD, two single-word
+    # substitutions land between REPORT_THRESHOLD and AUTO_SKIP_THRESHOLD,
+    # and an unrelated topic stays well under REPORT_THRESHOLD.
+    subnet_answer = (
+        "Subnetting divides a network into smaller pieces using a subnet mask. "
+        "Each subnet has its own range of usable host addresses bounded by the "
+        "network and broadcast address. CIDR notation expresses the mask as a "
+        "slash and a bit count, such as slash 24 for a class C sized network. "
+        "Subnetting improves routing efficiency and limits broadcast domains "
+        "within an organization network.")
+    subnet_answer_tweaked = subnet_answer.replace("divides", "splits").replace("improves", "helps")
+
+    guide1 = json.dumps({"topics": [
+        {"title": "Subnetting Basics", "category": "Networking",
+         "question": "What is subnetting?", "answer": subnet_answer},
+    ]})
+    c.post("/api/study/import", files={"file": ("net-guide-1.json", io.BytesIO(guide1.encode()), "application/json")})
+    baseline = next(n for n in c.get("/api/notes").json() if n["title"] == "Subnetting Basics")
+
+    route_answer = ("Static routes are configured by hand rather than learned from a "
+        "routing protocol. Each entry names a destination network and the next "
+        "hop to reach it. They are simple and predictable but do not adapt "
+        "automatically when the topology changes, so they suit small or stable "
+        "networks better than large dynamic ones.")
+    guide2 = json.dumps({"topics": [
+        # near-certain duplicate of the note guide1 already created: same
+        # answer, reworded title only -- must be skipped, not created.
+        {"title": "Subnetting Basics Overview", "category": "Networking",
+         "question": "What is subnetting?", "answer": subnet_answer},
+        # a real but lighter rewrite: reported, not auto-skipped, so real
+        # content is never dropped on a guess.
+        {"title": "Subnetting Fundamentals", "category": "Networking",
+         "question": "What is subnetting?", "answer": subnet_answer_tweaked},
+        # genuinely unrelated -- must not be flagged at all.
+        {"title": "DHCP Overview", "category": "Networking",
+         "question": "What does DHCP do?",
+         "answer": "DHCP automatically assigns IP addresses and other network "
+                   "configuration to hosts on a network via a lease process."},
+        # two near-identical topics *within the same file*, neither of which
+        # exists in the vault yet -- the within-batch case the user hit.
+        {"title": "Static Routing", "category": "Networking",
+         "question": "What is static routing?", "answer": route_answer},
+        {"title": "Static Routes Explained", "category": "Networking",
+         "question": "What is static routing?", "answer": route_answer},
+    ]})
+    r = c.post("/api/study/import",
+               files={"file": ("net-guide-2.json", io.BytesIO(guide2.encode()), "application/json")}).json()
+
+    check("near-certain reword is skipped, not created",
+       r["skipped_duplicates"] >= 1, r["skipped_duplicates"])
+    dup_titles = {d["title"]: d for d in r["duplicates"]}
+    check("the skipped one is reported and marked skipped",
+       dup_titles.get("Subnetting Basics Overview", {}).get("skipped") is True, dup_titles)
+    check("the lighter rewrite is reported but NOT skipped",
+       dup_titles.get("Subnetting Fundamentals", {}).get("skipped") is False, dup_titles)
+    check("an unrelated topic is never flagged", "DHCP Overview" not in dup_titles, dup_titles)
+    check("a within-batch duplicate is caught too (neither existed before this import)",
+       dup_titles.get("Static Routes Explained", {}).get("skipped") is True, dup_titles)
+
+    notes_after = {n["title"] for n in c.get("/api/notes").json()}
+    check("the skipped duplicate never became a note",
+       "Subnetting Basics Overview" not in notes_after, sorted(notes_after))
+    check("the reported (not skipped) rewrite WAS created -- flagging never withholds content",
+       "Subnetting Fundamentals" in notes_after, sorted(notes_after))
+    check("the unrelated topic was created normally", "DHCP Overview" in notes_after)
+    check("only one of the two within-batch near-duplicates was created",
+       ("Static Routing" in notes_after) != ("Static Routes Explained" in notes_after),
+       sorted(t for t in notes_after if t.startswith("Static")))
+    check("the original note is untouched", baseline["slug"] in
+       {n["slug"] for n in c.get("/api/notes").json()})
+
+    print("\n── vault-wide duplicate scan ──")
+    scan = c.get("/api/duplicates").json()["pairs"]
+    check("finds the real duplicate left on disk (reported rewrite vs the original)",
+       any({p["a_title"], p["b_title"]} == {"Subnetting Basics", "Subnetting Fundamentals"}
+           for p in scan), scan)
+    check("sorted highest-similarity first",
+       all(scan[i]["similarity"] >= scan[i + 1]["similarity"] for i in range(len(scan) - 1)))
+    check("unrelated notes are not paired up",
+       not any({p["a_title"], p["b_title"]} & {"DHCP Overview"} for p in scan), scan)
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

@@ -59,7 +59,7 @@ window.tephraReloadList = async () => {
    with the notes and survives container rebuilds.
    ═══════════════════════════════════════════════════════════ */
 const DEFAULTS = { acc: '63,224,173', wall: 'aurora', wallUrl: null, blur: 30, frost: 55,
-  sat: 200, scrim: 26, inset: 20, contrast: 0, auto: false, radius: 28, shine: 34, dynamic: true,
+  sat: 200, scrim: 26, inset: 20, contrast: 0, auto: false, radius: 28, shine: 34,
   font_display: 'Bricolage Grotesque', font_serif: 'Newsreader', font_mono: 'JetBrains Mono',
   note_sort: 'updated', note_tag: '', media_open: {} };
 let T = { ...DEFAULTS };
@@ -168,46 +168,6 @@ function applyTheme() {
   [['fontDisplay', 'font_display'], ['fontSerif', 'font_serif'], ['fontMono', 'font_mono']].forEach(([id, key]) => {
     $('#' + id).querySelectorAll('.fopt').forEach((o) => o.toggleAttribute('data-on', o.dataset.font === T[key]));
   });
-  $('#dynGlass').toggleAttribute('data-on', !!T.dynamic);
-  ensureDynamic();
-}
-
-/* ══ DYNAMIC GLASS ═══════════════════════════════════════════
-   Pointer position drives --px/--py (-1..1), which the CSS uses to nudge
-   floating panes and sweep a specular highlight across every glass surface
-   — the parallax lives only on panes that own their own backdrop-filter
-   (never on an ancestor of one; see the .shell comment for why that breaks
-   WebKit). A single rAF loop lerps toward the pointer so it reads as glass
-   catching light, not input lag. */
-let dynActive = false, dynTargetX = 0, dynTargetY = 0, dynX = 0, dynY = 0, dynRAF = null;
-function dynPointer(e) {
-  dynTargetX = (e.clientX / window.innerWidth) * 2 - 1;
-  dynTargetY = (e.clientY / window.innerHeight) * 2 - 1;
-}
-function dynTick() {
-  dynX += (dynTargetX - dynX) * 0.06;
-  dynY += (dynTargetY - dynY) * 0.06;
-  R.style.setProperty('--px', dynX.toFixed(4));
-  R.style.setProperty('--py', dynY.toFixed(4));
-  dynRAF = requestAnimationFrame(dynTick);
-}
-function ensureDynamic() {
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const want = !!T.dynamic && !reduced;
-  document.body.classList.toggle('glass-dyn', want);
-  if (want === dynActive) return;
-  dynActive = want;
-  if (want) {
-    window.addEventListener('pointermove', dynPointer);
-    if (!dynRAF) dynTick();
-  } else {
-    window.removeEventListener('pointermove', dynPointer);
-    if (dynRAF) cancelAnimationFrame(dynRAF);
-    dynRAF = null;
-    dynX = dynY = dynTargetX = dynTargetY = 0;
-    R.style.setProperty('--px', '0');
-    R.style.setProperty('--py', '0');
-  }
 }
 
 let themeT;
@@ -1837,7 +1797,6 @@ $('#autoAcc').onclick = () => setTheme({ auto: !T.auto });
 [['fontDisplay', 'font_display'], ['fontSerif', 'font_serif'], ['fontMono', 'font_mono']].forEach(([id, key]) => {
   $('#' + id).querySelectorAll('.fopt').forEach((o) => (o.onclick = () => setTheme({ [key]: o.dataset.font })));
 });
-$('#dynGlass').onclick = () => setTheme({ dynamic: !T.dynamic });
 $('#thReset').onclick = () => setTheme({ ...DEFAULTS, wallUrl: T.wallUrl });
 
 /* ══ VAULTS ═════════════════════════════════════
@@ -2200,6 +2159,40 @@ $('#btnReindex').onclick = async () => {
     await loadList(); await loadGraph(); await loadMedia();
     out.textContent = `Reindexed ${r.notes} notes.`;
   } catch { out.textContent = 'Reindex failed.'; }
+};
+
+$('#dupRun').onclick = async () => {
+  const out = $('#dupResult');
+  out.textContent = 'Scanning…';
+  try {
+    const { pairs } = await api('/duplicates');
+    out.innerHTML = '';
+    if (!pairs.length) { out.textContent = 'No near-duplicate notes found.'; return; }
+    const head = document.createElement('div');
+    head.innerHTML = `<b>${pairs.length}</b> possible duplicate pair${pairs.length === 1 ? '' : 's'}:`;
+    out.appendChild(head);
+    for (const p of pairs.slice(0, 30)) {
+      const row = document.createElement('div');
+      row.className = 'duprow';
+      const a = document.createElement('button');
+      a.className = 'dc-part'; a.textContent = p.a_title; a.title = 'Open ' + p.a_title;
+      a.onclick = () => openNote(p.a_slug);
+      const b = document.createElement('button');
+      b.className = 'dc-part'; b.textContent = p.b_title; b.title = 'Open ' + p.b_title;
+      b.onclick = () => openNote(p.b_slug);
+      const pct = document.createElement('span');
+      pct.className = 'dupscore';
+      pct.textContent = Math.round(p.similarity * 100) + '%';
+      row.append(a, document.createTextNode(' ↔ '), b, pct);
+      out.appendChild(row);
+    }
+    if (pairs.length > 30) {
+      const more = document.createElement('div');
+      more.className = 'th-note';
+      more.textContent = `+ ${pairs.length - 30} more, closest shown first.`;
+      out.appendChild(more);
+    }
+  } catch { out.textContent = 'Could not scan for duplicates.'; }
 };
 
 /* ══ AMBIENT AURORA ══════════════════════════════════════════ */

@@ -13,6 +13,9 @@ let notes = [
   { slug: 'mid',   title: 'Middle',     tags: ['study', 'index'], updated: '2026-07-15T00:00:00Z', backlinks: 3, links_out: 12, size: 900, kind: 'index', favorite: false },
 ];
 let theme = {}, deleted = [];
+const dupPairs = [
+  { a_slug: 'zeta', a_title: 'Zeta note', b_slug: 'alpha', b_title: 'Alpha note', similarity: 0.962 },
+];
 const calls = [];
 window.fetch = async (u, o = {}) => {
   const p = String(u); calls.push({ p, m: o.method || 'GET', body: o.body });
@@ -27,6 +30,7 @@ window.fetch = async (u, o = {}) => {
       if (payload.tags) n.tags = payload.tags; }
     b = { slug: n.slug, title: n.title, body: '', tags: n.tags, favorite: n.favorite, meta: {}, html: '<p>x</p>', links_out: n.links_out, media: [], backlinks: [], suggestions: [], words: 1, updated: n.updated }; }
   else if (p.includes('/api/notes')) b = notes;
+  else if (p.includes('/api/duplicates')) b = { pairs: dupPairs };
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
   else if (p.includes('/api/media')) b = [];
   else if (p.includes('/api/study')) b = { known_categories: [] };
@@ -58,7 +62,7 @@ console.log('── every control app.js wires exists in the markup ──');
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
                '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
                '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
-               '#btnReindex', '#themeBtn', '#newNote', '#openPalette', '#favBtn'];
+               '#btnReindex', '#themeBtn', '#newNote', '#openPalette', '#favBtn', '#dupRun'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
 
@@ -86,6 +90,21 @@ ck('trailing number relabels with sort',
    doc.querySelector('#noteList .node').title.includes('sorted by') === false ||
    doc.querySelector('#noteList .node').title.includes('backlinks'));
 ck('type shown via dot class', !!doc.querySelector('.node.kind-index') && !!doc.querySelector('.node.kind-study'));
+
+console.log('\n── vault health: find duplicate notes ──');
+doc.querySelector('#dupRun').onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('hit the duplicates endpoint', calls.some((c) => c.p.endsWith('/api/duplicates')));
+const dupOut = doc.querySelector('#dupResult');
+ck('reports the pair count', dupOut.textContent.includes('1'), dupOut.textContent);
+const dupRow = dupOut.querySelector('.duprow');
+ck('renders a row with both titles and the score',
+   !!dupRow && dupRow.textContent.includes('Zeta note') && dupRow.textContent.includes('Alpha note')
+   && dupRow.textContent.includes('96%'), dupRow && dupRow.textContent);
+const dupLink = [...dupOut.querySelectorAll('.dc-part')].find((b) => b.textContent === 'Alpha note');
+dupLink.onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('clicking a title in the report opens that note', doc.querySelector('#noteTitle').value === 'Alpha note');
 
 console.log('\n── favorites float to the top, under any sort ──');
 setSort('updated');

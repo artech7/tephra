@@ -659,7 +659,15 @@
       if (r.collisions && r.collisions.length) {
         msg += ` — ${r.collisions.length} matched an existing note by title and were kept separate`;
       }
-      toast(msg, r.collisions && r.collisions.length ? 8000 : undefined);
+      if (r.skipped_duplicates) {
+        msg += ` — ${r.skipped_duplicates} skipped as near-duplicates of existing notes`;
+      }
+      const flagged = (r.duplicates || []).filter((d) => !d.skipped);
+      if (flagged.length) {
+        msg += ` — ${flagged.length} possible duplicate${flagged.length === 1 ? '' : 's'} kept, worth a look (Vault → Find duplicate notes)`;
+      }
+      const needsAttention = (r.collisions && r.collisions.length) || r.skipped_duplicates || flagged.length;
+      toast(msg, needsAttention ? 8000 : undefined);
       await refreshAll();
       if (window.tephraReloadList) window.tephraReloadList();
     } catch (e) {

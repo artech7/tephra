@@ -23,10 +23,6 @@
   --edge:rgba(255,255,255,.13);
   --edge-hi:rgba(255,255,255,.34);
 
-  --px:0;
-  --py:0;
-  --shine:none;
-
   --r-md:16px;
   --r-sm:10px;
   --ease:cubic-bezier(.22,1,.36,1);
@@ -35,11 +31,6 @@
   --serif:'Newsreader',Georgia,serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
 }
-
-/* Dynamic glass: pointer position (--px/--py, -1..1) is written by JS on a
-   rAF loop only while enabled and prefers-reduced-motion is off. --shine
-   stays 'none' otherwise, so every layer below is a no-op when disabled. */
-body.glass-dyn{--shine:radial-gradient(560px circle at calc(50% + var(--px) * 42%) calc(38% + var(--py) * 32%),rgba(255,255,255,.16),transparent 60%)}
 
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -115,10 +106,10 @@ body.crucible .side{left:-100%;right:100%}
 }
 /* ink is the readability guarantee — it scales against frost, blur
    and dim so text never has to compete with the wallpaper */
-.topbar{background:var(--shine),linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),rgba(255,255,255,calc(var(--frost) + .022));border-bottom:1px solid var(--edge)}
-.sidebar{background:var(--shine),linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),linear-gradient(180deg,rgba(0,0,0,.10),rgba(0,0,0,.16)),rgba(255,255,255,var(--frost));border-right:1px solid var(--edge)}
-.editor{background:var(--shine),linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),rgba(255,255,255,var(--frost))}
-.context{background:var(--shine),linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.10)),rgba(255,255,255,var(--frost));border-left:1px solid var(--edge)}
+.topbar{background:linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),rgba(255,255,255,calc(var(--frost) + .022));border-bottom:1px solid var(--edge)}
+.sidebar{background:linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),linear-gradient(180deg,rgba(0,0,0,.10),rgba(0,0,0,.16)),rgba(255,255,255,var(--frost));border-right:1px solid var(--edge)}
+.editor{background:linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),rgba(255,255,255,var(--frost))}
+.context{background:linear-gradient(rgba(0,0,0,var(--ink)),rgba(0,0,0,var(--ink))),linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.10)),rgba(255,255,255,var(--frost));border-left:1px solid var(--edge)}
 
 .g2{backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);background:rgba(255,255,255,.07);border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset}
 .sect{border-top:1px solid var(--edge);padding-top:15px;margin-top:3px}
@@ -346,11 +337,11 @@ body.crucible .side{left:-100%;right:100%}
 
 /* ══ THEME DRAWER ════════════════════════════════════════════ */
 #theme{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:302px;border-radius:var(--radius);
-  background:var(--shine),rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
+  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
   border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 46px 100px -34px rgba(0,0,0,.85);
-  transform:translateX(calc(100% + var(--inset) + 14px)) translate(calc(var(--px) * 10px),calc(var(--py) * 8px));
+  transform:translateX(calc(100% + var(--inset) + 14px));
   transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
-#theme.on{transform:translateX(0) translate(calc(var(--px) * 10px),calc(var(--py) * 8px))}
+#theme.on{transform:translateX(0)}
 .th-head{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
 .th-head h4{font-size:15px;font-weight:600;letter-spacing:-.02em}
 .th-body{overflow-y:auto;padding:4px 18px 20px}
@@ -390,11 +381,11 @@ input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;bac
 .th-reset:hover{color:var(--paper);background:rgba(255,255,255,.13)}
 
 /* ══ OVERLAYS ════════════════════════════════════════════════ */
-.pane{background:var(--shine),rgba(255,255,255,.10);backdrop-filter:blur(36px) saturate(190%);-webkit-backdrop-filter:blur(36px) saturate(190%);border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 36px 76px -28px rgba(0,0,0,.85)}
+.pane{background:rgba(255,255,255,.10);backdrop-filter:blur(36px) saturate(190%);-webkit-backdrop-filter:blur(36px) saturate(190%);border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 36px 76px -28px rgba(0,0,0,.85)}
 #lens{position:fixed;z-index:60;width:330px;border-radius:20px;padding:16px;opacity:0;pointer-events:none;
-  transform:translateY(10px) scale(.94) translate(calc(var(--px) * 8px),calc(var(--py) * 6px));
+  transform:translateY(10px) scale(.94);
   transition:opacity .3s var(--ease),transform .42s var(--ease);transform-origin:top left}
-#lens.on{opacity:1;transform:translateY(0) scale(1) translate(calc(var(--px) * 8px),calc(var(--py) * 6px))}
+#lens.on{opacity:1;transform:translateY(0) scale(1)}
 #lens .l-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
 #lens .l-t{font-size:16px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
 #lens .l-b{font-family:var(--serif);font-size:13.5px;line-height:1.6;color:var(--muted);max-height:120px;overflow:hidden}
@@ -402,9 +393,9 @@ input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;bac
 #scrim{position:fixed;inset:0;z-index:70;background:rgba(3,8,9,.5);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);opacity:0;pointer-events:none;transition:opacity .3s var(--ease)}
 #scrim.on{opacity:1;pointer-events:auto}
 #palette{position:fixed;z-index:80;top:14vh;left:50%;width:min(600px,92vw);
-  transform:translateX(-50%) translateY(-14px) scale(.97) translate(calc(var(--px) * 6px),calc(var(--py) * 4px));
+  transform:translateX(-50%) translateY(-14px) scale(.97);
   border-radius:22px;overflow:hidden;opacity:0;pointer-events:none;transition:opacity .28s var(--ease),transform .4s var(--ease)}
-#palette.on{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0) scale(1) translate(calc(var(--px) * 6px),calc(var(--py) * 4px))}
+#palette.on{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0) scale(1)}
 #palette input[type=text]{width:100%;border:0;outline:0;background:transparent;padding:20px 22px;font-family:var(--display);font-size:17px;color:var(--paper);border-bottom:1px solid var(--edge)}
 #palette input::placeholder{color:var(--faint)}
 .plist{max-height:44vh;overflow-y:auto;padding:8px}
@@ -852,6 +843,13 @@ input.sv-select{cursor:text}
 .dc-part:hover:not(:disabled){text-decoration:underline;color:#fff}
 .dc-part:disabled{cursor:default;color:var(--faint)}
 .dc-sep{color:var(--faint);font-size:10px}
+
+/* ── duplicate-notes report, in Vault Health ── */
+.duprow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--edge);font-size:11.5px;color:var(--faint)}
+.duprow:first-of-type{border-top:0}
+.duprow .dc-part{font-size:10.5px;letter-spacing:.04em;text-transform:none;color:var(--muted)}
+.duprow .dc-part:hover{color:#fff}
+.dupscore{margin-left:auto;font-family:var(--mono);font-size:10px;color:rgb(var(--apricot));flex:none}
 
 /* topbar crumb now names the vault */
 #vaultCrumb{cursor:pointer;transition:color .2s var(--ease)}

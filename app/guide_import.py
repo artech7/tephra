@@ -10,9 +10,10 @@ knows its own vault, so importing through it cannot miss.
 from __future__ import annotations
 
 import ast
+import itertools
 import re
 
-from . import study, vault
+from . import dedupe, study, vault
 
 DEFAULT_ROOT_NOTE = "Study Guide"
 
@@ -71,6 +72,15 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     owns outright, so two guides that happen to share a category name merge
     onto one page instead of one replacing the other's links.
 
+    Title/id matching above only catches a topic that is *known* to be the
+    same note. A topic that is a near-duplicate under a different title --
+    reworded, or from a differently-named guide, or a hand-written note that
+    already covers the same ground -- gets a content check instead (see
+    dedupe.py): a near-certain match (>= dedupe.AUTO_SKIP_THRESHOLD) is
+    skipped outright and never written; anything past dedupe.REPORT_THRESHOLD
+    but short of that is imported as normal and reported back in
+    `duplicates`, never silently dropped on a guess that might be wrong.
+
     Parsing is delegated by file type; everything below this line works on
     the one normalised topic shape, so a new format needs no changes here.
     """
@@ -95,14 +105,27 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         n.title.strip().lower(): n.slug
         for n in existing.values() if n.meta.get("study_index") == "true"
     }
+    # Content corpus for the dedup check, computed once rather than per
+    # topic. Prose only -- quiz markup is stripped out so a heavy quiz
+    # section can't skew the ratio away from the prose that actually
+    # carries the content, matching what an incoming topic's own answer
+    # text (no quiz rendered into it yet) looks like.
+    existing_corpus = [
+        (n.slug, dedupe.content_text(n.title, n.meta.get("question"),
+                                     study.split_quiz(n.body)[0]))
+        for n in existing.values()
+    ]
+    batch_corpus: list[tuple[str, str]] = []   # topics already accepted this run
 
-    created = updated = preserved = 0
+    created = updated = preserved = skipped_duplicates = 0
     collisions: list[str] = []
+    duplicates: list[dict] = []
     by_category: dict[str, list[str]] = {}
 
     for t in topics:
         title_ = t["title"]
         category = t["category"]
+        content = dedupe.content_text(title_, t["question"], t["answer"])
 
         match_slug = None
         if t.get("id"):
@@ -112,6 +135,25 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         if match_slug is None:
             match_slug = owned_by_key.get((root_note, title_.strip().lower()))
         prior = existing.get(match_slug) if match_slug else None
+
+        if prior is None:
+            found = dedupe.best_match(content, itertools.chain(existing_corpus, batch_corpus))
+            if found:
+                dup_key, score = found
+                dup_note = existing.get(dup_key)
+                skip = score >= dedupe.AUTO_SKIP_THRESHOLD
+                duplicates.append({
+                    "title": title_,
+                    "matches": dup_note.title if dup_note else dup_key,
+                    "similarity": round(score, 3),
+                    "skipped": skip,
+                })
+                if skip:
+                    skipped_duplicates += 1
+                    batch_corpus.append((title_, content))
+                    continue
+
+        batch_corpus.append((title_, content))
 
         collide_slug = title_to_slug.get(title_.lower())
         needs_suffix = collide_slug is not None and collide_slug != match_slug
@@ -228,5 +270,7 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         "notes_total": created + updated + len(by_category) + 1,
         "manual_overrides_kept": preserved,
         "collisions": collisions,
+        "skipped_duplicates": skipped_duplicates,
+        "duplicates": duplicates,
         "dry_run": dry_run,
     }
