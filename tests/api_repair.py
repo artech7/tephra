@@ -130,7 +130,7 @@ with TestClient(app) as c:
     ck("options preserved",
        item["quiz"][0]["options"] == ["A firewall drops ICMP but permits tcp/443", "The host is Down"],
        item["quiz"][0]["options"])
-    ck("correct answer preserved", item["quiz"][0]["answer"] == 0)
+    ck("correct answer preserved", item["quiz"][0]["answers"] == [0])
 
     print("\n── flattened links point at real notes now ──")
     ck("Answer Ping was created", c.get("/api/notes/answer-ping").status_code == 200)

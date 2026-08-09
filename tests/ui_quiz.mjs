@@ -27,7 +27,7 @@ window.tephraApi = async (p, o = {}) => {
   if (p.startsWith('/study/quiz')) {
     const n = +new URLSearchParams(p.split('?')[1]).get('n');
     return { pool: 29, questions: Array.from({ length: Math.min(n, 29) }, (_, i) =>
-      ({ id: 'q' + i, question: 'Q' + i, options: ['a', 'b'], answer: 0, why: '', slug: 's', title: 'T', category: 'Networking', stats: { seen: 0, right: 0 }, flagged: false })) };
+      ({ id: 'q' + i, question: 'Q' + i, options: ['a', 'b'], answers: [0], why: '', slug: 's', title: 'T', category: 'Networking', stats: { seen: 0, right: 0 }, flagged: false })) };
   }
   throw new Error(p);
 };

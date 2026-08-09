@@ -118,8 +118,11 @@ def _plain(text: str) -> str:
 def parse_quiz(section: str) -> list[dict]:
     """Parse Q / option / Why blocks.
 
-    A malformed block is skipped rather than raising: this is user-edited
-    markdown, and one typo must not take down the whole study section.
+    `answers` is every `[x]`-marked option's index, not just one -- a
+    question can have more than one correct choice, marked with multiple
+    `[x]` lines. A malformed block is skipped rather than raising: this is
+    user-edited markdown, and one typo must not take down the whole study
+    section.
     """
     if not section.strip():
         return []
@@ -131,7 +134,7 @@ def parse_quiz(section: str) -> list[dict]:
             continue
         question = qm.group(1).strip()
         options: list[str] = []
-        answer = -1
+        answers: list[int] = []
         for line in blk.splitlines():
             om = OPT_LINE.match(line.strip())
             if line.strip().startswith("-") and om:
@@ -140,15 +143,15 @@ def parse_quiz(section: str) -> list[dict]:
                 if not text:
                     continue
                 if marked:
-                    answer = len(options)
+                    answers.append(len(options))
                 options.append(text)
         wm = WHY_LINE.search(blk)
-        if len(options) < 2 or answer < 0:
+        if len(options) < 2 or not answers:
             continue                    # unanswerable; leave it out
         out.append({
             "question": _plain(question),
             "options": [_plain(o) for o in options],
-            "answer": answer,
+            "answers": answers,
             "why": _plain(wm.group(1).strip()) if wm else "",
         })
     return out
@@ -158,8 +161,9 @@ def render_quiz(items: list[dict]) -> str:
     lines = ["## Quiz", ""]
     for it in items:
         lines.append(f"Q: {it['question']}")
+        marked = set(it["answers"])
         for i, opt in enumerate(it["options"]):
-            lines.append(f"- {'[x] ' if i == it['answer'] else ''}{opt}")
+            lines.append(f"- {'[x] ' if i in marked else ''}{opt}")
         if it.get("why"):
             lines.append(f"Why: {it['why']}")
         lines.append("")

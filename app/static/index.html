@@ -118,6 +118,16 @@
           <div class="body" id="noteBody"></div>
           <textarea class="src" id="noteSrc" spellcheck="false" hidden placeholder="Write in markdown. [[Double brackets]] link a note, ![[file.png]] embeds one."></textarea>
           <div class="hint" id="editHint">CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH</div>
+
+          <section class="quizedit" id="quizEdit">
+            <div class="quizedit-head">
+              <span class="quizedit-title">Quiz</span>
+              <span class="quizedit-save" id="quizSaveChip"></span>
+            </div>
+            <div class="quizedit-list" id="quizList"></div>
+            <button class="quizedit-add" id="quizAdd" type="button">+ Add quiz question</button>
+            <div class="quizedit-note">Check more than one box on a question for multiple correct answers. This is the same <code>## Quiz</code> section as the markdown source — hand-editing it in ⌘E source mode stays in sync with this.</div>
+          </section>
         </div>
       </div>
     </main>
@@ -407,5 +417,6 @@
 <script src="/static/links.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/study.js"></script>
+<script src="/static/quiz-editor.js"></script>
 </body>
 </html>

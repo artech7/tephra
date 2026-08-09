@@ -41,7 +41,7 @@ cs = "category,title,answer,question,option_a,option_b,correct,why\nStorage,RAID
 shapes = []
 for name, src in (("g.py", py), ("g.json", js), ("g.csv", cs)):
     t = I.parse(name, src)
-    shapes.append((t[0]["title"], t[0]["category"], len(t[0]["quiz"]), t[0]["quiz"][0]["answer"]))
+    shapes.append((t[0]["title"], t[0]["category"], len(t[0]["quiz"]), tuple(t[0]["quiz"][0]["answers"])))
     ck(f"{name} parses", t[0]["title"] == "RAID" and len(t[0]["quiz"]) == 1, shapes[-1])
 ck("all three agree", len(set(shapes)) == 1, shapes)
 

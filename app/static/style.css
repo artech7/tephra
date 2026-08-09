@@ -315,6 +315,49 @@ body[data-wall="aurora"] .newnote:hover{
 .src:focus{border-color:rgba(var(--acc),.45);box-shadow:0 0 0 1px rgba(var(--acc),.25)}
 .hint{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:10px;letter-spacing:.05em}
 
+/* ══ QUIZ EDITOR ═════════════════════════════════════════════
+   A form over the same `## Quiz` markdown section source mode edits as
+   text -- sits below the note, same "separate section" spot a `## Quiz`
+   heading already occupied, just no longer rendered a second time as
+   plain markdown inside .body (see get_note's prose-only html). */
+.quizedit{margin-top:40px;padding-top:22px;border-top:1px solid var(--edge)}
+.quizedit-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.quizedit-title{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:-.02em;color:#fff}
+.quizedit-save{font-family:var(--mono);font-size:10px;color:var(--faint);transition:color .3s var(--ease)}
+.quizedit-save[data-state="saving"]{color:#FFD2B8}
+.quizedit-save[data-state="error"]{color:#FFB3B3}
+.quizedit-list{display:flex;flex-direction:column;gap:14px}
+.quizitem{padding:16px 18px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--edge)}
+.quizitem-qrow{display:flex;gap:8px;align-items:flex-start;margin-bottom:12px}
+.quizitem-q{flex:1;font:inherit;font-family:var(--display);font-size:15px;color:#fff;
+  background:none;border:0;outline:none;resize:none;line-height:1.5;padding:0}
+.quizitem-q::placeholder,.quizitem-why::placeholder,.quizopt-text::placeholder{color:var(--faint)}
+.quizitem-del,.quizopt-del{flex:none;border-radius:7px;border:1px solid var(--edge);background:rgba(255,255,255,.05);
+  color:var(--faint);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s var(--ease)}
+.quizitem-del{width:26px;height:26px}
+.quizitem-del svg{width:12px;height:12px}
+.quizitem-del:hover,.quizopt-del:hover:not(:disabled){color:#fff;border-color:rgba(255,110,110,.5);background:rgba(255,110,110,.16)}
+.quizitem-del.armed{color:#fff;background:rgba(255,80,80,.55);border-color:rgba(255,80,80,.7)}
+.quizitem-opts{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.quizopt-row{display:flex;align-items:center;gap:8px}
+.quizopt-check{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex:none}
+.quizopt-text{flex:1;min-width:0;font:inherit;font-size:13.5px;color:var(--paper);
+  background:rgba(0,0,0,.22);border:1px solid var(--edge);border-radius:8px;padding:7px 10px;outline:none;transition:border-color .2s var(--ease)}
+.quizopt-text:focus{border-color:rgba(var(--acc),.45)}
+.quizopt-del{width:22px;height:22px;font-size:14px;line-height:1}
+.quizopt-del:disabled{opacity:.3;cursor:default}
+.quizitem-addopt{align-self:flex-start;font:inherit;font-size:12px;color:var(--muted);background:none;
+  border:1px dashed var(--edge);border-radius:8px;padding:6px 12px;cursor:pointer;margin-bottom:10px;transition:.2s var(--ease)}
+.quizitem-addopt:hover{color:#fff;border-color:rgba(var(--acc),.4)}
+.quizitem-why{width:100%;font:inherit;font-size:13px;color:var(--muted);background:rgba(0,0,0,.18);
+  border:1px solid var(--edge);border-radius:8px;padding:8px 10px;outline:none;resize:none;transition:border-color .2s var(--ease)}
+.quizitem-why:focus{border-color:rgba(var(--acc),.4)}
+.quizedit-add{width:100%;margin-top:4px;height:38px;border-radius:10px;background:rgba(255,255,255,.05);
+  border:1px dashed var(--edge);color:var(--muted);font:inherit;font-size:13px;cursor:pointer;transition:.2s var(--ease)}
+.quizedit-add:hover{color:#fff;border-color:rgba(var(--acc),.45);background:rgba(var(--acc),.08)}
+.quizedit-note{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:12px;line-height:1.5}
+.quizedit-note code{font-family:var(--mono);background:rgba(0,0,0,.3);padding:1px 4px;border-radius:4px}
+
 /* the signature: liquid wikilink */
 .wl{position:relative;cursor:pointer;color:#fff;text-decoration:none;padding:1px 5px;margin:0 -1px;border-radius:6px;white-space:nowrap;
   background:linear-gradient(180deg,rgba(var(--acc),.20),rgba(var(--acc),.07));
@@ -651,11 +694,16 @@ input.sv-select{cursor:text}
 .sv-flagbtn{margin-left:auto;font:inherit;font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:7px;cursor:pointer;background:rgba(255,255,255,.06);border:1px solid var(--edge);color:var(--muted)}
 .sv-flagbtn.on{background:rgba(var(--apricot),.2);border-color:rgba(var(--apricot),.45);color:#FFD2B8}
 .sv-quiz-q{font-family:var(--serif);font-size:20px;line-height:1.5}
+.sv-quiz-hint{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-top:-6px}
 .sv-opts{display:flex;flex-direction:column;gap:9px}
 .sv-opt{font:inherit;font-size:14.5px;text-align:left;padding:13px 16px;border-radius:12px;cursor:pointer;color:var(--paper);
   background:rgba(255,255,255,.055);border:1px solid var(--edge);transition:.22s var(--ease)}
 .sv-opt:hover:not(:disabled){background:rgba(255,255,255,.12);border-color:rgba(var(--acc),.4)}
 .sv-opt:disabled{cursor:default}
+/* Picked-but-not-yet-submitted, on a multi-answer question -- a lighter
+   accent than the post-grade .right, so "checked" and "correct" never
+   look identical while you're still choosing. */
+.sv-opt.picked{background:rgba(var(--acc),.14);border-color:rgba(var(--acc),.45)}
 .sv-opt.right{background:rgba(var(--acc),.22);border-color:rgba(var(--acc),.6)}
 .sv-opt.wrong{background:rgba(255,120,120,.16);border-color:rgba(255,120,120,.5)}
 .sv-why{padding:14px 16px;border-radius:13px;background:rgba(255,255,255,.05);border:1px solid var(--edge);font-size:13.5px;line-height:1.6;color:var(--muted)}

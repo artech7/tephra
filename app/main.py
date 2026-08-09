@@ -233,7 +233,14 @@ def get_note(slug: str):
     note = vault.read(slug)
     if not note:
         raise HTTPException(404, "note not found")
-    body_html, targets, used = rndr.render(note.body, resolver())
+    # links_out/media still count the whole file -- a link or embed sitting
+    # inside the quiz section is unusual but real, and shouldn't vanish from
+    # those counts. The *displayed* HTML is prose only: quiz has its own
+    # editor now, so rendering it a second time as a plain markdown list
+    # inside the note body would just be the same content shown twice.
+    _, targets, used = rndr.render(note.body, resolver())
+    prose, _ = st.split_quiz(note.body)
+    body_html, _, _ = rndr.render(prose, resolver())
     item = st.load_item(note)
     flagged = set(st.load_progress()["flagged"])
     flagged_qs = [{"id": q["id"], "question": q["question"]}
@@ -249,6 +256,7 @@ def get_note(slug: str):
         "backlinks": idx.backlinks(db(), slug),
         "suggestions": idx.suggestions(db(), slug, limit=6),
         "words": len(note.body.split()),
+        "quiz": item["quiz"],
     }
 
 
@@ -290,7 +298,8 @@ def save_note(slug: str, payload: NoteIn):
                 _apply_tags(renamed, payload.tags)
             vault.write(renamed)
             idx.rebuild(db())          # a retitle can repoint links vault-wide
-            return {**_note_dict(renamed), "renamed_to": renamed.slug}
+            return {**_note_dict(renamed), "renamed_to": renamed.slug,
+                    "quiz": st.load_item(renamed)["quiz"]}
 
     if payload.body is not None:
         note.body = payload.body
@@ -298,7 +307,47 @@ def save_note(slug: str, payload: NoteIn):
         _apply_tags(note, payload.tags)
     vault.write(note)
     idx.reindex_note(db(), note)
-    return _note_dict(note)
+    # A hand-edited `## Quiz` section (source mode is still there for anyone
+    # who prefers it) needs to reach the structured quiz editor too, or the
+    # two views of the same markdown would drift apart.
+    return {**_note_dict(note), "quiz": st.load_item(note)["quiz"]}
+
+
+class QuizItemIn(BaseModel):
+    question: str
+    options: list[str]
+    answers: list[int]
+    why: str = ""
+
+
+class QuizIn(BaseModel):
+    items: list[QuizItemIn]
+
+
+@app.put("/api/notes/{slug}/quiz")
+def save_quiz(slug: str, payload: QuizIn):
+    """The quiz editor's save path -- parallel to save_note's free-text one,
+    for whoever would rather fill in a form than write `Q:`/`- [x]`/`Why:`
+    by hand. Either way the only thing on disk is the same markdown: this
+    re-renders the `## Quiz` section from structured items and splices it
+    back after the prose, exactly what a hand edit would have produced.
+
+    A question with under 2 options or no marked answer is left out of what
+    gets written, the same tolerance parse_quiz already has reading it back
+    in -- so a question the user hasn't finished composing yet just doesn't
+    persist until it's answerable, rather than being saved broken.
+    """
+    note = vault.read(slug)
+    if not note:
+        raise HTTPException(404, "note not found")
+    prose, _ = st.split_quiz(note.body)
+    items = [it.model_dump() for it in payload.items
+             if len(it.options) >= 2 and it.answers]
+    note.body = prose + ("\n\n" + st.render_quiz(items) if items else "")
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    item = st.load_item(note)
+    return {**_note_dict(note), "quiz": item["quiz"]}
 
 
 @app.delete("/api/notes/{slug}")

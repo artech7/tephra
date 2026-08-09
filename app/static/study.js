@@ -16,11 +16,19 @@
     open: false, mode: 'browse', data: null,
     category: '', item: null,
     cards: [], cardIx: 0, cardFlipped: false,
-    quiz: [], quizIx: 0, quizPicked: null, quizScore: 0, quizDone: false,
+    // quizPicked is always an array of chosen option indices, even for a
+    // single-answer question -- one question shape, whether it has one
+    // correct answer or several. quizSubmitted separates "still choosing"
+    // (relevant only once a question allows more than one pick) from
+    // "graded", since picking stops being instant the moment more than one
+    // box can be checked.
+    quiz: [], quizIx: 0, quizPicked: null, quizSubmitted: false, quizScore: 0, quizDone: false,
   };
 
   const api = window.tephraApi;
   const toast = window.tephraToast;
+
+  const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
 
   /* One file input for the whole module, created once and kept OUTSIDE any
      label. A <label> forwards activation to a nested input on its own, so
@@ -145,7 +153,8 @@
      round, built from a pool you were no longer looking at. */
   function resetBrowse() {
     S.item = null;
-    S.quiz = []; S.quizIx = 0; S.quizPicked = null; S.quizScore = 0; S.quizDone = false;
+    S.quiz = []; S.quizIx = 0; S.quizPicked = null; S.quizSubmitted = false;
+    S.quizScore = 0; S.quizDone = false;
   }
 
   const inCat = (it) => !S.category || it.category === S.category;
@@ -225,7 +234,7 @@
       for (const q of item.quiz) {
         const b = el('div', 'sv-qpeek');
         b.appendChild(el('div', 'sv-qpeek-q', q.question));
-        const ans = el('div', 'sv-qpeek-a', '✓ ' + q.options[q.answer]);
+        const ans = el('div', 'sv-qpeek-a', '✓ ' + q.answers.map((i) => q.options[i]).join(', '));
         b.appendChild(ans);
         if (q.why) b.appendChild(el('div', 'sv-qpeek-w', q.why));
         main.appendChild(b);
@@ -356,7 +365,8 @@
     if (opts.weakest) params.set('weakest_first', 'true');
     const r = await api('/study/quiz?' + params);
     S.quiz = r.questions;
-    S.quizIx = 0; S.quizPicked = null; S.quizScore = 0; S.quizDone = false;
+    S.quizIx = 0; S.quizPicked = null; S.quizSubmitted = false;
+    S.quizScore = 0; S.quizDone = false;
     render();
   }
 
@@ -395,32 +405,58 @@
     wrap.appendChild(meta);
 
     wrap.appendChild(el('div', 'sv-quiz-q', q.question));
+    const multi = q.answers.length > 1;
+    if (multi) wrap.appendChild(el('div', 'sv-quiz-hint', 'Select all that apply'));
+
+    const picked = S.quizPicked || [];
+    const answered = S.quizSubmitted;
+
+    async function lockIn() {
+      S.quizSubmitted = true;
+      const correct = sameSet(picked, q.answers);
+      if (correct) S.quizScore++;
+      await api('/study/answer', { method: 'POST', body: JSON.stringify({ qid: q.id, correct }) });
+      render();
+    }
 
     const opts = el('div', 'sv-opts');
     q.options.forEach((text, i) => {
       const b = el('button', 'sv-opt');
       b.textContent = text;
-      if (S.quizPicked !== null) {
-        if (i === q.answer) b.classList.add('right');
-        else if (i === S.quizPicked) b.classList.add('wrong');
+      if (answered) {
+        if (q.answers.includes(i)) b.classList.add('right');
+        else if (picked.includes(i)) b.classList.add('wrong');
         b.disabled = true;
+      } else if (multi && picked.includes(i)) {
+        b.classList.add('picked');
       }
-      b.onclick = async () => {
-        if (S.quizPicked !== null) return;
-        S.quizPicked = i;
-        const correct = i === q.answer;
-        if (correct) S.quizScore++;
-        await api('/study/answer', { method: 'POST', body: JSON.stringify({ qid: q.id, correct }) });
-        render();
+      b.onclick = () => {
+        if (answered) return;
+        if (multi) {
+          const at = picked.indexOf(i);
+          if (at === -1) picked.push(i); else picked.splice(at, 1);
+          S.quizPicked = picked;
+          render();
+          return;
+        }
+        S.quizPicked = [i];
+        lockIn();
       };
       opts.appendChild(b);
     });
     wrap.appendChild(opts);
 
-    if (S.quizPicked !== null) {
+    if (multi && !answered) {
+      const submit = el('button', 'sv-btn primary', 'Submit');
+      submit.disabled = picked.length === 0;
+      submit.onclick = lockIn;
+      wrap.appendChild(submit);
+    }
+
+    if (answered) {
       const why = el('div', 'sv-why');
       why.appendChild(el('div', 'sv-why-h',
-        S.quizPicked === q.answer ? 'Correct' : 'Not quite'));
+        sameSet(picked, q.answers) ? 'Correct' : 'Not quite'));
       if (q.why) why.appendChild(el('div', null, q.why));
       const hint = el('button', 'sv-back', `Read the full topic: ${q.title} →`);
       hint.onclick = async () => {
@@ -433,8 +469,9 @@
       const next = el('button', 'sv-btn primary',
         S.quizIx + 1 < S.quiz.length ? 'Next question →' : 'See results');
       next.onclick = () => {
-        if (S.quizIx + 1 < S.quiz.length) { S.quizIx++; S.quizPicked = null; }
-        else S.quizDone = true;
+        if (S.quizIx + 1 < S.quiz.length) {
+          S.quizIx++; S.quizPicked = null; S.quizSubmitted = false;
+        } else S.quizDone = true;
         render();
       };
       wrap.appendChild(next);

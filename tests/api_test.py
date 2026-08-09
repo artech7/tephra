@@ -525,6 +525,48 @@ with TestClient(app) as c:
     check("unrelated notes are not paired up",
        not any({p["a_title"], p["b_title"]} & {"DHCP Overview"} for p in scan), scan)
 
+    print("\n── quiz editor: structured save ──")
+    qnote = c.post("/api/notes", json={"title": "Quiz Editor Note",
+                                        "body": "Some prose about the topic.\n"}).json()
+    qslug = qnote["slug"]
+    saved = c.put(f"/api/notes/{qslug}/quiz", json={"items": [
+        {"question": "Single-answer question?", "options": ["Right", "Wrong"],
+         "answers": [0], "why": "Because."},
+        {"question": "Multi-answer question?", "options": ["A", "B", "C"],
+         "answers": [0, 2], "why": ""},
+        # No options marked correct -- unanswerable, must not be persisted.
+        {"question": "Half-finished question", "options": ["Only one so far"],
+         "answers": [], "why": ""},
+    ]}).json()
+    check("response reports only the two answerable questions",
+       len(saved["quiz"]) == 2, [q["question"] for q in saved["quiz"]])
+    single = next(q for q in saved["quiz"] if q["question"] == "Single-answer question?")
+    multi = next(q for q in saved["quiz"] if q["question"] == "Multi-answer question?")
+    check("single answer round-trips as a one-element list", single["answers"] == [0], single["answers"])
+    check("multi answer keeps both indices", sorted(multi["answers"]) == [0, 2], multi["answers"])
+
+    on_disk = open(f"{VAULT}/notes/{qslug}.md").read()
+    check("prose is untouched", "Some prose about the topic." in on_disk)
+    check("multi-answer question has two [x] marks in the file",
+       on_disk.count("- [x] A") == 1 and on_disk.count("- [x] C") == 1, on_disk)
+    check("the half-finished question was never written",
+       "Half-finished" not in on_disk)
+
+    refetched = c.get(f"/api/notes/{qslug}").json()
+    check("GET agrees with the save response", len(refetched["quiz"]) == 2,
+       [q["question"] for q in refetched["quiz"]])
+    check("the note's displayed html is prose only, not the quiz text a second time",
+       "Multi-answer question?" not in refetched["html"] and "Some prose" in refetched["html"],
+       refetched["html"])
+
+    print("\n── quiz editor: hand-edited markdown round-trips back through the same parser ──")
+    hand = c.put(f"/api/notes/{qslug}", json={
+        "body": "Rewritten prose.\n\n## Quiz\n\nQ: Hand-written?\n- [x] Yes\n- No\nWhy: because.\n"}).json()
+    check("save_note also reports the quiz array", len(hand["quiz"]) == 1, hand["quiz"])
+    check("hand-written question parsed correctly",
+       hand["quiz"][0]["question"] == "Hand-written?" and hand["quiz"][0]["answers"] == [0],
+       hand["quiz"][0])
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

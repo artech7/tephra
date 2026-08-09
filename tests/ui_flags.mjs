@@ -24,7 +24,7 @@ window.fetch = async (u, o = {}) => {
     if (sp.get('only_flagged') === 'true') pool = pool.filter((q) => flagged.has(q.id));
     b = { pool: pool.length, questions: pool.slice(0, +sp.get('n') || 12).map((q) => ({
       id: q.id, slug: q.slug, title: noteMeta[q.slug].title, category: 'Net',
-      question: 'Q ' + q.id, options: ['a', 'b'], answer: 0, why: '',
+      question: 'Q ' + q.id, options: ['a', 'b'], answers: [0], why: '',
       stats: { seen: 0, right: 0 }, flagged: flagged.has(q.id) })) };
   }
   else if (p.includes('/api/study')) b = {

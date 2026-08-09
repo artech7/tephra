@@ -45,6 +45,17 @@ window.tephraRefreshFlags = async () => {
     } catch {}
   }
 };
+// The quiz editor calls this after its own save, so a stale #noteSrc
+// textarea can't clobber those changes on the prose editor's next autosave
+// -- the quiz section is part of the same note.body, just edited from a
+// different form. Skipped while the user has unsaved prose mid-edit, so
+// their own in-progress keystrokes are never the thing that gets discarded.
+window.tephraSyncBody = (body, forSlug) => {
+  if (forSlug !== state.slug) return;
+  if (state.editing && state.dirty) return;
+  if (state.note) state.note.body = body;
+  $('#noteSrc').value = body;
+};
 window.tephraReloadList = async () => {
   window.tephraLinks?.poll();
   await loadList();
@@ -508,6 +519,7 @@ async function openNote(slug, push = true) {
   renderStudyChip(note);
   renderFlagChip(note);
   renderDeleteButton();
+  window.tephraQuizEdit?.render(note.quiz, slug);
   document.querySelectorAll('#noteList .node').forEach((el) =>
     el.toggleAttribute('aria-current', el.dataset.slug === slug));
   drawMini();
@@ -735,6 +747,7 @@ async function deleteNoteBySlug(slug, title) {
       $('#noteTitle').value = '';
       $('#docCrumb').hidden = true;
       $('#noteBody').innerHTML = '<p class="empty">No notes left. Create one.</p>';
+      window.tephraQuizEdit?.render([], null);
     }
   }
   window.tephraStudy?.refresh();
@@ -1119,6 +1132,7 @@ async function setEditing(on) {
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
     renderBacklinks(note.backlinks);
+    window.tephraQuizEdit?.render(note.quiz, state.slug);
       loadList();
     drawMini();
   }

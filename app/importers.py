@@ -4,7 +4,13 @@ Study-guide importers.
 Everything lands on one normalised shape before it touches the vault:
 
     {"title", "category", "question", "answer", "id",
-     "quiz": [{"question", "options", "answer", "why"}]}
+     "quiz": [{"question", "options", "answers", "why"}]}
+
+Every external format still names one correct choice per question (`answer`,
+singular) -- that's the interchange syntax people actually write. It's
+wrapped into `answers: [index]` once normalised, matching study.py's
+internal shape, which does allow more than one correct index (multi-select
+questions built through the in-app quiz editor, not through import).
 
 Adding a format means writing a parser to that shape and nothing else. Field
 names are matched leniently on purpose — a guide someone exported from a
@@ -114,7 +120,7 @@ def _norm_quiz(raw: list, one_based: bool = False) -> list[dict]:
         except ImportError_:
             continue          # skip the question, don't fail the whole import
         out.append({"question": str(question).strip(), "options": options,
-                    "answer": answer,
+                    "answers": [answer],
                     "why": str(_pick(q, QUIZ_ALIASES["why"], "") or "").strip()})
     return out
 
@@ -260,7 +266,7 @@ def parse_csv(source: str) -> list[dict]:
                 skipped.append(f"{str(qtext)[:40]} ({exc})")
                 continue
             slot["quiz"].append({"question": str(qtext).strip(), "options": options,
-                                 "answer": answer,
+                                 "answers": [answer],
                                  "why": str(_pick(row, QUIZ_ALIASES["why"], "") or "").strip()})
     if not rows:
         raise ImportError_("CSV had a header but no rows")
