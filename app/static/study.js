@@ -36,6 +36,29 @@
     });
   }
 
+  /* Browse-grid cards: a lighter tilt than wireTilt's (these sit shoulder to
+     shoulder in a grid, so a big lean reads as chaos, not depth) plus --mx/
+     --my for the foil/glitter pseudo-elements in style.css. Own mousemove
+     per card, same as wireTilt -- a shared container listener would mean
+     every card in the grid re-computing on every pixel the cursor crosses. */
+  function wireFoil(cardEl) {
+    cardEl.addEventListener('mousemove', (e) => {
+      const b = cardEl.getBoundingClientRect();
+      const cx = e.clientX - b.left - b.width / 2;
+      const cy = e.clientY - b.top - b.height / 2;
+      const deg = Math.min(Math.sqrt(cx * cx + cy * cy) / 24, 6);
+      cardEl.style.transform =
+        `perspective(800px) translateY(-2px) rotate3d(${cy / 160},${-cx / 160},0,${deg}deg)`;
+      cardEl.style.setProperty('--mx', ((cx + b.width / 2) / b.width * 100).toFixed(1) + '%');
+      cardEl.style.setProperty('--my', ((cy + b.height / 2) / b.height * 100).toFixed(1) + '%');
+    });
+    cardEl.addEventListener('mouseleave', () => {
+      cardEl.style.transform = '';
+      cardEl.style.setProperty('--mx', '50%');
+      cardEl.style.setProperty('--my', '50%');
+    });
+  }
+
   const S = {
     open: false, mode: 'browse', data: null,
     category: '', item: null,
@@ -227,6 +250,7 @@
         S.item = await api('/study/item/' + it.slug);
         render();
       };
+      if (!reduce) wireFoil(card);
       grid.appendChild(card);
     }
     main.appendChild(grid);
