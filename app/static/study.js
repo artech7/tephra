@@ -114,6 +114,14 @@
         <button data-mode="search"  aria-pressed="false">Search</button>
       </div>
       <button class="sv-import" id="svImport" title="Import or merge a study guide file into this vault">Import/Merge</button>
+      <button class="sv-import" id="svImportPathToggle" title="Import a guide plus its images straight from a folder on disk">Import from folder…</button>
+    </div>
+    <div class="sv-pathimport" id="svPathImport" hidden>
+      <input type="text" id="svPathInput" placeholder="/path/to/guide folder (or the guide file itself)">
+      <button id="svPathGo">Import</button>
+      <span class="sv-pathimport-h">Searches the folder for a guide file and, recursively, for any
+        images its topics reference by filename — for guides with more images than a browser
+        upload should carry.</span>
     </div>
     <div class="sv-body">
       <aside class="sv-cats"><div class="eyebrow"><span>Categories</span></div><div id="svCatList"></div></aside>
@@ -127,6 +135,13 @@
   // guide is empty, which made importing unreachable the moment anything at
   // all had been added.
   $('#svImport').onclick = () => pickFile(null);
+  $('#svImportPathToggle').onclick = () => {
+    const panel = $('#svPathImport');
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) $('#svPathInput').focus();
+  };
+  $('#svPathGo').onclick = () => doImportPath();
+  $('#svPathInput').onkeydown = (e) => { if (e.key === 'Enter') doImportPath(); };
   wireDrop(view.querySelector('.sv-body'));
   view.querySelectorAll('.sv-modes button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 
@@ -788,6 +803,36 @@
     });
   }
 
+  // Shared by the upload path and the folder-path import below -- both
+  // return the same guide_import summary shape, images and all.
+  function summarizeImport(r) {
+    let msg = `Imported ${r.topics} topics, ${r.questions} questions, ${r.categories} categories`;
+    if (r.images_embedded) {
+      msg += `, ${r.images_embedded} image${r.images_embedded === 1 ? '' : 's'}`;
+    }
+    if (r.collisions && r.collisions.length) {
+      msg += ` — ${r.collisions.length} matched an existing note by title and were kept separate`;
+    }
+    if (r.skipped_duplicates) {
+      msg += ` — ${r.skipped_duplicates} skipped as near-duplicates of existing notes`;
+    }
+    const flagged = (r.duplicates || []).filter((d) => !d.skipped);
+    if (flagged.length) {
+      msg += ` — ${flagged.length} possible duplicate${flagged.length === 1 ? '' : 's'} kept, worth a look (Vault → Find duplicate notes)`;
+    }
+    const missingTopics = r.missing_images || [];
+    const missingCount = missingTopics.reduce((n, m) => n + m.files.length, 0);
+    if (missingCount) {
+      msg += ` — ${missingCount} referenced image${missingCount === 1 ? '' : 's'} not found in the search folder`;
+    }
+    if (r.duplicate_image_names && r.duplicate_image_names.length) {
+      msg += ` — ${r.duplicate_image_names.length} image filename${r.duplicate_image_names.length === 1 ? '' : 's'} appeared more than once, first match used`;
+    }
+    const needsAttention = (r.collisions && r.collisions.length) || r.skipped_duplicates
+      || flagged.length || missingCount || (r.duplicate_image_names && r.duplicate_image_names.length);
+    return { msg, needsAttention };
+  }
+
   async function doImport(file, host) {
     const label = host && host.querySelector('.sv-drop-t');
     if (host) host.classList.add('busy');
@@ -798,18 +843,7 @@
     fd.append('file', file);
     try {
       const r = await api('/study/import', { method: 'POST', body: fd });
-      let msg = `Imported ${r.topics} topics, ${r.questions} questions, ${r.categories} categories`;
-      if (r.collisions && r.collisions.length) {
-        msg += ` — ${r.collisions.length} matched an existing note by title and were kept separate`;
-      }
-      if (r.skipped_duplicates) {
-        msg += ` — ${r.skipped_duplicates} skipped as near-duplicates of existing notes`;
-      }
-      const flagged = (r.duplicates || []).filter((d) => !d.skipped);
-      if (flagged.length) {
-        msg += ` — ${flagged.length} possible duplicate${flagged.length === 1 ? '' : 's'} kept, worth a look (Vault → Find duplicate notes)`;
-      }
-      const needsAttention = (r.collisions && r.collisions.length) || r.skipped_duplicates || flagged.length;
+      const { msg, needsAttention } = summarizeImport(r);
       toast(msg, needsAttention ? 8000 : undefined);
       await refreshAll();
       if (window.tephraReloadList) window.tephraReloadList();
@@ -826,6 +860,38 @@
     } finally {
       if (host) host.classList.remove('busy');
       if (label) label.textContent = 'Import/Merge study guide';
+    }
+  }
+
+  async function doImportPath() {
+    const input = $('#svPathInput');
+    const path = input.value.trim();
+    if (!path) return;
+    const btn = $('#svPathGo');
+    btn.disabled = true;
+    const prevLabel = btn.textContent;
+    btn.textContent = 'Importing…';
+    toast(`Reading ${path}…`, 20000);
+    try {
+      const r = await api('/study/import/path', { method: 'POST', body: JSON.stringify({ path }) });
+      const { msg, needsAttention } = summarizeImport(r);
+      toast(msg, needsAttention ? 8000 : undefined);
+      input.value = '';
+      $('#svPathImport').hidden = true;
+      await refreshAll();
+      if (window.tephraReloadList) window.tephraReloadList();
+    } catch (e) {
+      let detail = String((e && e.message) || e);
+      try { detail = JSON.parse(detail).detail || detail; } catch {}
+      toast(detail.slice(0, 180), 6000);
+      const main = $('#svMain');
+      if (main) {
+        const err = el('div', 'sv-warn', 'Import failed: ' + detail.slice(0, 240));
+        main.appendChild(err);
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevLabel;
     }
   }
 

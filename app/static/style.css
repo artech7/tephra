@@ -715,6 +715,13 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .sv-modes{display:flex;gap:2px;padding:3px;margin-left:auto;border-radius:var(--r-sm);background:rgba(0,0,0,.24);border:1px solid var(--edge)}
 .sv-modes button{font:inherit;font-size:12px;font-weight:500;padding:6px 14px;border:0;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;transition:.28s var(--ease)}
 .sv-modes button[aria-pressed="true"]{background:rgba(255,255,255,.14);color:var(--paper);box-shadow:0 1px 0 var(--edge-hi) inset}
+.sv-pathimport{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 22px;border-bottom:1px solid var(--edge);background:rgba(0,0,0,.14)}
+.sv-pathimport input{flex:1 1 320px;font:inherit;font-family:var(--mono);font-size:11.5px;padding:8px 11px;border-radius:8px;border:1px solid var(--edge);background:rgba(0,0,0,.24);color:var(--paper)}
+.sv-pathimport input:focus{outline:0;border-color:rgba(var(--acc),.7)}
+.sv-pathimport button{font:inherit;font-size:12px;padding:7px 14px;border-radius:8px;border:1px solid var(--edge);background:rgba(255,255,255,.08);color:var(--paper);cursor:pointer}
+.sv-pathimport button:hover{background:rgba(255,255,255,.14)}
+.sv-pathimport button:disabled{opacity:.6;cursor:default}
+.sv-pathimport-h{flex-basis:100%;font-family:var(--mono);font-size:10px;color:var(--faint);line-height:1.5}
 .sv-body{display:grid;grid-template-columns:236px 1fr;min-height:0}
 .sv-cats{border-right:1px solid var(--edge);padding:16px 12px;overflow-y:auto;background:rgba(0,0,0,.10)}
 .sv-main{overflow-y:auto;padding:26px 32px 60px}

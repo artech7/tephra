@@ -12,10 +12,15 @@ from __future__ import annotations
 import ast
 import itertools
 import re
+from pathlib import Path
 
 from . import dedupe, study, vault
 
 DEFAULT_ROOT_NOTE = "Study Guide"
+
+# Recognised guide file extensions -- kept here rather than importers.ACCEPTED
+# so resolve_guide_source never has to import importers just to read a tuple.
+GUIDE_EXTENSIONS = (".json", ".py", ".csv", ".tsv", ".md")
 
 
 def read_literals(source: str):
@@ -49,9 +54,73 @@ def _linked_titles(body: str) -> list[str]:
     return re.findall(r"^- \[\[(.+?)\]\]", body, flags=re.M)
 
 
+def resolve_guide_source(path: str) -> tuple[Path, Path]:
+    """A path the user typed or browsed to -> (the guide file, the folder to
+    search for its images).
+
+    A bare file names the guide directly; its own parent folder is searched
+    for images. A folder must contain exactly one recognised guide file --
+    zero is a typo in the path, more than one is a real ambiguity (which
+    guide?) -- either way it's cheaper to stop and say so than to guess and
+    import the wrong file.
+    """
+    from . import importers
+
+    p = Path(path).expanduser()
+    if not p.exists():
+        raise importers.ImportError_(f"{p} does not exist")
+    if p.is_file():
+        return p, p.parent
+    if not p.is_dir():
+        raise importers.ImportError_(f"{p} is neither a file nor a folder")
+
+    candidates = sorted(f for f in p.iterdir()
+                        if f.is_file() and f.suffix.lower() in GUIDE_EXTENSIONS)
+    if not candidates:
+        raise importers.ImportError_(
+            f"no study guide file ({', '.join(GUIDE_EXTENSIONS)}) found in {p}")
+    if len(candidates) > 1:
+        names = ", ".join(f.name for f in candidates)
+        raise importers.ImportError_(
+            f"found more than one guide file in {p} ({names}) — point at the exact file")
+    return candidates[0], p
+
+
+def _media_name(slug: str, filename: str) -> str:
+    """Deterministic per (note, source filename) so re-importing the same
+    guide overwrites the same media file instead of piling up `-2`, `-3`..."""
+    stem = vault.slugify(Path(filename).stem)[:60] or "image"
+    ext = Path(filename).suffix.lower()
+    return f"{slug}--{stem}{ext}"
+
+
+def _place_images(slug: str, wanted: list[str], available: dict[str, Path],
+                   dry_run: bool) -> tuple[list[str], list[str]]:
+    """Resolve a topic's requested image filenames against the images found
+    under the search root, writing matches into vault media under a name
+    derived from this note. Returns (embedded media names, filenames that
+    matched nothing) -- a miss is reported, not fatal, so one typo'd filename
+    in a 40-topic guide doesn't block the other 39."""
+    embedded, missing = [], []
+    for filename in wanted:
+        src = available.get(filename.lower())
+        if src is None:
+            missing.append(filename)
+            continue
+        name = _media_name(slug, filename)
+        if not dry_run:
+            vault.import_media(name, src.read_bytes())
+        embedded.append(name)
+    return embedded, missing
+
+
 def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
-                title: str | None = None) -> dict:
+                title: str | None = None, images: dict[str, Path] | None = None) -> dict:
     """Merges into the vault -- never overwrites a note it doesn't own.
+
+    `images` is the lowercased-filename -> path map from vault.find_images,
+    if the caller has one (run_import_from_path always does; a plain upload
+    never does, so a topic's `images` list is simply reported as unmatched).
 
     A title (or id) match only updates an existing note when that note was
     itself produced by a previous run of *this same guide* (tracked in
@@ -117,10 +186,12 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     ]
     batch_corpus: list[tuple[str, str]] = []   # topics already accepted this run
 
-    created = updated = preserved = skipped_duplicates = 0
+    images = images or {}
+    created = updated = preserved = skipped_duplicates = images_embedded = 0
     collisions: list[str] = []
     duplicates: list[dict] = []
     by_category: dict[str, list[str]] = {}
+    missing_images: list[dict] = []
 
     for t in topics:
         title_ = t["title"]
@@ -167,6 +238,15 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
 
         qitems = t["quiz"]
         body = t["answer"]
+        embedded, missing = _place_images(slug, t.get("images") or [], images, dry_run)
+        if embedded:
+            # No blank line between the embeds -- render.py groups adjacent
+            # embeds into one row, and sequential slide screenshots read
+            # better side by side than stacked one per line.
+            body += "\n\n" + "\n".join(f"![[{n}]]" for n in embedded)
+            images_embedded += len(embedded)
+        if missing:
+            missing_images.append({"topic": title_, "files": missing})
         if qitems:
             body += "\n\n" + study.render_quiz(qitems)
 
@@ -273,4 +353,32 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         "skipped_duplicates": skipped_duplicates,
         "duplicates": duplicates,
         "dry_run": dry_run,
+        "images_embedded": images_embedded,
+        "missing_images": missing_images,
     }
+
+
+def run_import_from_path(path: str, dry_run: bool = False, title: str | None = None) -> dict:
+    """Import a guide plus its images straight off disk -- the counterpart to
+    run_import's upload path, for guides that come with more image files than
+    a browser upload should reasonably carry.
+
+    The search root is the guide file's own folder (or the folder given, if a
+    folder was given): every image anywhere under it, at any depth up to
+    vault.find_images' limit, is fair game for a topic's `images` list to
+    reference by filename.
+    """
+    from . import importers
+
+    guide_path, search_root = resolve_guide_source(path)
+    try:
+        source = guide_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise importers.ImportError_(f"could not read {guide_path.name} as text: {exc}") from exc
+
+    images, dupes = vault.find_images(search_root)
+    summary = run_import(source, dry_run=dry_run, filename=guide_path.name, title=title,
+                          images=images)
+    summary["image_dir"] = str(search_root)
+    summary["duplicate_image_names"] = dupes
+    return summary

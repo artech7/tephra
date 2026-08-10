@@ -368,6 +368,75 @@ def save_media(filename: str, data: bytes) -> dict:
     }
 
 
+def import_media(name: str, data: bytes) -> dict:
+    """Write to vault media at exactly the given name, overwriting.
+
+    Unlike save_media's auto-uniquify (built for one-off drags into the media
+    panel, where two unrelated uploads named `screenshot.png` must not
+    collide), an import name is already deterministic per (note, source
+    filename) -- see guide_import._media_name. Re-running the same guide
+    should replace that one file in place, not accumulate `-2`, `-3`, ...
+    copies on every run.
+    """
+    ensure_dirs()
+    (MEDIA / name).write_bytes(data)
+    return {
+        "name": name,
+        "url": f"/media/{name}",
+        "kind": kind_of(name),
+        "size": len(data),
+    }
+
+
+IMAGE_SCAN_MAX_DEPTH = 6
+
+
+def find_images(root: Path, max_depth: int = IMAGE_SCAN_MAX_DEPTH) -> tuple[dict[str, Path], list[str]]:
+    """Scan a directory tree for image files, keyed by lowercased filename.
+
+    A guide's `images` list names files without saying which subdirectory
+    they live in -- slide exports commonly land one folder per section, or
+    everything flat -- so this walks the whole tree under `root` and lets a
+    topic's filename resolve regardless of where it actually sits.
+
+    First match wins in sorted (depth-first, alphabetical) order; every later
+    file with a basename already claimed is reported back as a collision
+    rather than silently shadowed -- two different slides both saved as
+    `slide.png` is exactly the kind of mixup an import should surface, not
+    guess at.
+    """
+    found: dict[str, Path] = {}
+    dupes: list[str] = []
+
+    def walk_(dir_: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(dir_.iterdir())
+        except OSError:
+            return
+        for e in entries:
+            try:
+                if e.is_symlink():
+                    continue
+                if e.is_dir():
+                    if e.name in WALK_SKIP or e.name.startswith("."):
+                        continue
+                    walk_(e, depth + 1)
+                elif e.is_file() and e.suffix.lower() in MEDIA_KINDS["image"]:
+                    key = e.name.lower()
+                    if key in found:
+                        dupes.append(e.name)
+                    else:
+                        found[key] = e
+            except OSError:
+                continue
+
+    if root.is_dir():
+        walk_(root, 0)
+    return found, sorted(set(dupes))
+
+
 def media_list() -> list[dict]:
     ensure_dirs()
     out = []

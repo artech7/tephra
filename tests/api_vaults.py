@@ -45,6 +45,13 @@ for name, src in (("g.py", py), ("g.json", js), ("g.csv", cs)):
     ck(f"{name} parses", t[0]["title"] == "RAID" and len(t[0]["quiz"]) == 1, shapes[-1])
 ck("all three agree", len(set(shapes)) == 1, shapes)
 
+img_topic = I.parse("g.json", json.dumps(
+    {"topics": [{"title": "T", "answer": "a", "images": "one.png, two.png ,, one.png"}]}))[0]
+ck("images: delimited string dedups case-insensitively and keeps order",
+   img_topic["images"] == ["one.png", "two.png"], img_topic["images"])
+ck("images: absent field normalises to an empty list, not None",
+   I.parse("g.json", json.dumps({"topics": [{"title": "T2", "answer": "a"}]}))[0]["images"] == [])
+
 print("\n── content sniffing when the extension lies ──")
 ck("json without .json", I.parse("mystery", js)[0]["title"] == "RAID")
 ck("python without .py", I.parse("mystery", py)[0]["title"] == "RAID")
@@ -226,6 +233,81 @@ with TestClient(app) as c:
             ck(f"the {fmt['id']} example actually imports", len(t) >= 1, f"{len(t)} topic(s)")
         except I.ImportError_ as e:
             ck(f"the {fmt['id']} example actually imports", False, str(e)[:60])
+
+    print("\n── image-aware import: folder path, deterministic embedding ──")
+    PNG = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890"
+        "000000a49444154789c6360000002000100" + "0" * 10)
+    IROOT = f"{ROOT}/image-guide"
+    shutil.rmtree(IROOT, ignore_errors=True)
+    os.makedirs(f"{IROOT}/images")
+    os.makedirs(f"{IROOT}/slides/deck2")
+    Path(f"{IROOT}/images/diagram.png").write_bytes(PNG)
+    Path(f"{IROOT}/slides/deck2/extra.png").write_bytes(PNG)
+    # same basename under two different folders -- a collision the scan must
+    # surface, not silently resolve one way or the other.
+    Path(f"{IROOT}/images/dup.png").write_bytes(PNG)
+    Path(f"{IROOT}/slides/dup.png").write_bytes(PNG)
+
+    guide = json.dumps({"topics": [
+        {"title": "Diagram Topic", "category": "Imaging", "question": "q?",
+         "answer": "prose", "images": ["diagram.png", "extra.png", "dup.png", "ghost.png"]},
+        {"title": "No Image Topic", "category": "Imaging", "question": "q2?", "answer": "prose2"},
+    ]})
+    Path(f"{IROOT}/guide.json").write_text(guide)
+
+    r = c.post("/api/study/import/path", json={"path": IROOT}).json()
+    ck("found the lone guide file in the folder", r.get("topics") == 2, r)
+    ck("three of four requested images resolved", r.get("images_embedded") == 3, r)
+    ck("the fourth (typo'd) filename reported missing, not fatal",
+       r.get("missing_images") == [{"topic": "Diagram Topic", "files": ["ghost.png"]}],
+       r.get("missing_images"))
+    ck("the duplicate basename is reported",
+       r.get("duplicate_image_names") == ["dup.png"], r.get("duplicate_image_names"))
+
+    note = next(n for n in c.get("/api/notes").json() if n["title"] == "Diagram Topic")
+    body = open(f"{A}/notes/{note['slug']}.md").read()
+    ck("diagram embedded under a deterministic (note-scoped) name",
+       f"![[{note['slug']}--diagram.png]]" in body, body)
+    ck("extra (found two folders deep) embedded too",
+       f"![[{note['slug']}--extra.png]]" in body, body)
+    ck("dup embedded despite the collision -- first match still wins, not dropped",
+       f"![[{note['slug']}--dup.png]]" in body, body)
+    ck("ghost never got an embed", "ghost" not in body, body)
+    media_before = set(os.listdir(f"{A}/media"))
+    ck("media files actually written to disk", {
+        f"{note['slug']}--diagram.png", f"{note['slug']}--extra.png", f"{note['slug']}--dup.png",
+    } <= media_before, media_before)
+
+    r2 = c.post("/api/study/import/path", json={"path": IROOT}).json()
+    media_after = set(os.listdir(f"{A}/media"))
+    ck("re-import overwrites in place -- no -2/-3 copies pile up",
+       media_after == media_before, media_after ^ media_before)
+    ck("re-import still reports the same embed count", r2.get("images_embedded") == 3, r2)
+
+    ck("pointing straight at the guide file (not its folder) also works",
+       c.post("/api/study/import/path", json={"path": f"{IROOT}/guide.json"}).status_code == 200)
+
+    AMBROOT = f"{ROOT}/ambiguous-guide"
+    shutil.rmtree(AMBROOT, ignore_errors=True)
+    os.makedirs(AMBROOT)
+    Path(f"{AMBROOT}/a.json").write_text(json.dumps({"topics": [{"title": "A", "answer": "x"}]}))
+    Path(f"{AMBROOT}/b.json").write_text(json.dumps({"topics": [{"title": "B", "answer": "y"}]}))
+    r = c.post("/api/study/import/path", json={"path": AMBROOT})
+    ck("refuses a folder with more than one guide file, rather than guessing",
+       r.status_code == 400, r.text[:160])
+
+    EMPTYROOT = f"{ROOT}/empty-guide-folder"
+    shutil.rmtree(EMPTYROOT, ignore_errors=True)
+    os.makedirs(EMPTYROOT)
+    r = c.post("/api/study/import/path", json={"path": EMPTYROOT})
+    ck("refuses a folder with no guide file", r.status_code == 400, r.text[:160])
+
+    r = c.post("/api/study/import/path", json={"path": "relative/path"})
+    ck("refuses a relative path", r.status_code == 400, r.text[:160])
+
+    r = c.post("/api/study/import/path", json={"path": f"{ROOT}/does-not-exist-at-all"})
+    ck("refuses a path that doesn't exist", r.status_code == 400, r.text[:160])
 
 print(f"\n{'='*46}\n  {ok} passed, {fail} failed\n{'='*46}")
 raise SystemExit(1 if fail else 0)

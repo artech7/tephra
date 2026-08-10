@@ -3,8 +3,15 @@ Study-guide importers.
 
 Everything lands on one normalised shape before it touches the vault:
 
-    {"title", "category", "question", "answer", "id",
+    {"title", "category", "question", "answer", "id", "images": [filename, ...],
      "quiz": [{"question", "options", "answers", "why"}]}
+
+`images` names files by filename only, not path -- where they actually live
+on disk (flat, nested under an `images/` folder, split one folder per
+section) is guide_import's problem to solve by searching, via
+vault.find_images, not the guide author's to spell out. A name with no match
+anywhere under the search root is reported back, not a failure: a typo in a
+topic's image list shouldn't block the topics that don't have one.
 
 Every external format still names one correct choice per question (`answer`,
 singular) -- that's the interchange syntax people actually write. It's
@@ -39,6 +46,7 @@ QUIZ_ALIASES = {
     "answer":   ("answer", "a", "correct", "correct_index", "correct_answer", "key"),
     "why":      ("why", "explanation", "rationale", "note", "because", "feedback"),
 }
+IMAGE_ALIASES = ("images", "image", "pictures", "screenshots", "slides")
 TOPIC_REF = ("topic", "t", "topic_id", "for", "parent", "title")
 
 # In a CSV, `answer` is the topic's prose body, so it must not be read as the
@@ -125,6 +133,27 @@ def _norm_quiz(raw: list, one_based: bool = False) -> list[dict]:
     return out
 
 
+def _norm_images(raw) -> list[str]:
+    """A single filename, a delimited string of several, or a list of either
+    -- matching how loosely every other field here is read. Order is kept
+    (it becomes embed order in the note) and case-insensitive duplicates
+    within one topic are dropped."""
+    if isinstance(raw, str):
+        items = [s.strip() for s in re.split(r"\s*[|;,]\s*", raw) if s.strip()]
+    elif isinstance(raw, (list, tuple)):
+        items = [str(s).strip() for s in raw if str(s).strip()]
+    else:
+        items = []
+    seen: set[str] = set()
+    out = []
+    for name in items:
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
 def _norm_topic(raw: dict) -> dict | None:
     title = _pick(raw, ALIASES["title"])
     if not title:
@@ -136,6 +165,7 @@ def _norm_topic(raw: dict) -> dict | None:
                     or "Uncategorised",
         "question": str(_pick(raw, ALIASES["question"], "") or "").strip(),
         "answer": str(_pick(raw, ALIASES["answer"], "") or "").strip(),
+        "images": _norm_images(_pick(raw, IMAGE_ALIASES, [])),
         "quiz": _norm_quiz(_pick(raw, ("quiz", "questions", "mcq", "items"), [])),
     }
 
@@ -323,13 +353,17 @@ FORMATS = [
     {
         "id": "json", "label": "JSON", "extensions": [".json"],
         "summary": "The most portable option. Quiz questions can nest inside each "
-                   "topic, or sit in a flat array that references topics by id or title.",
+                   "topic, or sit in a flat array that references topics by id or title. "
+                   "A topic's `images` names files by filename only — import from a "
+                   "folder and any image anywhere under it with a matching name is "
+                   "found and embedded automatically, wherever it actually sits on disk.",
         "example": json.dumps({
             "name": "Storage Fundamentals",
             "topics": [{
                 "id": "raid", "category": "Storage", "title": "RAID levels",
                 "question": "What are the common RAID levels?",
                 "answer": "**RAID 0** stripes...  \nSupports full markdown.",
+                "images": ["raid-levels-diagram.png", "raid5-parity.png"],
                 "quiz": [{
                     "question": "Which level has no redundancy?",
                     "options": ["RAID 0", "RAID 1", "RAID 5"],

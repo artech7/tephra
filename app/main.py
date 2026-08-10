@@ -831,6 +831,39 @@ async def study_import(file: UploadFile = File(...), dry_run: bool = False,
     return summary
 
 
+class StudyImportPathIn(BaseModel):
+    path: str
+    dry_run: bool = False
+    title: str | None = None
+
+
+@app.post("/api/study/import/path")
+def study_import_path(payload: StudyImportPathIn):
+    """Import a study guide straight off disk, images and all.
+
+    The upload endpoint above can only carry the guide text itself -- a guide
+    with a folder of slide screenshots needs the server to read them directly,
+    the same trust boundary /api/vault/open already crosses (loopback-only,
+    single-user). `path` may name the guide file itself or a folder containing
+    it; either way its folder is searched for images the guide's topics
+    reference by filename (see vault.find_images).
+    """
+    target = Path(payload.path).expanduser()
+    if not target.is_absolute():
+        raise HTTPException(400, "give an absolute path")
+    try:
+        summary = guide_import.run_import_from_path(
+            str(target), dry_run=payload.dry_run, title=payload.title)
+    except importers.ImportError_ as exc:
+        raise HTTPException(400, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not payload.dry_run:
+        summary["reindexed"] = idx.rebuild(db())
+        st.ensure_fitted(st.all_items(), force=True)
+    return summary
+
+
 @app.get("/api/study/item/{slug}")
 def study_item(slug: str):
     note = vault.read(slug)
