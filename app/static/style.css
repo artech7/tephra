@@ -670,28 +670,40 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
   --mx:50%;--my:50%}
 .sv-card:hover{background:rgba(255,255,255,.10);border-color:rgba(var(--acc),.4)}
 /* Foil sheen (::before) + a grain of glitter (::after), both keyed off the
-   live theme rather than a fixed rainbow: the conic gradient walks accent ->
-   its Crucible complements (--cruc-a/b/c, hue-shifted off the accent in
+   live theme rather than a fixed rainbow: the band walks accent -> its
+   Crucible complements (--cruc-a/b/c, hue-shifted off the accent in
    applyTheme) -> back to accent, so the shimmer always matches whatever
    theme is active instead of clashing at the edge. --mx/--my are written by
    wireFoil in study.js from that one card's own mousemove -- same rule as
    wireTilt above, never a container-wide pointer listener. The direct
    children get position+z-index so the foil layers (z-index:2) can't paint
-   over the card's text. */
+   over the card's text.
+   The band is a diagonal linear-gradient read through a background-size
+   far larger than the card, so --mx/--my (as background-position) slide
+   the visible window across it -- a moving prismatic streak, the way the
+   trading-card holo demos do it, rather than a radial blob glued to the
+   cursor. That radial-blob version was the bug: a white highlight blended
+   with color-dodge blows out to a flat pastel wash almost immediately
+   (dodge divides by 1-alpha, and alpha was heading toward 1), which is
+   exactly the washed-out look this replaces. brightness/contrast here
+   push the opposite way -- darken first so color-dodge has room to punch
+   through as saturated streaks instead of white glare. */
 .sv-card>*{position:relative;z-index:3}
 .sv-card::before,.sv-card::after{content:'';position:absolute;inset:0;border-radius:inherit;z-index:2;pointer-events:none;opacity:0;transition:opacity .35s var(--ease)}
 .sv-card::before{
-  background:
-    radial-gradient(160px circle at var(--mx) var(--my),rgba(255,255,255,.5),transparent 65%),
-    conic-gradient(from 180deg at var(--mx) var(--my),var(--accent),var(--cruc-a),var(--cruc-b),var(--cruc-c),var(--accent));
-  background-blend-mode:overlay;
+  background-image:linear-gradient(115deg,
+    transparent 15%,var(--accent) 30%,var(--cruc-a) 40%,var(--cruc-b) 50%,var(--cruc-c) 60%,var(--accent) 70%,transparent 85%);
+  background-size:260% 260%;
+  background-position:var(--mx) var(--my);
   mix-blend-mode:color-dodge;
-  filter:brightness(1.2) saturate(1.4)}
+  filter:brightness(.8) contrast(1.6) saturate(1.35)}
 .sv-card::after{
-  mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
-.sv-card:hover::before{opacity:.55}
-.sv-card:hover::after{opacity:.16}
+  mix-blend-mode:color-dodge;
+  background-size:90px 90px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  filter:contrast(1.7)}
+.sv-card:hover::before{opacity:.8}
+.sv-card:hover::after{opacity:.4}
 .sv-c-cat{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
 .sv-c-title{font-size:15px;font-weight:600;letter-spacing:-.01em}
 .sv-c-q{font-family:var(--serif);font-size:13px;line-height:1.5;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
