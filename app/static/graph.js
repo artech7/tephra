@@ -618,7 +618,7 @@
       const openBtn = document.createElement('button');
       openBtn.className = 'sv-btn primary';
       openBtn.textContent = 'Open note';
-      openBtn.onclick = () => { close(); window.tephraOpenNote(node.slug); };
+      openBtn.onclick = () => openFromGraph(node.slug);
       acts.appendChild(openBtn);
     }
     const centreBtn = document.createElement('button');
@@ -639,7 +639,7 @@
       // single click walks the graph, double click opens the note — so you can
       // explore neighbourhoods without leaving the view
       row.onclick = () => { select(nb); centreOn(nb); };
-      row.ondblclick = () => { if (nb.slug) { close(); window.tephraOpenNote(nb.slug); } };
+      row.ondblclick = () => { if (nb.slug) openFromGraph(nb.slug); };
       list.appendChild(row);
     }
     panel.appendChild(list);
@@ -740,7 +740,7 @@
     c.addEventListener('dblclick', (e) => {
       const [x, y] = local(e);
       const hit = hitTest(G.raw.nodes, x, y, G.view, radiusOf);
-      if (hit && hit.slug) { close(); window.tephraOpenNote(hit.slug); }
+      if (hit && hit.slug) openFromGraph(hit.slug);
     });
 
     /* Optional chaining throughout: a missing toolbar control should degrade
@@ -781,6 +781,17 @@
     await load();
   }
   function close() { G.open = false; stop(); }
+
+  // Opening a note from inside the graph needs the *overlay* closed, not
+  // just the sim stopped -- #graphview's .on class and the segmented
+  // control's pressed state live in app.js, so route through its setView
+  // rather than this module's own close(). Falls back to close() if that
+  // global isn't there yet, same degrade-one-thing-not-the-whole-view
+  // reasoning as the optional-chained toolbar wiring above.
+  function openFromGraph(slug) {
+    if (window.tephraSetView) window.tephraSetView('write'); else close();
+    window.tephraOpenNote(slug);
+  }
 
   window.tephraGraph = { open, close, isOpen: () => G.open, select };
 })();

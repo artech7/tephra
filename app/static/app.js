@@ -1746,6 +1746,11 @@ function setView(v) {
   if (v === 'links') window.tephraLinks?.open();
   else window.tephraLinks?.close();
 }
+// graph.js opens a note from inside the graph overlay (canvas dblclick, panel
+// row dblclick, panel "Open note" button) and needs to land back on Write --
+// its own close() only stops the sim, since toggling #graphview's .on class
+// and the segmented control's pressed state has always lived here.
+window.tephraSetView = setView;
 document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
 $('#noteSort').onchange = (e) => { state.sort = e.target.value; renderList(); saveTheme(); };
 $('#tagClear').onclick = () => { state.tag = ''; renderList(); saveTheme(); };
