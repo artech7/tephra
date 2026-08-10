@@ -554,6 +554,20 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
   background:radial-gradient(220px circle at calc(50% + var(--lmx) * 30%) calc(40% + var(--lmy) * 30%),rgba(255,255,255,.16),transparent 62%);
   opacity:0;transition:opacity .3s var(--ease)}
 #lens.on::before{opacity:1}
+/* Same Windows-11-style spotlight border as the Crucible cards (.sv-card
+   below) -- a radial-gradient clipped to just the border ring via a
+   content-box/border-box mask XOR, reusing --lmx/--lmy (-1..1, already
+   tracked per-frame by the tilt listener above) instead of a separate
+   --mx/--my pair. Accent -> its complements (--cruc-a/b/c, computed in
+   applyTheme) rather than the fixed rainbow, same reasoning as the cards. */
+#lens::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  padding:1.5px;
+  background:radial-gradient(240px circle at calc(50% + var(--lmx) * 50%) calc(50% + var(--lmy) * 50%),var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude;
+  opacity:0;transition:opacity .3s var(--ease)}
+#lens.on::after{opacity:1}
 #lens .l-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
 #lens .l-t{font-size:16px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px}
 #lens .l-b{font-family:var(--serif);font-size:13.5px;line-height:1.6;color:var(--muted);max-height:120px;overflow:hidden}
