@@ -358,14 +358,57 @@ body[data-wall="aurora"] .newnote:hover{
 .quizedit-note{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:12px;line-height:1.5}
 .quizedit-note code{font-family:var(--mono);background:rgba(0,0,0,.3);padding:1px 4px;border-radius:4px}
 
-/* the signature: liquid wikilink */
-.wl{position:relative;cursor:pointer;color:#fff;text-decoration:none;padding:1px 5px;margin:0 -1px;border-radius:6px;white-space:nowrap;
-  background:linear-gradient(180deg,rgba(var(--acc),.20),rgba(var(--acc),.07));
-  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
-  box-shadow:0 0 0 1px rgba(var(--acc),.28),0 1px 0 rgba(255,255,255,.24) inset;transition:.3s var(--ease)}
-.wl:hover{background:linear-gradient(180deg,rgba(var(--acc),.36),rgba(var(--acc),.14));box-shadow:0 0 0 1px rgba(var(--acc),.6),0 1px 0 rgba(255,255,255,.38) inset,0 0 24px -4px var(--accent)}
-.wl.pending{color:#FFDCC9;background:linear-gradient(180deg,rgba(var(--apricot),.18),rgba(var(--apricot),.05));box-shadow:0 0 0 1px rgba(var(--apricot),.36)}
-.wl.pending:hover{background:linear-gradient(180deg,rgba(var(--apricot),.3),rgba(var(--apricot),.11));box-shadow:0 0 0 1px rgba(var(--apricot),.6),0 0 22px -5px rgb(var(--apricot))}
+/* the signature: liquid wikilink -- a Gel pill, same glossy-cap recipe as
+   .newnote, instead of the old flat tinted-text-with-a-hairline this
+   replaced (it read as "text with a faint outline," not a control). Real
+   border + inset highlight for the resting state so it reads as an object
+   even before the cursor arrives; hover adds the same Windows-11-style
+   spotlight ring the Crucible cards/#lens use elsewhere, walking accent
+   into its complements (--cruc-a/b, hue-shifted off the accent in
+   applyTheme) instead of a plain glow. */
+.wl{position:relative;cursor:pointer;color:#fff;text-decoration:none;font-weight:500;
+  padding:2px 8px;margin:0 -2px;border-radius:8px;white-space:nowrap;
+  background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.42),transparent 55%),
+    linear-gradient(180deg,rgba(var(--acc),.3),rgba(var(--acc),.12));
+  border:1px solid rgba(var(--acc),.45);
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset;
+  transition:background .3s var(--ease),border-color .3s var(--ease),box-shadow .3s var(--ease),transform .2s var(--ease);
+  --mx:50%;--my:50%}
+.wl:hover{transform:translateY(-1px);
+  background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.58),transparent 55%),
+    linear-gradient(180deg,rgba(var(--acc),.42),rgba(var(--acc),.17));
+  border-color:rgba(var(--acc),.7);
+  box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 8px 20px -12px rgba(0,0,0,.6),0 0 22px -8px var(--accent)}
+.wl:active{transform:translateY(0) scale(.97)}
+/* Spotlight ring: the standard gradient-border trick -- a radial-gradient
+   clipped to just the border via a content-box/border-box mask XOR, at
+   --mx/--my (0-100% within this one link, written by the existing lens
+   mousemove listener in app.js -- it already only runs while a wikilink is
+   hovered, so this rides along rather than adding a second listener).
+   z-index:-1 matters here: inline text paints *before* positioned
+   descendants with z-index:auto, so without a negative index the ring
+   would sit on top of the letters instead of around them. farthest-corner
+   circle sizing, not a fixed px radius like the cards use, because a
+   wikilink's width is whatever its title is -- one word or a long phrase --
+   and a fixed radius left long links dim on the far end. */
+.wl::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none;
+  padding:1.5px;
+  background:radial-gradient(circle farthest-corner at var(--mx) var(--my),var(--accent),var(--cruc-a) 45%,var(--cruc-b) 80%,transparent 100%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude;
+  opacity:0;transition:opacity .3s var(--ease)}
+.wl:hover::before{opacity:1}
+.wl.pending{color:#FFDCC9;
+  background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.42),transparent 55%),
+    linear-gradient(180deg,rgba(var(--apricot),.32),rgba(var(--apricot),.1));
+  border-color:rgba(var(--apricot),.5)}
+.wl.pending:hover{
+  background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.58),transparent 55%),
+    linear-gradient(180deg,rgba(var(--apricot),.46),rgba(var(--apricot),.16));
+  border-color:rgba(var(--apricot),.72);
+  box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 8px 20px -12px rgba(0,0,0,.6),0 0 22px -8px rgb(var(--apricot))}
+.wl.pending::before{background:radial-gradient(circle farthest-corner at var(--mx) var(--my),rgb(var(--apricot)),#FFD2B8 55%,transparent 100%)}
 
 /* media embeds */
 .embed{position:relative;margin:26px 0;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8)}

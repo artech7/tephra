@@ -1194,6 +1194,12 @@ if (!reduce) {
     const lens = $('#lens');
     lens.style.setProperty('--lmx', nx.toFixed(3));
     lens.style.setProperty('--lmy', ny.toFixed(3));
+    // The wikilink's own spotlight-ring position (0-100% within the link
+    // itself, not the -1..1 lens tilt above) -- same guard, same listener,
+    // no separate mousemove for it. Stale --mx/--my left behind once the
+    // cursor moves on is harmless: the ring's opacity is 0 outside :hover.
+    lensFor.style.setProperty('--mx', ((e.clientX - r.left) / (r.width || 1) * 100).toFixed(1) + '%');
+    lensFor.style.setProperty('--my', ((e.clientY - r.top) / (r.height || 1) * 100).toFixed(1) + '%');
   });
 }
 
