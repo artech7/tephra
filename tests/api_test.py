@@ -303,9 +303,6 @@ with TestClient(app) as c:
     # the actual bug: it used to reappear on the next read
     again = [x["term"] for x in c.get("/api/suggestions", params={"limit": 20}).json()]
     check("still gone on a fresh read", term not in again)
-    check("per-note suggestions honour it too",
-          all(x["term"] != term for n in c.get("/api/notes").json()[:6]
-              for x in c.get(f"/api/notes/{n['slug']}").json()["suggestions"]))
 
     c.post("/api/suggestions/restore", json={"term": term})
     check("restoring brings it back",

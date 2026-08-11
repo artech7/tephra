@@ -257,7 +257,6 @@ def get_note(slug: str):
         "links_out": len(set(t.lower() for t in targets)),
         "media": used,
         "backlinks": idx.backlinks(db(), slug),
-        "suggestions": idx.suggestions(db(), slug, limit=6),
         "words": len(note.body.split()),
         "quiz": item["quiz"],
     }
