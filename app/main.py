@@ -841,12 +841,20 @@ class StudyImportPathIn(BaseModel):
 def study_import_path(payload: StudyImportPathIn):
     """Import a study guide straight off disk, images and all.
 
-    The upload endpoint above can only carry the guide text itself -- a guide
-    with a folder of slide screenshots needs the server to read them directly,
-    the same trust boundary /api/vault/open already crosses (loopback-only,
-    single-user). `path` may name the guide file itself or a folder containing
-    it; either way its folder is searched for images the guide's topics
-    reference by filename (see vault.find_images).
+    Only meaningful when the server and the browser share a filesystem --
+    running headless on the same machine, or the desktop build. That's the
+    same trust boundary /api/vault/open already crosses (loopback-only,
+    single-user). It's the wrong tool the moment the server runs somewhere
+    the browser can't see into (a container, a different machine): a typed
+    path there resolves against the *server's* filesystem and fails with
+    "does not exist" even though the folder is sitting right in front of the
+    person typing it. /api/study/import/upload below is the endpoint for
+    that case -- the browser reads the files itself and sends the bytes, so
+    no path ever needs to resolve on the server side at all.
+
+    `path` may name the guide file itself or a folder containing it; either
+    way its folder is searched for images the guide's topics reference by
+    filename (see vault.find_images).
     """
     target = Path(payload.path).expanduser()
     if not target.is_absolute():
@@ -859,6 +867,76 @@ def study_import_path(payload: StudyImportPathIn):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     if not payload.dry_run:
+        summary["reindexed"] = idx.rebuild(db())
+        st.ensure_fitted(st.all_items(), force=True)
+    return summary
+
+
+@app.post("/api/study/import/upload")
+async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool = False,
+                               title: str | None = Form(None)):
+    """Import a guide plus its images from files the browser itself read --
+    a folder picked via a native OS dialog, or dragged in -- and never asks
+    the server to resolve a path at all. This is the one that works no
+    matter what machine is running the server: a container, a headless box
+    on the other side of the network, anything.
+
+    Exactly one uploaded file must be a recognised guide format; every other
+    file is treated as a candidate image, matched to topics by filename the
+    same way /api/study/import/path matches against a directory scan --
+    just against an in-memory map instead of files on disk.
+    """
+    total = 0
+    guide_name: str | None = None
+    guide_bytes: bytes | None = None
+    image_bytes: dict[str, bytes] = {}
+    dupes: list[str] = []
+    for f in files:
+        data = await f.read()
+        total += len(data)
+        if total > MAX_UPLOAD:
+            raise HTTPException(413, f"upload over {MAX_UPLOAD // 1024 // 1024} MB limit")
+        # webkitdirectory sends each file's path relative to the picked
+        # folder (e.g. "images/slide-04.png") -- only the basename is ever
+        # matched against, same as a server-side directory scan matches by
+        # filename regardless of which subfolder it's actually in.
+        name = Path(f.filename or "").name
+        if not name:
+            continue
+        ext = Path(name).suffix.lower()
+        if ext in importers.PARSERS:
+            if guide_name is not None:
+                raise HTTPException(400, f"found more than one guide file among the uploaded "
+                                          f"files ({guide_name}, {name}) — select just one guide "
+                                          f"plus its images")
+            guide_name, guide_bytes = name, data
+        elif vault.kind_of(name) == "image":
+            key = name.lower()
+            if key in image_bytes:
+                dupes.append(name)
+            else:
+                image_bytes[key] = data
+        # anything else (a README, a .DS_Store swept up by a folder pick) is
+        # silently ignored rather than rejected -- picking a whole folder
+        # means picking whatever else lives in it too.
+
+    if guide_name is None:
+        raise HTTPException(400, "no study guide file (" + ", ".join(importers.ACCEPTED)
+                                  + ") found among the uploaded files")
+    try:
+        source = guide_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, f"could not read {guide_name} as text")
+
+    try:
+        summary = guide_import.run_import(source, dry_run=dry_run, filename=guide_name,
+                                          title=title, images=image_bytes)
+    except importers.ImportError_ as exc:
+        raise HTTPException(400, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    summary["duplicate_image_names"] = sorted(set(dupes))
+    if not dry_run:
         summary["reindexed"] = idx.rebuild(db())
         st.ensure_fitted(st.all_items(), force=True)
     return summary

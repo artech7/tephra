@@ -309,5 +309,65 @@ with TestClient(app) as c:
     r = c.post("/api/study/import/path", json={"path": f"{ROOT}/does-not-exist-at-all"})
     ck("refuses a path that doesn't exist", r.status_code == 400, r.text[:160])
 
+    print("\n── image-aware import: browser upload, no server path involved ──")
+    # The counterpart to the folder-path tests above: the same guide+images
+    # shape, but delivered the way a device with no filesystem in common
+    # with the server has to deliver it -- as bytes the browser already
+    # read, not a path the server resolves itself.
+    guide_up = json.dumps({"topics": [
+        {"title": "Upload Diagram Topic", "category": "Imaging", "question": "q?",
+         "answer": "prose", "images": ["shot1.png", "shot2.png", "missing.png"]},
+    ]})
+    up_files = [
+        ("files", ("guide.json", io.BytesIO(guide_up.encode()), "application/json")),
+        ("files", ("shot1.png", io.BytesIO(PNG), "image/png")),
+        ("files", ("shot2.png", io.BytesIO(PNG), "image/png")),
+    ]
+    r = c.post("/api/study/import/upload", files=up_files).json()
+    ck("uploaded guide + images imports", r.get("topics") == 1, r)
+    ck("both present images embedded, the typo'd one is not", r.get("images_embedded") == 2, r)
+    ck("missing image reported, not fatal",
+       r.get("missing_images") == [{"topic": "Upload Diagram Topic", "files": ["missing.png"]}],
+       r.get("missing_images"))
+
+    unote = next(n for n in c.get("/api/notes").json() if n["title"] == "Upload Diagram Topic")
+    ubody = open(f"{A}/notes/{unote['slug']}.md").read()
+    ck("both uploaded images embedded under deterministic names",
+       f"![[{unote['slug']}--shot1.png]]" in ubody and f"![[{unote['slug']}--shot2.png]]" in ubody,
+       ubody)
+
+    umedia_before = set(os.listdir(f"{A}/media"))
+    c.post("/api/study/import/upload", files=up_files)
+    umedia_after = set(os.listdir(f"{A}/media"))
+    ck("re-uploading the same batch overwrites in place, no duplicate copies",
+       umedia_after == umedia_before, umedia_after ^ umedia_before)
+
+    dup_up_files = [
+        ("files", ("guide3.json", io.BytesIO(json.dumps({"topics": [
+            {"title": "Dup Upload Topic", "answer": "x", "images": ["dup.png"]}]}).encode()),
+         "application/json")),
+        ("files", ("dup.png", io.BytesIO(PNG), "image/png")),
+        ("files", ("dup.png", io.BytesIO(PNG), "image/png")),
+    ]
+    r = c.post("/api/study/import/upload", files=dup_up_files).json()
+    ck("two uploaded files sharing a filename are reported as a collision",
+       r.get("duplicate_image_names") == ["dup.png"], r)
+    ck("the first copy is still used, not dropped", r.get("images_embedded") == 1, r)
+
+    amb_up_files = [
+        ("files", ("a.json", io.BytesIO(json.dumps({"topics": [{"title": "A", "answer": "x"}]}).encode()),
+         "application/json")),
+        ("files", ("b.json", io.BytesIO(json.dumps({"topics": [{"title": "B", "answer": "y"}]}).encode()),
+         "application/json")),
+    ]
+    r = c.post("/api/study/import/upload", files=amb_up_files)
+    ck("refuses more than one guide file in the same batch",
+       r.status_code == 400, r.text[:160])
+
+    r = c.post("/api/study/import/upload", files=[
+        ("files", ("only.png", io.BytesIO(PNG), "image/png")),
+    ])
+    ck("refuses a batch with no guide file at all", r.status_code == 400, r.text[:160])
+
 print(f"\n{'='*46}\n  {ok} passed, {fail} failed\n{'='*46}")
 raise SystemExit(1 if fail else 0)

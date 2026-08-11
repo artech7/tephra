@@ -95,6 +95,29 @@
   });
   function pickFile(host) { importHost = host; fileInput.click(); }
 
+  /* A second, separate input for "pick a whole folder" -- webkitdirectory
+     turns the OS's native file dialog into a folder picker, which is the
+     browser's own filesystem access, not the server's. That distinction is
+     the whole point: it works from any device pointed at Tephra, including
+     one that shares no filesystem at all with wherever the server runs (a
+     container, a box across the network). Everything selected is read
+     locally by the browser and uploaded, guide and images together -- see
+     doImportFiles. Kept outside any label for the same reason as fileInput
+     above. */
+  const folderInput = document.createElement('input');
+  folderInput.type = 'file';
+  folderInput.webkitdirectory = true;
+  folderInput.multiple = true;
+  folderInput.hidden = true;
+  document.body.appendChild(folderInput);
+  let importFolderHost = null;
+  folderInput.addEventListener('change', () => {
+    const files = Array.from(folderInput.files || []);
+    folderInput.value = '';
+    if (files.length) doImportFiles(files, importFolderHost);
+  });
+  function pickFolder(host) { importFolderHost = host; folderInput.click(); }
+
   /* ── shell ── */
   const view = el('div');
   view.id = 'studyview';
@@ -113,15 +136,17 @@
         <button data-mode="quiz"    aria-pressed="false">Quiz</button>
         <button data-mode="search"  aria-pressed="false">Search</button>
       </div>
-      <button class="sv-import" id="svImport" title="Import or merge a study guide file into this vault">Import/Merge</button>
-      <button class="sv-import" id="svImportPathToggle" title="Import a guide plus its images straight from a folder on disk">Import from folder…</button>
+      <button class="sv-import" id="svImport" title="Import or merge a single study guide file into this vault">Import/Merge</button>
+      <button class="sv-import" id="svImportFolder" title="Pick a folder on this device with the OS file dialog — its guide file plus any images it references are uploaded and embedded automatically">Choose folder…</button>
+      <button class="sv-import" id="svImportPathToggle" title="Import from a folder path on the machine actually running the server — not this device. Mainly useful running Tephra directly, not in a container">Server path…</button>
     </div>
     <div class="sv-pathimport" id="svPathImport" hidden>
       <input type="text" id="svPathInput" placeholder="/path/to/guide folder (or the guide file itself)">
       <button id="svPathGo">Import</button>
-      <span class="sv-pathimport-h">Searches the folder for a guide file and, recursively, for any
-        images its topics reference by filename — for guides with more images than a browser
-        upload should carry.</span>
+      <span class="sv-pathimport-h">This path is read by the <strong>server</strong>, not your browser — only useful if
+        the server can see your filesystem (running it directly, not in a container). From another
+        device, or when Tephra runs in a container, use <strong>Choose folder…</strong> instead —
+        that reads the folder on this device and uploads it.</span>
     </div>
     <div class="sv-body">
       <aside class="sv-cats"><div class="eyebrow"><span>Categories</span></div><div id="svCatList"></div></aside>
@@ -135,6 +160,7 @@
   // guide is empty, which made importing unreachable the moment anything at
   // all had been added.
   $('#svImport').onclick = () => pickFile(null);
+  $('#svImportFolder').onclick = () => pickFolder(null);
   $('#svImportPathToggle').onclick = () => {
     const panel = $('#svPathImport');
     panel.hidden = !panel.hidden;
@@ -741,10 +767,16 @@
     const drop = el('div', 'sv-drop');
     drop.innerHTML = `<span class="sv-drop-t">Import/Merge study guide</span>
       <span class="sv-drop-s">Click to choose, or drop a
-        <code>.json</code> <code>.py</code> <code>.csv</code> <code>.md</code> file</span>`;
+        <code>.json</code> <code>.py</code> <code>.csv</code> <code>.md</code> file —
+        or drop a whole folder (guide plus its images)</span>`;
     drop.onclick = () => pickFile(drop);
     wireDrop(drop);
     wrap.appendChild(drop);
+
+    const folderLink = el('button', 'sv-drop-alt', 'Or choose a folder (with images) with the OS file dialog');
+    folderLink.type = 'button';
+    folderLink.onclick = () => pickFolder(drop);
+    wrap.appendChild(folderLink);
 
     // A reference, not a link out: someone authoring a guide for a different
     // product needs the exact shape, and needs it here.
@@ -789,6 +821,38 @@
     main.appendChild(wrap);
   }
 
+  // Walks a drop's items out with the FileSystem Entry API when the browser
+  // exposes it (webkitGetAsEntry, recursing into any dropped folder) so a
+  // whole folder dropped at once yields every file inside it, images and
+  // all -- dt.files alone only ever sees what was dropped directly, never
+  // anything nested inside a folder entry. Falls back to the flat file list
+  // for a browser (or a synthetic test event) that doesn't expose entries.
+  async function filesFromDrop(dt) {
+    const items = dt.items && Array.from(dt.items);
+    const hasEntries = items && items.length
+      && items.every((it) => typeof it.webkitGetAsEntry === 'function');
+    if (!hasEntries) return Array.from((dt.files) || []);
+    const out = [];
+    async function walk(entry) {
+      if (!entry) return;
+      if (entry.isFile) {
+        await new Promise((res) => entry.file((f) => { out.push(f); res(); }, res));
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        // readEntries returns at most one batch per call by spec -- keep
+        // calling until it comes back empty, or a folder with more than a
+        // batch's worth of slides silently loses the rest.
+        let batch;
+        do {
+          batch = await new Promise((res) => reader.readEntries(res, () => res([])));
+          for (const child of batch) await walk(child);
+        } while (batch.length);
+      }
+    }
+    await Promise.all(items.map((it) => walk(it.webkitGetAsEntry())));
+    return out;
+  }
+
   function wireDrop(node) {
     ['dragenter', 'dragover'].forEach((ev) => node.addEventListener(ev, (e) => {
       e.preventDefault(); node.classList.add('over');
@@ -796,10 +860,18 @@
     ['dragleave', 'drop'].forEach((ev) => node.addEventListener(ev, (e) => {
       e.preventDefault(); node.classList.remove('over');
     }));
-    node.addEventListener('drop', (e) => {
+    node.addEventListener('drop', async (e) => {
       e.preventDefault();
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) doImport(f, node);
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const files = await filesFromDrop(dt);
+      if (!files.length) return;
+      // A single plain file keeps using the plain-text upload it always
+      // has -- no behaviour change for the common case. Two or more (or
+      // anything that came out of a dropped folder) goes through the
+      // upload endpoint that also carries images.
+      if (files.length === 1) doImport(files[0], node);
+      else doImportFiles(files, node);
     });
   }
 
@@ -833,6 +905,16 @@
     return { msg, needsAttention };
   }
 
+  // Shared by every import path below: the server's reason has to survive
+  // into the view, not just a toast that fades before anyone reads it.
+  function reportImportError(e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    toast(detail.slice(0, 180), 6000);
+    const main = $('#svMain');
+    if (main) main.appendChild(el('div', 'sv-warn', 'Import failed: ' + detail.slice(0, 240)));
+  }
+
   async function doImport(file, host) {
     const label = host && host.querySelector('.sv-drop-t');
     if (host) host.classList.add('busy');
@@ -848,15 +930,32 @@
       await refreshAll();
       if (window.tephraReloadList) window.tephraReloadList();
     } catch (e) {
-      // Surface the server's reason in the view, not just a toast that fades.
-      let detail = String((e && e.message) || e);
-      try { detail = JSON.parse(detail).detail || detail; } catch {}
-      toast(detail.slice(0, 180), 6000);
-      const main = $('#svMain');
-      if (main) {
-        const err = el('div', 'sv-warn', 'Import failed: ' + detail.slice(0, 240));
-        main.appendChild(err);
-      }
+      reportImportError(e);
+    } finally {
+      if (host) host.classList.remove('busy');
+      if (label) label.textContent = 'Import/Merge study guide';
+    }
+  }
+
+  // The folder picker and folder/multi-file drag-drop both land here: the
+  // browser has already read every file's bytes, so this never touches a
+  // filesystem path at all -- it just uploads what it was handed.
+  async function doImportFiles(files, host) {
+    const label = host && host.querySelector('.sv-drop-t');
+    if (host) host.classList.add('busy');
+    if (label) label.textContent = `Importing ${files.length} file${files.length === 1 ? '' : 's'}…`;
+    toast(`Reading ${files.length} files…`, 20000);
+
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f, f.name);
+    try {
+      const r = await api('/study/import/upload', { method: 'POST', body: fd });
+      const { msg, needsAttention } = summarizeImport(r);
+      toast(msg, needsAttention ? 8000 : undefined);
+      await refreshAll();
+      if (window.tephraReloadList) window.tephraReloadList();
+    } catch (e) {
+      reportImportError(e);
     } finally {
       if (host) host.classList.remove('busy');
       if (label) label.textContent = 'Import/Merge study guide';
@@ -881,14 +980,7 @@
       await refreshAll();
       if (window.tephraReloadList) window.tephraReloadList();
     } catch (e) {
-      let detail = String((e && e.message) || e);
-      try { detail = JSON.parse(detail).detail || detail; } catch {}
-      toast(detail.slice(0, 180), 6000);
-      const main = $('#svMain');
-      if (main) {
-        const err = el('div', 'sv-warn', 'Import failed: ' + detail.slice(0, 240));
-        main.appendChild(err);
-      }
+      reportImportError(e);
     } finally {
       btn.disabled = false;
       btn.textContent = prevLabel;

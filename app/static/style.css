@@ -877,6 +877,9 @@ input.sv-select{cursor:text}
 .sv-drop-t{font-size:15px;font-weight:600}
 .sv-drop-s{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 .sv-drop-s code{background:rgba(0,0,0,.3);border:1px solid var(--edge);padding:1px 5px;border-radius:4px}
+.sv-drop-alt{font:inherit;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:none;border:0;
+  text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0}
+.sv-drop-alt:hover{color:var(--paper)}
 .sv-vaultinfo{font-family:var(--mono);font-size:10.5px;color:var(--faint);line-height:1.6}
 .sv-vaultinfo code{background:rgba(0,0,0,.3);border:1px solid var(--edge);padding:1px 5px;border-radius:4px;color:var(--muted)}
 .sv-warn{font-family:var(--mono);font-size:10.5px;color:#FFD2B8}

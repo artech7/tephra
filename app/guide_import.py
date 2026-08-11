@@ -94,13 +94,19 @@ def _media_name(slug: str, filename: str) -> str:
     return f"{slug}--{stem}{ext}"
 
 
-def _place_images(slug: str, wanted: list[str], available: dict[str, Path],
+def _place_images(slug: str, wanted: list[str], available: dict[str, Path | bytes],
                    dry_run: bool) -> tuple[list[str], list[str]]:
     """Resolve a topic's requested image filenames against the images found
     under the search root, writing matches into vault media under a name
     derived from this note. Returns (embedded media names, filenames that
     matched nothing) -- a miss is reported, not fatal, so one typo'd filename
-    in a 40-topic guide doesn't block the other 39."""
+    in a 40-topic guide doesn't block the other 39.
+
+    `available` values are a Path when they came from vault.find_images (a
+    server-side directory scan) or raw bytes when they came from files the
+    browser itself read and uploaded -- either source resolves the same way
+    from here on.
+    """
     embedded, missing = [], []
     for filename in wanted:
         src = available.get(filename.lower())
@@ -109,18 +115,23 @@ def _place_images(slug: str, wanted: list[str], available: dict[str, Path],
             continue
         name = _media_name(slug, filename)
         if not dry_run:
-            vault.import_media(name, src.read_bytes())
+            data = src.read_bytes() if isinstance(src, Path) else src
+            vault.import_media(name, data)
         embedded.append(name)
     return embedded, missing
 
 
 def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
-                title: str | None = None, images: dict[str, Path] | None = None) -> dict:
+                title: str | None = None,
+                images: dict[str, Path | bytes] | None = None) -> dict:
     """Merges into the vault -- never overwrites a note it doesn't own.
 
-    `images` is the lowercased-filename -> path map from vault.find_images,
-    if the caller has one (run_import_from_path always does; a plain upload
-    never does, so a topic's `images` list is simply reported as unmatched).
+    `images` is a lowercased-filename -> (path or bytes) map: paths from
+    vault.find_images (run_import_from_path's server-side directory scan),
+    bytes from files a browser upload already read into memory
+    (study_import_upload's flow). A caller with neither just doesn't pass
+    one, and any topic's `images` list is reported as unmatched rather than
+    failing the import.
 
     A title (or id) match only updates an existing note when that note was
     itself produced by a previous run of *this same guide* (tracked in

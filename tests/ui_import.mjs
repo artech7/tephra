@@ -23,11 +23,12 @@ window.tephraApi = async (path, opts = {}) => {
     throw new Error('{"detail":"that file is not valid Python: bad"}');
   if (path === '/study') return JSON.parse(JSON.stringify(study));
   if (path === '/vault/info') return { vault: '/Users/dylan/Documents/Tephra', files_on_disk: 3, indexed: 3, study_items: 0 };
-  if (path === '/study/import') {
+  if (path === '/study/import' || path === '/study/import/upload') {
     study.totals = { topics: 62, questions: 135, needs_review: 0 };
     study.categories = [{ category: 'SAN & Fibre Channel', topics: 5, questions: 14 }];
     study.items = [{ slug: 'icmp', title: 'ICMP', category: 'SAN & Fibre Channel', source: 'import', questions: 3, question: 'q?', needs_review: false }];
-    return { topics: 62, questions: 135, categories: 13, vault: '/Users/dylan/Documents/Tephra', reindexed: 79 };
+    return { topics: 62, questions: 135, categories: 13, vault: '/Users/dylan/Documents/Tephra',
+             reindexed: 79, images_embedded: path === '/study/import/upload' ? 4 : 0 };
   }
   throw new Error('unexpected ' + path);
 };
@@ -88,6 +89,64 @@ Object.defineProperty(ev, 'dataTransfer', { value: dt });
 document.querySelector('.sv-body').dispatchEvent(ev);
 await new Promise(r => setTimeout(r, 60));
 ck('dropping a file imports it', calls.some(c => c.path === '/study/import'));
+
+console.log('\n── the folder input (native OS picker, not a server path) ──');
+const folderInputs = allFile.filter(i => i.webkitdirectory);
+ck('exactly one folder-picker input', folderInputs.length === 1, `found ${folderInputs.length}`);
+ck('accepts multiple files', folderInputs[0].multiple === true);
+ck('NOT nested inside a label', folderInputs[0].closest('label') === null);
+ck('lives directly on body', folderInputs[0].parentElement === document.body);
+ck('choose-folder header button exists', !!document.querySelector('#svImportFolder'));
+
+let folderClicks = 0;
+folderInputs[0].click = () => { folderClicks++; };
+document.querySelector('#svImportFolder').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+ck('header button opens the folder dialog exactly once', folderClicks === 1, `${folderClicks}x`);
+
+console.log('\n── picking a folder uploads every file to /study/import/upload ──');
+calls.length = 0;
+const gFile = new window.File(['{"topics":[]}'], 'guide.json', { type: 'application/json' });
+const iFile = new window.File(['x'], 'slide1.png', { type: 'image/png' });
+Object.defineProperty(folderInputs[0], 'files', { value: [gFile, iFile], writable: true, configurable: true });
+folderInputs[0].dispatchEvent(new window.Event('change'));
+await new Promise(r => setTimeout(r, 60));
+const upPost1 = calls.find(c => c.path === '/study/import/upload');
+ck('POSTed to /study/import/upload', !!upPost1, upPost1 && upPost1.method);
+ck('sent as multipart FormData', upPost1 && upPost1.body instanceof window.FormData);
+ck('both files attached under the same "files" field', upPost1 && upPost1.body.getAll('files').length === 2,
+   upPost1 && upPost1.body.getAll('files').map((f) => f.name));
+
+console.log('\n── dropping a whole folder walks it recursively (FileSystem Entry API) ──');
+// A minimal fake of the browser's drag-drop directory-entry shape: each
+// directory answers readEntries() once with its children, then empty (the
+// real API is batch-based and study.js has to keep calling until it's
+// told there's nothing left).
+const fileEntry = (file) => ({ isFile: true, isDirectory: false, file: (resolve) => resolve(file) });
+const dirEntry = (children) => {
+  let served = false;
+  return {
+    isFile: false, isDirectory: true,
+    createReader: () => ({
+      readEntries: (resolve) => { const batch = served ? [] : children; served = true; resolve(batch); },
+    }),
+  };
+};
+const deepFile = new window.File(['x'], 'deep.png', { type: 'image/png' });
+const topImg = new window.File(['x'], 'top.png', { type: 'image/png' });
+const folderGuide = new window.File(['{"topics":[]}'], 'guide2.json', { type: 'application/json' });
+const rootDir = dirEntry([fileEntry(folderGuide), fileEntry(topImg), dirEntry([fileEntry(deepFile)])]);
+
+calls.length = 0;
+const dropDt = { items: [{ webkitGetAsEntry: () => rootDir }], files: [] };
+const dropEv = new window.Event('drop', { bubbles: true, cancelable: true });
+Object.defineProperty(dropEv, 'dataTransfer', { value: dropDt });
+document.querySelector('.sv-body').dispatchEvent(dropEv);
+await new Promise(r => setTimeout(r, 80));
+const upPost2 = calls.find(c => c.path === '/study/import/upload');
+ck('a dropped folder goes through /study/import/upload, not /study/import', !!upPost2, upPost2 && upPost2.method);
+const droppedNames = (upPost2 && upPost2.body.getAll('files').map((f) => f.name).sort()) || [];
+ck('the nested file was found too -- not just the top level',
+   JSON.stringify(droppedNames) === JSON.stringify(['deep.png', 'guide2.json', 'top.png']), droppedNames);
 
 console.log('\n── a server error is shown, not swallowed ──');
 failNext = true;
