@@ -500,7 +500,7 @@ async function openNote(slug, push = true) {
   renderDocCrumb(note);
   $('#noteTitle').value = note.title;
   autoGrow($('#noteTitle'));
-  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
@@ -1115,7 +1115,7 @@ async function setEditing(on) {
   $('#noteBody').hidden = on;
   $('#editHint').textContent = on
     ? '⌘E OR CLICK AWAY TO PREVIEW · [[LINK]] · ![[EMBED]] · DRAG FILES IN'
-    : 'CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH';
+    : 'DOUBLE-CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH';
   if (on) {
     const ta = $('#noteSrc');
     ta.style.height = 'auto';
@@ -1125,7 +1125,7 @@ async function setEditing(on) {
     await flush();
     const note = await api('/notes/' + encodeURIComponent(state.slug));
     state.note = note;
-    $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+    $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
     enhanceEmbeds();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
@@ -1137,7 +1137,7 @@ async function setEditing(on) {
   }
 }
 
-$('#noteBody').addEventListener('click', (e) => {
+$('#noteBody').addEventListener('dblclick', (e) => {
   if (e.target.closest('a')) return;   // links win over entering edit mode
   if (e.target.closest('.embed-cap')) return;   // caption click/edit wins too
   // A resize drag's mouseup fires a click right after it, but targeted
@@ -1448,7 +1448,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   // reproduce app/render.py's grouping rules a second time in JS.
   const note = await api('/notes/' + encodeURIComponent(state.slug));
   state.note = note;
-  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Click here to start writing.</p>';
+  $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
 }
 

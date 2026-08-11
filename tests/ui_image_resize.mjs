@@ -115,11 +115,11 @@ ck('the resize was applied', fig.style.width === '360px', fig.style.width);
 ck('edit mode was NOT entered despite the click landing on the image',
    !doc.querySelector('#noteBody').hidden && doc.querySelector('#noteSrc').hidden);
 
-console.log('\n── a genuinely unrelated click still enters edit mode ──');
+console.log('\n── a genuinely unrelated double-click still enters edit mode ──');
 await new Promise(r => setTimeout(r, 450));   // outside the post-resize suppression window
-doc.querySelector('#noteBody').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+doc.querySelector('#noteBody').dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
 await new Promise(r => setTimeout(r, 30));
-ck('an ordinary click on the body still opens the editor',
+ck('an ordinary double-click on the body still opens the editor',
    doc.querySelector('#noteBody').hidden && !doc.querySelector('#noteSrc').hidden);
 // Back to preview by hand (not setEditing(false), which would refetch and
 // replace #noteBody's contents -- detaching `fig` from the rest of this file).
