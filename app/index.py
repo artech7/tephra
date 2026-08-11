@@ -32,7 +32,23 @@ CODE_RE = re.compile(r"`[^`]*`|```.*?```", re.S)
 # Spans the auto-linker must never write inside. Existing links are the
 # important one: rewriting inside `[[Answer Ping|answer ping]]` produced
 # `[[Answer [[Ping]]|answer ping]]` — a nested link that renders as raw markup.
-PROTECTED_RE = re.compile(r"```.*?```|`[^`\n]*`|!?\[\[[^\[\]]*\]\]", re.S)
+#
+# `[text](url)` and bare URLs belong here too. Without them, a term matching
+# plain text inside a URL path (e.g. "documentation" in
+# `.../commonly-referenced-documentation`) got wikilink-wrapped mid-URL,
+# breaking the link, and a term inside a markdown link's own anchor text got
+# nested-linked the same way `[[...]]` nesting did. The anchor-text branch
+# allows exactly one nested `[[wikilink]]` -- e.g. a link whose visible text
+# already names another note, `[...for [[Flashblade|FlashBlade]]...](url)` --
+# since that is the one shape real link text takes here.
+PROTECTED_RE = re.compile(
+    r"```.*?```"
+    r"|`[^`\n]*`"
+    r"|!?\[\[[^\[\]]*\]\]"
+    r"|!?\[(?:[^\[\]]|\[\[[^\[\]]*\]\])*\]\([^()\s]*\)"
+    r"|https?://\S+",
+    re.S,
+)
 
 # The quiz block is data, not prose. Links injected there show up as literal
 # brackets in questions and options, because the quiz UI renders plain text.
@@ -449,7 +465,11 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
     rows = con.execute("SELECT slug,title,body FROM notes").fetchall()
     if not rows:
         return []
-    bodies = {r["slug"]: strip_code(r["body"]) for r in rows}
+    # Mined and matched with code, existing links (wiki or markdown), and
+    # bare URLs blanked out -- a phrase found only inside one of those would
+    # get suggested, and accepting it would corrupt exactly what it's inside
+    # of (see PROTECTED_RE).
+    bodies = {r["slug"]: PROTECTED_RE.sub(" ", r["body"]) for r in rows}
     titles = {r["slug"]: r["title"] for r in rows}
     linked = defaultdict(set)
     for r in con.execute("SELECT src,target FROM links"):
@@ -487,8 +507,7 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
     caps: Counter = Counter()          # times this phrase appeared Title Cased
     where: dict[str, list] = defaultdict(list)
     for s, body in bodies.items():
-        text = WIKI_RE.sub(" ", body)
-        text = re.sub(r"[^\w\s-]", " ", text)
+        text = re.sub(r"[^\w\s-]", " ", body)
         words = text.split()
         seen_here = set()
         for n in (3, 2, 1):
