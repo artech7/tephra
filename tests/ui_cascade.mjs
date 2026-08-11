@@ -65,6 +65,23 @@ console.log('\n── the same trap, checked for the box-shadow glow ──');
 const gw = rulesFor(cIcon, 'box-shadow').pop();
 ck('glow comes from the Crucible rule', gw && gw.value.includes('--cruc-a'), gw?.sel);
 
+console.log('\n── code blocks scroll both axes and resize instead of growing forever ──');
+const bodyEl = doc.createElement('div');
+bodyEl.className = 'body';
+const preEl = doc.createElement('pre');
+bodyEl.appendChild(preEl);
+doc.body.appendChild(bodyEl);
+
+const rz = rulesFor(preEl, 'resize').pop();
+ck('gets a vertical drag handle', rz && rz.value === 'vertical', rz?.value);
+const ov = rulesFor(preEl, 'overflow').pop();
+ck('scrolls both axes, not just horizontally', ov && ov.value === 'auto', ov?.value);
+ck('has a default min size (the resize drag floor too)',
+   !!rulesFor(preEl, 'min-height').pop(), rulesFor(preEl, 'min-height').pop()?.value);
+ck('has a default cap so it does not grow unbounded on its own',
+   !!rulesFor(preEl, 'max-height').pop(), rulesFor(preEl, 'max-height').pop()?.value);
+doc.body.removeChild(bodyEl);
+
 console.log('\n── the body mark is gone, not blank ──');
 ck('no .sv-mark element in the Crucible header', !doc.querySelector('.sv-mark'));
 ck('no orphaned .sv-mark CSS', !rawCss.includes('.sv-mark'));

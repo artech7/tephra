@@ -134,6 +134,40 @@ with TestClient(app) as c:
     check("indices run in document order across a mixed row+stack layout",
           'data-embed-index="0"' in h and 'data-embed-index="1"' in h and 'data-embed-index="2"' in h, h)
 
+    print("\n── callout / note boxes (GitHub and Obsidian [!TYPE] syntax) ──")
+    h = rendered("> [!NOTE]\n> Plain callout, no title.")
+    check("renders a callout div, not a bare blockquote",
+          '<div class="callout callout-note">' in h and "<blockquote>" not in h, h)
+    check("no title falls back to the type name",
+          '<div class="callout-h">NOTE</div>' in h, h)
+
+    h = rendered("> [!WARNING] Careful now\n> Danger ahead.")
+    check("a custom title is used instead of the type name",
+          '<div class="callout-h">Careful now</div>' in h, h)
+    check("recognised type maps to its own visual variant",
+          'class="callout callout-warning"' in h, h)
+
+    h = rendered("> [!some-made-up-type]\n> Still boxed, not left as broken bracket text.")
+    check("an unrecognised type still renders as a box (falls back to the note variant)",
+          'class="callout callout-note">' in h and "[!some-made-up-type]" not in h, h)
+
+    h = rendered("> [!TIP]+\n> Obsidian's fold marker doesn't break parsing.")
+    check("a trailing +/- fold marker is accepted, not left dangling in the title",
+          '<div class="callout-h">TIP</div>' in h, h)
+
+    h = rendered("> [!NOTE]\n> Links to [[Shunt Wiring]] still resolve inside a callout.")
+    check("a wikilink inside a callout still gets resolved, not left as raw brackets",
+          'class="wl"' in h and 'data-slug="shunt-wiring"' in h, h)
+
+    h = rendered("> [!NOTE]\n> Before.\n> ![[busbar-layout.png]]\n> After.")
+    check("a block embed inside a callout stays inside the callout box",
+          re.search(r'callout-b">.*Before.*embed g2.*After', h, re.S), h)
+    check("it's still tracked as used media, not just visually present",
+          'src="/media/busbar-layout.png"' in h, h)
+
+    h = rendered("> Just a normal quote, no [!TYPE] marker.")
+    check("an ordinary blockquote is untouched", "<blockquote>" in h and "callout" not in h, h)
+
     print("\n── search ──")
     s = c.get("/api/search", params={"q": "inverter"}).json()
     check("fts finds note", any(x["slug"] == new["slug"] for x in s), [x["slug"] for x in s])

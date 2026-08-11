@@ -15,6 +15,23 @@ should not require syntax.
 Embeds placed on adjacent lines with no blank line between them render as a
 row rather than stacked -- the same "no new syntax" instinct as the size
 spec above. A blank line between two embeds keeps today's stacked layout.
+
+Tables and plain blockquotes are standard CommonMark/GFM and need nothing
+special. Callout/note boxes are not standard, but the syntax pasted-in
+sources actually use for them (GitHub's and Obsidian's, which agree) is
+recognised on top of an ordinary blockquote:
+
+    > [!NOTE]
+    > A note. TIP, IMPORTANT, WARNING, CAUTION, DANGER and Obsidian's wider
+    > vocabulary (info, hint, danger, question, ...) all work too, mapped
+    > onto a handful of visual variants; an unrecognised type still gets a
+    > box rather than rendering as literal "[!TYPE]" text.
+
+    > [!WARNING] Custom title
+    > A custom title after the type, instead of the type name. Needs a
+    > blank line before it like this one -- same as two ordinary
+    > blockquotes, which CommonMark itself also reads as one if they run
+    > together with no blank line between them.
 """
 from __future__ import annotations
 
@@ -31,6 +48,36 @@ md.enable("table")
 md.enable("strikethrough")
 
 URL_LINE_RE = re.compile(r"^\s*(https?://\S+)\s*$", re.M)
+
+# GitHub/Obsidian callout syntax: a blockquote whose first line is a bare
+# `[!TYPE]` marker, optionally followed by a custom title on that same line.
+# `[+-]?` is Obsidian's fold marker -- accepted so a foldable callout parses
+# instead of leaking a stray `+`/`-` into the title, even though nothing here
+# makes it actually foldable. Every subsequent `>`-prefixed line belongs to
+# the callout; a line with no `>` at all ends it, same as any blockquote.
+CALLOUT_RE = re.compile(
+    r"^[ \t]*>[ \t]*\[!(?P<type>[\w-]+)\][+-]?[ \t]*(?P<title>[^\n]*)\n"
+    r"(?P<lines>(?:[ \t]*>.*(?:\n|$))*)",
+    re.M,
+)
+_CALLOUT_STRIP_RE = re.compile(r"^[ \t]*>[ \t]?", re.M)
+
+# Sources pasted in from GitHub READMEs or an Obsidian vault use a much
+# wider vocabulary of callout types than there's any use styling separately
+# -- collapse them onto a handful of visual variants. Anything not listed
+# still renders as a boxed callout (see _callout_html's fallback), just
+# with the "note" look, rather than falling back to a plain blockquote with
+# a literal "[!TYPE]" leaking into the text.
+CALLOUT_VARIANTS = {
+    "note": "note", "info": "note", "abstract": "note", "summary": "note", "tldr": "note",
+    "quote": "note", "cite": "note", "example": "note", "question": "note",
+    "help": "note", "faq": "note",
+    "tip": "tip", "hint": "tip", "success": "tip", "check": "tip", "done": "tip",
+    "important": "tip",
+    "warning": "warning", "caution": "warning", "attention": "warning",
+    "danger": "danger", "error": "danger", "failure": "danger", "fail": "danger",
+    "missing": "danger", "bug": "danger",
+}
 # CommonMark *requires* U+0000 to be replaced with U+FFFD, so a NUL-delimited
 # placeholder gets silently destroyed. Letters and digits only: nothing here
 # is markdown-active, so the token survives the parser untouched.
@@ -172,6 +219,54 @@ def _open_externally(m: re.Match) -> str:
     return f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer"{m.group(2)}>'
 
 
+# Markdown wraps a placeholder sitting alone on its own line in a <p>, same
+# as any other block -- unwanted once it's a block-level fragment itself
+# (a figure, a bookmark card, a callout). Shared so a callout's own nested
+# md.render() can unwrap a block-level embed inside it exactly as the outer
+# render does, rather than leaving it stuck inside an invalid <p><figure>.
+_PLACEHOLDER_P_RE = re.compile(r"<p>\s*(" + PLACEHOLDER.replace("{}", r"\d+") + r")\s*</p>")
+
+
+def _unwrap_placeholder_p(rendered: str) -> str:
+    return _PLACEHOLDER_P_RE.sub(r"\1", rendered)
+
+
+def _callout_html(kind: str, title: str, inner_md: str, stash, on_wiki, used: list) -> str:
+    variant = CALLOUT_VARIANTS.get(kind.lower(), "note")
+    label = html.escape(title.strip()) if title.strip() else html.escape(kind.upper())
+    # A callout's content runs the same embed + wikilink pass the top-level
+    # body gets, not a plain md.render() -- an ![[embed]] or [[link]] inside
+    # one is otherwise invisible to it (rendered as raw brackets) or, worse,
+    # tracked nowhere (an image only ever embedded inside a callout would
+    # never show up as "used", and a link made only from inside one would
+    # never appear in that note's outgoing links or the graph).
+    inner_text, embed_used = _embed_runs(inner_md, stash)
+    used.extend(embed_used)
+    inner_text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), inner_text)
+    inner = _unwrap_placeholder_p(md.render(inner_text))
+    return (f'<div class="callout callout-{variant}">'
+            f'<div class="callout-h">{label}</div>'
+            f'<div class="callout-b">{inner}</div></div>')
+
+
+def _callout_sub(body: str, stash, on_wiki, used: list) -> str:
+    """Runs on the raw body, before the top-level _embed_runs -- that call
+    inserts blank lines around a block embed's placeholder, and a blank
+    line with no leading `>` ends a blockquote right there, splitting a
+    callout that has an embed in it into three pieces (see the regression
+    this replaced: text before the embed stayed boxed, the embed and
+    everything after it fell out into a bare, unstyled blockquote). Callout
+    detection has to run before that split can happen, and it strips
+    `>` markers before handing content off to _embed_runs itself, so
+    nothing here depends on blockquote continuation surviving at all.
+    """
+    def repl(m: re.Match) -> str:
+        inner_md = _CALLOUT_STRIP_RE.sub("", m.group("lines"))
+        frag = _callout_html(m.group("type"), m.group("title"), inner_md, stash, on_wiki, used)
+        return "\n\n" + stash(frag) + "\n\n"
+    return CALLOUT_RE.sub(repl, body)
+
+
 def _bookmark_html(url: str) -> str:
     safe = html.escape(url, quote=True)
     host = re.sub(r"^www\.", "", url.split("/")[2]) if "//" in url else url
@@ -204,9 +299,6 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
         blocks.append(fragment)
         return PLACEHOLDER.format(len(blocks) - 1)
 
-    text, embed_used = _embed_runs(body, stash)
-    used.extend(embed_used)
-
     def on_wiki(m):
         title = m.group(1).strip()
         shown = (m.group(2) or title).strip()
@@ -218,17 +310,33 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
                 f'data-title="{html.escape(title, quote=True)}">'
                 f'{html.escape(shown)}</a>')
 
+    # Callouts first, on the raw body -- _embed_runs (next) inserts blank
+    # lines around a block embed's placeholder, and a blank line with no
+    # leading `>` ends a blockquote right there, splitting a callout that
+    # has an embed in it into three pieces. See _callout_sub's own note for
+    # why extracting a callout's content up front, before that split can
+    # happen, sidesteps the problem entirely rather than working around it.
+    body = _callout_sub(body, stash, on_wiki, used)
+
+    text, embed_used = _embed_runs(body, stash)
+    used.extend(embed_used)
+
     # inline, so it must survive markdown; stash these too
     text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), text)
     text = URL_LINE_RE.sub(lambda m: "\n\n" + stash(_bookmark_html(m.group(1))) + "\n\n",
                            text)
 
-    out = _EXTERNAL_LINK_RE.sub(_open_externally, md.render(text))
+    out = _unwrap_placeholder_p(_EXTERNAL_LINK_RE.sub(_open_externally, md.render(text)))
 
-    # Unwrap the <p> markdown puts around a block-level placeholder before
-    # substituting, while the token is still a single predictable word.
-    out = re.sub(r"<p>\s*(" + PLACEHOLDER.replace("{}", r"\d+") + r")\s*</p>",
-                 r"\1", out)
-    for i, frag in enumerate(blocks):
-        out = out.replace(PLACEHOLDER.format(i), frag)
+    # Highest index first: a callout's own fragment can itself still contain
+    # an embed or wikilink placeholder verbatim (stashed earlier, at a lower
+    # index, then carried through untouched by the callout's own nested
+    # md.render() -- see _callout_html). Substituting low-to-high would
+    # revisit index 0 before the callout at, say, index 5 ever exposes it in
+    # `out`, leaving the placeholder token as literal visible text. Every
+    # nested placeholder's index is guaranteed lower than its container's,
+    # since stash() only ever appends, so one high-to-low pass resolves any
+    # depth of nesting in a single pass.
+    for i in range(len(blocks) - 1, -1, -1):
+        out = out.replace(PLACEHOLDER.format(i), blocks[i])
     return out, targets, used

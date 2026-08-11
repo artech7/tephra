@@ -299,13 +299,30 @@ body[data-wall="aurora"] .newnote:hover{
 .body ul,.body ol{margin:0 0 17px 22px}
 .body li{margin-bottom:6px}
 .body blockquote{border-left:2px solid rgba(var(--acc),.5);padding-left:16px;margin:0 0 17px;color:var(--muted)}
+.body .callout{--cal-c:var(--acc);border-radius:12px;padding:13px 16px 14px;margin:0 0 17px;
+  background:rgba(var(--cal-c),.08);border:1px solid rgba(var(--cal-c),.28);
+  border-left:3px solid rgb(var(--cal-c))}
+.body .callout-h{font-family:var(--display);font-weight:600;font-size:12.5px;letter-spacing:.03em;
+  text-transform:uppercase;color:rgb(var(--cal-c));margin-bottom:6px}
+.body .callout-b{font-size:16px}
+.body .callout-b>*:last-child{margin-bottom:0}
+.body .callout-tip{--cal-c:var(--violet)}
+.body .callout-warning{--cal-c:var(--apricot)}
+.body .callout-danger{--cal-c:255,110,110}
 .body hr{border:0;border-top:1px solid var(--edge);margin:28px 0}
 .body table{width:100%;border-collapse:collapse;margin-bottom:18px;font-family:var(--display);font-size:14px}
 .body th,.body td{border:1px solid var(--edge);padding:8px 11px;text-align:left}
 .body th{background:rgba(255,255,255,.06);font-weight:500}
 .body code{font-family:var(--mono);font-size:13.5px;background:rgba(0,0,0,.34);border:1px solid var(--edge);padding:1.5px 6px;border-radius:5px;color:var(--accent)}
-.body pre{background:rgba(0,0,0,.4);border:1px solid var(--edge);border-radius:12px;padding:14px 16px;overflow-x:auto;margin-bottom:18px}
-.body pre code{background:none;border:0;padding:0;color:#DDEDE9;font-size:12.5px;line-height:1.6}
+/* Long terminal output/code pasted from an external source would otherwise
+   either force the whole note wider (horizontal) or run the page on forever
+   (vertical) -- both scroll inside a capped box instead. resize:vertical
+   adds the browser's own drag handle in the bottom-right corner so a box
+   that's cutting off something worth seeing in full can be pulled taller;
+   min/max-height are also the drag's own bounds, not just the initial size. */
+.body pre{background:rgba(0,0,0,.4);border:1px solid var(--edge);border-radius:12px;padding:14px 16px;
+  margin-bottom:18px;overflow:auto;resize:vertical;min-height:52px;max-height:60vh}
+.body pre code{background:none;border:0;padding:0;color:#DDEDE9;font-size:12.5px;line-height:1.6;white-space:pre}
 .body a:not(.wl):not(.bookmark):not(.filechip){color:#9FE8FF;text-decoration:underline;text-underline-offset:3px}
 
 /* markdown source editing */

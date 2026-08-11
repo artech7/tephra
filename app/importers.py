@@ -359,7 +359,13 @@ FORMATS = [
                    "found and embedded automatically, wherever it actually sits on disk. "
                    "`question` and `answer` are plain markdown, so ordinary "
                    "`[link text](https://example.com)` hyperlinks work with no separate "
-                   "field for them — write them straight into the string.",
+                   "field for them — write them straight into the string. Fenced code blocks "
+                   "(```` ``` ````, an optional language after the opening fence, terminal "
+                   "output included) work the same way, and render in a scrollable, resizable "
+                   "box. Since JSON is the container, a code block's own newlines, quotes and "
+                   "backslashes need JSON's usual `\\n`/`\\\"`/`\\\\` escaping — any real JSON "
+                   "encoder does this automatically; it only bites a guide assembled by "
+                   "hand or string-concatenation instead of json.dumps/JSON.stringify.",
         "example": json.dumps({
             "name": "Guide name",
             "topics": [{
