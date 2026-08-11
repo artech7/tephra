@@ -84,8 +84,8 @@
      filesystem access, not the server's -- it works from any device pointed
      at Tephra, including one that shares no filesystem at all with wherever
      the server runs (a container, a box across the network). Everything
-     selected is read locally by the browser and uploaded, guide and images
-     together -- see doImportFiles.
+     selected is read locally by the browser -- see the import confirmation
+     modal below, which is the only thing that ever actually uploads it.
 
      Kept outside any label: a <label> forwards activation to a nested input
      on its own, so wrapping one and *also* calling input.click() makes the
@@ -98,13 +98,19 @@
   folderInput.multiple = true;
   folderInput.hidden = true;
   document.body.appendChild(folderInput);
-  let importFolderHost = null;
+  // Picking (or dropping -- see wireDrop) files never imports anything by
+  // itself; it only hands the file list to whichever caller asked for it
+  // (openImportModal, or setPickedFiles on an already-open modal). Nothing
+  // gets written until the confirm modal's own button is clicked -- that's
+  // the whole point: no more silent imports into whatever vault happens to
+  // be open.
+  let onFolderPicked = null;
   folderInput.addEventListener('change', () => {
     const files = Array.from(folderInput.files || []);
     folderInput.value = '';
-    if (files.length) doImportFiles(files, importFolderHost);
+    if (files.length && onFolderPicked) onFolderPicked(files);
   });
-  function pickFolder(host) { importFolderHost = host; folderInput.click(); }
+  function pickFolder(cb) { onFolderPicked = cb; folderInput.click(); }
 
   /* ── shell ── */
   const view = el('div');
@@ -126,7 +132,7 @@
       </div>
       <div class="sv-importbox">
         <button class="sv-import" id="svImport"
-          title="Pick a folder with your study guide — and any images it references — and import it into this vault. Reads the folder on this device, so it works no matter where the server runs.">
+          title="Import a study guide, with confirmation — into a brand-new vault by default, or merge into this one if you explicitly choose to.">
           Import/Merge</button>
         <button class="sv-formats-btn" id="svFormatsBtn"
           title="Reference: accepted file formats, and how to list a topic's images">
@@ -177,11 +183,287 @@
   $('#svFormatsBtn').onclick = openFormats;
   $('#svFormatsClose').onclick = () => formatsDrawer.classList.remove('on');
 
+  /* ── import confirmation modal ──
+     The bug this exists to fix: picking or dropping a guide used to import
+     it immediately, into whatever vault happened to be open -- easy to get
+     wrong the moment vault-switching isn't the very last thing that
+     happened (e.g. cleaning up other vaults, then importing, and only
+     later noticing it landed in the wrong one). Nothing here writes
+     anything until the modal's own confirm button is clicked, and the
+     default path (a brand-new vault) can't merge into existing content by
+     construction -- merging into the vault that's already open is an
+     explicit, reviewed opt-in, never the default. */
+  const modal = el('div', 'sv-importmodal');
+  modal.id = 'svImportModal';
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="sv-importmodal-card" id="svImportModalCard">
+      <div class="th-head"><h4>Import study guide</h4><button class="mini" id="svImportModalClose">×</button></div>
+      <div class="th-body">
+        <div class="sv-modetoggle">
+          <button type="button" class="sv-modebtn" data-mode="new" aria-pressed="true">Import → new vault</button>
+          <button type="button" class="sv-modebtn" data-mode="merge" aria-pressed="false">Merge → current vault</button>
+        </div>
+
+        <div class="sv-drop sv-importdrop" id="svImportDrop">
+          <span class="sv-drop-t">Choose a folder…</span>
+          <span class="sv-drop-s" id="svImportDropS">No folder chosen yet — click here, or drop a guide file
+            (or a whole folder with its images) anywhere on this card.</span>
+        </div>
+
+        <div id="svNewVaultPane">
+          <label class="sv-fieldlabel" for="svNewVaultName">New vault name</label>
+          <input type="text" id="svNewVaultName" placeholder="e.g. LDAP Study Guide" autocomplete="off">
+          <div class="sv-pathpreview" id="svNewVaultPath"></div>
+        </div>
+
+        <div id="svMergePane" hidden>
+          <div class="sv-mergebanner" id="svMergeBanner"></div>
+          <button type="button" class="sv-btn" id="svMergeReviewBtn" disabled>Review merge</button>
+          <div id="svMergeReviewOut"></div>
+        </div>
+
+        <div class="sv-warn" id="svImportModalError" hidden></div>
+
+        <div class="sv-importmodal-actions">
+          <button type="button" class="sv-btn" id="svImportModalCancel">Cancel</button>
+          <button type="button" class="sv-btn primary" id="svImportModalConfirm" disabled>Create Vault &amp; Import</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const $$ = (s) => Array.from(modal.querySelectorAll(s));
+  const isGuideFile = (f) => /\.(json|py|csv|tsv|md)$/i.test(f.name);
+  const basename = (p) => (p || '').replace(/\/+$/, '').split('/').pop();
+
+  const IM = { mode: 'new', files: null, reviewed: false, busy: false };
+
+  async function ensureSuggestedParent() {
+    if (S.suggestedParent) return S.suggestedParent;
+    try { S.suggestedParent = (await api('/vault/list')).suggested_parent; }
+    catch { S.suggestedParent = ''; }
+    return S.suggestedParent;
+  }
+
+  function guessVaultName(files) {
+    const guide = files && files.find(isGuideFile);
+    if (!guide) return '';
+    const stem = guide.name.replace(/\.[^.]+$/, '');
+    const words = stem.split(/[\s_-]+/).filter(Boolean);
+    return words.map((w) => (w === w.toUpperCase() ? w : w[0].toUpperCase() + w.slice(1))).join(' ');
+  }
+
+  function importDropSummary(files) {
+    if (!files || !files.length) {
+      return 'No folder chosen yet — click here, or drop a guide file (or a whole folder with its images) anywhere on this card.';
+    }
+    const guide = files.find(isGuideFile);
+    const images = files.length - (guide ? 1 : 0);
+    if (!guide) {
+      return `${files.length} file${files.length === 1 ? '' : 's'} chosen, but none looks like a study `
+        + 'guide (.json/.py/.csv/.tsv/.md) — pick the folder that has the guide file in it.';
+    }
+    return `Guide: ${guide.name}` + (images ? ` — ${images} other file${images === 1 ? '' : 's'} alongside it` : '');
+  }
+
+  function syncModalUI() {
+    $('#svNewVaultPane').hidden = IM.mode !== 'new';
+    $('#svMergePane').hidden = IM.mode !== 'merge';
+    $('#svImportDropS').textContent = importDropSummary(IM.files);
+    const name = $('#svNewVaultName').value.trim();
+    $('#svNewVaultPath').textContent = !name ? ''
+      : S.suggestedParent ? `Will create: ${S.suggestedParent.replace(/\/+$/, '')}/${name}`
+      : 'Will create alongside your other vaults.';
+    const hasGuide = !!(IM.files && IM.files.some(isGuideFile));
+    $('#svMergeReviewBtn').disabled = IM.busy || !hasGuide;
+    const confirmBtn = $('#svImportModalConfirm');
+    if (IM.mode === 'new') {
+      confirmBtn.textContent = 'Create Vault & Import';
+      confirmBtn.disabled = IM.busy || !(hasGuide && name);
+    } else {
+      confirmBtn.textContent = S.vault ? `Merge into ${basename(S.vault.vault)}` : 'Merge';
+      confirmBtn.disabled = IM.busy || !IM.reviewed;
+    }
+    $('#svImportModalCancel').disabled = IM.busy;
+    $$('.sv-modebtn').forEach((b) => (b.disabled = IM.busy));
+  }
+
+  function hideModalError() {
+    const box = $('#svImportModalError');
+    box.hidden = true; box.textContent = '';
+  }
+  function setModalErrorText(text) {
+    const box = $('#svImportModalError');
+    box.hidden = false; box.textContent = text;
+  }
+  function showModalError(e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    setModalErrorText(detail.slice(0, 300));
+  }
+
+  function setPickedFiles(files) {
+    IM.files = files;
+    IM.reviewed = false;
+    $('#svMergeReviewOut').innerHTML = '';
+    if (IM.mode === 'new' && !$('#svNewVaultName').value.trim()) {
+      const guess = guessVaultName(files);
+      if (guess) $('#svNewVaultName').value = guess;
+    }
+    hideModalError();
+    syncModalUI();
+  }
+
+  function setMergeBanner() {
+    $('#svMergeBanner').textContent = S.vault
+      ? `This will merge into your currently open vault: "${basename(S.vault.vault)}" (${S.vault.vault}). `
+        + 'New topics are added; topics a previous import of this same guide already created are updated in place.'
+      : 'Could not tell which vault is currently open — close this and reopen Crucible, then try again.';
+  }
+
+  $$('.sv-modebtn').forEach((b) => {
+    b.onclick = () => {
+      if (IM.busy) return;
+      IM.mode = b.dataset.mode;
+      IM.reviewed = false;
+      $$('.sv-modebtn').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      if (IM.mode === 'merge') { setMergeBanner(); $('#svMergeReviewOut').innerHTML = ''; }
+      hideModalError();
+      syncModalUI();
+    };
+  });
+  $('#svNewVaultName').oninput = syncModalUI;
+
+  $('#svImportDrop').onclick = () => pickFolder(setPickedFiles);
+  wireDrop($('#svImportDrop'), setPickedFiles);
+  wireDrop(modal, setPickedFiles);   // drop anywhere on the card, not just the drop target itself
+
+  function renderMergeReview(r) {
+    const out = $('#svMergeReviewOut');
+    out.innerHTML = '';
+    const list = el('ul', 'sv-reviewlist');
+    const add = (text) => list.appendChild(el('li', null, text));
+    add(`${r.topics} topic${r.topics === 1 ? '' : 's'} parsed — ${r.questions} question${r.questions === 1 ? '' : 's'}, `
+      + `${r.categories} categor${r.categories === 1 ? 'y' : 'ies'}.`);
+    add(`${r.created} new note${r.created === 1 ? '' : 's'} will be created`
+      + (r.updated ? `, ${r.updated} existing note${r.updated === 1 ? '' : 's'} will be updated` : '') + '.');
+    if (r.images_embedded) add(`${r.images_embedded} image${r.images_embedded === 1 ? '' : 's'} will be embedded.`);
+    if (r.collisions && r.collisions.length) {
+      add(`${r.collisions.length} title${r.collisions.length === 1 ? '' : 's'} match existing notes this importer `
+        + `doesn't own — kept as separate notes, nothing overwritten: ${r.collisions.join(', ')}.`);
+    }
+    if (r.skipped_duplicates) {
+      add(`${r.skipped_duplicates} topic${r.skipped_duplicates === 1 ? '' : 's'} look like near-duplicates of `
+        + 'notes already here and will be skipped.');
+    }
+    const flagged = (r.duplicates || []).filter((d) => !d.skipped);
+    if (flagged.length) {
+      add(`${flagged.length} possible duplicate${flagged.length === 1 ? '' : 's'} will still be created, flagged for review.`);
+    }
+    const missingCount = (r.missing_images || []).reduce((n, m) => n + m.files.length, 0);
+    if (missingCount) add(`${missingCount} referenced image${missingCount === 1 ? '' : 's'} not found — skipped, not fatal.`);
+    if (r.duplicate_image_names && r.duplicate_image_names.length) {
+      add(`${r.duplicate_image_names.length} image filename${r.duplicate_image_names.length === 1 ? '' : 's'} `
+        + 'appeared more than once in the picked folder — the first match was used.');
+    }
+    out.appendChild(list);
+  }
+
+  async function postImport(files, { dryRun = false } = {}) {
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f, f.name);
+    return api('/study/import/upload' + (dryRun ? '?dry_run=true' : ''), { method: 'POST', body: fd });
+  }
+
+  $('#svMergeReviewBtn').onclick = async () => {
+    if (IM.busy || !IM.files || !IM.files.some(isGuideFile)) return;
+    const btn = $('#svMergeReviewBtn');
+    btn.disabled = true; btn.textContent = 'Reviewing…';
+    hideModalError();
+    try {
+      const r = await postImport(IM.files, { dryRun: true });
+      IM.reviewed = true;
+      renderMergeReview(r);
+    } catch (e) {
+      IM.reviewed = false;
+      showModalError(e);
+    } finally {
+      btn.textContent = 'Review merge';
+      syncModalUI();
+    }
+  };
+
+  async function afterSuccessfulImport(r, toastPrefix) {
+    closeImportModal();
+    const { msg, needsAttention } = summarizeImport(r);
+    toast((toastPrefix || '') + msg, needsAttention ? 8000 : undefined);
+    await refreshAll();
+    if (window.tephraReloadList) window.tephraReloadList();
+  }
+
+  function validVaultName(name) {
+    return !!name && !name.includes('/') && name !== '.' && name !== '..' && !name.startsWith('.');
+  }
+
+  async function confirmCreateAndImport() {
+    const name = $('#svNewVaultName').value.trim();
+    if (!name || !IM.files) return;
+    if (!validVaultName(name)) {
+      setModalErrorText('That name won’t work as a folder name — avoid "/" and leading dots.');
+      return;
+    }
+    IM.busy = true; syncModalUI(); hideModalError();
+    try {
+      await ensureSuggestedParent();
+      const path = `${(S.suggestedParent || '').replace(/\/+$/, '')}/${name}`;
+      await api('/vault/create', { method: 'POST', body: JSON.stringify({ path }) });
+      const r = await postImport(IM.files);
+      if (window.tephraAfterVaultSwitch) await window.tephraAfterVaultSwitch();
+      await afterSuccessfulImport(r, `Created "${name}" — `);
+    } catch (e) {
+      showModalError(e);
+    } finally {
+      IM.busy = false; syncModalUI();
+    }
+  }
+
+  async function confirmMerge() {
+    if (!IM.reviewed || !IM.files) return;
+    IM.busy = true; syncModalUI(); hideModalError();
+    try {
+      const r = await postImport(IM.files);
+      await afterSuccessfulImport(r);
+    } catch (e) {
+      showModalError(e);
+    } finally {
+      IM.busy = false; syncModalUI();
+    }
+  }
+
+  $('#svImportModalConfirm').onclick = () => (IM.mode === 'new' ? confirmCreateAndImport() : confirmMerge());
+
+  function openImportModal(prefilledFiles) {
+    IM.mode = 'new'; IM.files = null; IM.reviewed = false; IM.busy = false;
+    $$('.sv-modebtn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === 'new')));
+    $('#svNewVaultName').value = '';
+    $('#svMergeReviewOut').innerHTML = '';
+    hideModalError();
+    modal.hidden = false;
+    ensureSuggestedParent().then(syncModalUI);
+    if (prefilledFiles && prefilledFiles.length) setPickedFiles(prefilledFiles);
+    else syncModalUI();
+  }
+  function closeImportModal() { modal.hidden = true; }
+
+  $('#svImportModalClose').onclick = closeImportModal;
+  $('#svImportModalCancel').onclick = closeImportModal;
+  modal.addEventListener('click', (e) => { if (e.target === modal && !IM.busy) closeImportModal(); });
+
   // Available whatever the current state — the dropzone only appears when the
   // guide is empty, which made importing unreachable the moment anything at
   // all had been added.
-  $('#svImport').onclick = () => pickFolder(null);
-  wireDrop(view.querySelector('.sv-body'));
+  $('#svImport').onclick = () => openImportModal();
+  wireDrop(view.querySelector('.sv-body'), (files) => openImportModal(files));
   view.querySelectorAll('.sv-modes button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 
   function setMode(m) {
@@ -782,8 +1064,8 @@
       <span class="sv-drop-s">Click to choose a folder — guide plus any images it
         references — or drop a <code>.json</code> <code>.py</code> <code>.csv</code>
         <code>.md</code> file, or a whole folder, right here</span>`;
-    drop.onclick = () => pickFolder(drop);
-    wireDrop(drop);
+    drop.onclick = () => openImportModal();
+    wireDrop(drop, (files) => openImportModal(files));
     wrap.appendChild(drop);
 
     if (S.vault) {
@@ -834,7 +1116,11 @@
     return out;
   }
 
-  function wireDrop(node) {
+  // onFiles(files) is called with whatever was dropped -- never imports by
+  // itself. Every caller either opens the confirm modal fresh (pre-filled
+  // with the dropped files) or, if the modal's already open, just updates
+  // its picked-files state.
+  function wireDrop(node, onFiles) {
     ['dragenter', 'dragover'].forEach((ev) => node.addEventListener(ev, (e) => {
       e.preventDefault(); node.classList.add('over');
     }));
@@ -846,7 +1132,7 @@
       const dt = e.dataTransfer;
       if (!dt) return;
       const files = await filesFromDrop(dt);
-      if (files.length) doImportFiles(files, node);
+      if (files.length) onFiles(files);
     });
   }
 
@@ -878,42 +1164,6 @@
     const needsAttention = (r.collisions && r.collisions.length) || r.skipped_duplicates
       || flagged.length || missingCount || (r.duplicate_image_names && r.duplicate_image_names.length);
     return { msg, needsAttention };
-  }
-
-  // Shared by every import path below: the server's reason has to survive
-  // into the view, not just a toast that fades before anyone reads it.
-  function reportImportError(e) {
-    let detail = String((e && e.message) || e);
-    try { detail = JSON.parse(detail).detail || detail; } catch {}
-    toast(detail.slice(0, 180), 6000);
-    const main = $('#svMain');
-    if (main) main.appendChild(el('div', 'sv-warn', 'Import failed: ' + detail.slice(0, 240)));
-  }
-
-  // The folder picker and every drag-drop (single file, multiple files, or a
-  // whole folder) all land here: the browser has already read every file's
-  // bytes, so this never touches a filesystem path at all -- it just
-  // uploads what it was handed.
-  async function doImportFiles(files, host) {
-    const label = host && host.querySelector('.sv-drop-t');
-    if (host) host.classList.add('busy');
-    if (label) label.textContent = `Importing ${files.length} file${files.length === 1 ? '' : 's'}…`;
-    toast(`Reading ${files.length} file${files.length === 1 ? '' : 's'}…`, 20000);
-
-    const fd = new FormData();
-    for (const f of files) fd.append('files', f, f.name);
-    try {
-      const r = await api('/study/import/upload', { method: 'POST', body: fd });
-      const { msg, needsAttention } = summarizeImport(r);
-      toast(msg, needsAttention ? 8000 : undefined);
-      await refreshAll();
-      if (window.tephraReloadList) window.tephraReloadList();
-    } catch (e) {
-      reportImportError(e);
-    } finally {
-      if (host) host.classList.remove('busy');
-      if (label) label.textContent = 'Import/Merge study guide';
-    }
   }
 
   async function refreshAll() {

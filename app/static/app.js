@@ -1961,24 +1961,34 @@ async function renderVaults() {
   }
 }
 
+/* Everything that has to happen once the *server* has already switched
+   vaults, regardless of which caller made that happen -- the vault picker's
+   own switchVault() below, or Crucible's "create a vault, then import into
+   it" flow, which talks to /api/vault/create directly and has no reason to
+   duplicate this. */
+async function refreshAfterVaultSwitch() {
+  // Theme is per-vault, so re-read it rather than carrying the old one over.
+  try { T = { ...DEFAULTS, ...(await api('/theme')) }; } catch {}
+  state.sort = SORTS[T.note_sort] ? T.note_sort : 'updated';
+  state.tag = T.note_tag || '';
+  state.slug = null; state.note = null; state.dirty = false;
+  applyTheme();
+  await loadList();
+  await loadGraph();
+  await loadMedia();
+  if (state.notes[0]) await openNote(state.notes[0].slug, false);
+  await renderVaults();
+  await showVaultName();
+  window.tephraLinks?.poll();
+  window.tephraStudy?.refresh();
+}
+window.tephraAfterVaultSwitch = refreshAfterVaultSwitch;
+
 async function switchVault(endpoint, path, msgEl = $('#vaultMsg')) {
   msgEl.textContent = 'Switching…';
   try {
     const r = await api(endpoint, { method: 'POST', body: JSON.stringify({ path }) });
-    // Theme is per-vault, so re-read it rather than carrying the old one over.
-    try { T = { ...DEFAULTS, ...(await api('/theme')) }; } catch {}
-    state.sort = SORTS[T.note_sort] ? T.note_sort : 'updated';
-    state.tag = T.note_tag || '';
-    state.slug = null; state.note = null; state.dirty = false;
-    applyTheme();
-    await loadList();
-    await loadGraph();
-    await loadMedia();
-    if (state.notes[0]) await openNote(state.notes[0].slug, false);
-    await renderVaults();
-    await showVaultName();
-  window.tephraLinks?.poll();
-    window.tephraStudy?.refresh();
+    await refreshAfterVaultSwitch();
     msgEl.textContent = `Now in ${r.vault}` + (r.created ? ' (new)' : '');
     toast(r.created ? `Created vault at ${r.vault}` : `Opened ${r.vault}`);
     return true;
