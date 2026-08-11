@@ -166,6 +166,15 @@ class Conn:
     def __init__(self, raw: sqlite3.Connection):
         self._c = raw
         self._lock = threading.RLock()
+        # Bumped by every write that changes notes/links (reindex_note,
+        # drop_note, rebuild). suggestions() caches its expensive corpus-wide
+        # mining pass against this, so browsing notes between edits doesn't
+        # re-mine the whole vault on every click.
+        self.version = 0
+        self._sugg_cache: tuple[int, tuple[dict, list]] | None = None
+
+    def touch(self) -> None:
+        self.version += 1
 
     def execute(self, sql, params=()):
         with self._lock:
@@ -274,6 +283,7 @@ def reindex_note(con: "Conn", note: vault.Note) -> None:
     con.execute("UPDATE links SET dst=? WHERE dst IS NULL AND lower(target)=?",
                 (note.slug, note.title.strip().lower()))
     con.commit()
+    con.touch()
 
 
 def drop_note(con: "Conn", slug: str) -> None:
@@ -282,6 +292,7 @@ def drop_note(con: "Conn", slug: str) -> None:
     con.execute("DELETE FROM links WHERE src=?", (slug,))
     con.execute("UPDATE links SET dst=NULL WHERE dst=?", (slug,))
     con.commit()
+    con.touch()
 
 
 def rebuild(con: "Conn") -> int:
@@ -308,6 +319,7 @@ def rebuild(con: "Conn") -> int:
             con.execute("INSERT OR IGNORE INTO links(src,target,dst) VALUES(?,?,?)",
                         (n.slug, target, tmap.get(key)))
     con.commit()
+    con.touch()
     return len(notes)
 
 
@@ -453,18 +465,24 @@ def restore_term(term: str) -> dict:
     return data
 
 
-def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
-    """Two kinds, ranked together.
+def _mine_suggestions(con) -> tuple[dict, list]:
+    """The expensive corpus-wide pass behind suggestions(): every existing
+    title checked for plain-text mentions across every note, plus the full
+    n-gram scan for recurring unlinked phrases. Neither depends on which
+    note is being viewed or how many results are wanted, so this used to
+    re-run in full on every note open and every suggestions poll -- for a
+    vault of any size that's an O(notes x total text) pass paid on every
+    click. It's cached in suggestions() against Conn.version instead, and
+    only redone when a note is actually written, dropped, or reindexed.
 
-    'unlinked'  an existing note's title appears as plain prose elsewhere.
-                High confidence — the page already exists, we just aren't
-                pointing at it.
-    'emerging'  a phrase recurs across several notes and has no page yet.
-                This is the part that grows a wiki on its own.
+    Returns (unlinked_by_slug, emerging) where unlinked_by_slug maps a
+    target note's slug to its title and full per-note hit list (unfiltered
+    by viewing note), and emerging is the already-ranked, already-deduped
+    list of 'kind': 'emerging' suggestion dicts.
     """
     rows = con.execute("SELECT slug,title,body FROM notes").fetchall()
     if not rows:
-        return []
+        return {}, []
     # Mined and matched with code, existing links (wiki or markdown), and
     # bare URLs blanked out -- a phrase found only inside one of those would
     # get suggested, and accepting it would corrupt exactly what it's inside
@@ -475,9 +493,8 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
     for r in con.execute("SELECT src,target FROM links"):
         linked[r["src"]].add(r["target"].strip().lower())
 
-    out: list[dict] = []
-
     # 1. existing titles mentioned as plain text
+    unlinked_by_slug: dict[str, dict] = {}
     for tslug, title in titles.items():
         if len(title) < 4:
             continue
@@ -486,21 +503,17 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
         for s, body in bodies.items():
             if s == tslug or title.lower() in linked[s]:
                 continue
-            if slug and s != slug:
-                continue
             n = len(pat.findall(body))
             if n:
                 hits.append({"slug": s, "title": titles[s], "count": n})
         if hits:
-            out.append({
-                "kind": "unlinked",
-                "term": title,
-                "target": tslug,
-                "notes": len(hits),
-                "mentions": sum(h["count"] for h in hits),
-                "where": hits[:6],
-            })
+            unlinked_by_slug[tslug] = {"title": title, "hits": hits}
 
+    emerging = list(_mine_emerging(bodies, titles))
+    return unlinked_by_slug, emerging
+
+
+def _mine_emerging(bodies: dict[str, str], titles: dict[str, str]):
     # 2. recurring phrases with no page
     known = {t.lower() for t in titles.values()}
     df: Counter = Counter()
@@ -580,14 +593,50 @@ def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
         kept.append(k)
 
     for key in kept[:6]:
-        out.append({
+        yield {
             "kind": "emerging",
             "term": key,
             "target": None,
             "notes": df[key],
             "mentions": df[key],
             "where": where[key][:6],
+        }
+
+
+def suggestions(con, slug: str | None = None, limit: int = 12) -> list[dict]:
+    """Two kinds, ranked together.
+
+    'unlinked'  an existing note's title appears as plain prose elsewhere.
+                High confidence — the page already exists, we just aren't
+                pointing at it.
+    'emerging'  a phrase recurs across several notes and has no page yet.
+                This is the part that grows a wiki on its own.
+
+    The corpus-wide mining (_mine_suggestions) doesn't vary by slug or
+    limit, so it's cached on the connection and reused across calls until
+    the index actually changes -- opening notes one after another shouldn't
+    re-scan the whole vault each time.
+    """
+    cached = con._sugg_cache
+    if cached is None or cached[0] != con.version:
+        cached = (con.version, _mine_suggestions(con))
+        con._sugg_cache = cached
+    unlinked_by_slug, emerging = cached[1]
+
+    out: list[dict] = []
+    for tslug, info in unlinked_by_slug.items():
+        hits = info["hits"] if slug is None else [h for h in info["hits"] if h["slug"] == slug]
+        if not hits:
+            continue
+        out.append({
+            "kind": "unlinked",
+            "term": info["title"],
+            "target": tslug,
+            "notes": len(hits),
+            "mentions": sum(h["count"] for h in hits),
+            "where": hits[:6],
         })
+    out.extend(emerging)
 
     hidden = load_dismissed()["dismissed"]
     out = [d for d in out if d["term"].strip().lower() not in hidden]

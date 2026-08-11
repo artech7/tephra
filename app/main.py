@@ -240,9 +240,10 @@ def get_note(slug: str):
     # those counts. The *displayed* HTML is prose only: quiz has its own
     # editor now, so rendering it a second time as a plain markdown list
     # inside the note body would just be the same content shown twice.
-    _, targets, used = rndr.render(note.body, resolver())
+    resolve = resolver()
+    _, targets, used = rndr.render(note.body, resolve)
     prose, _ = st.split_quiz(note.body)
-    body_html, _, _ = rndr.render(prose, resolver())
+    body_html, _, _ = rndr.render(prose, resolve)
     item = st.load_item(note)
     flagged = set(st.load_progress()["flagged"])
     flagged_qs = [{"id": q["id"], "question": q["question"]}
@@ -474,10 +475,13 @@ def dismissed_suggestions():
 
 @app.post("/api/suggestions/apply")
 def apply_suggestion(payload: SuggestIn):
+    # idx.apply_suggestion() already rebuilds once up front and then
+    # incrementally reindexes every note it touches, so the index is fully
+    # consistent by the time it returns -- a second full rebuild here was
+    # just redoing that same disk scan for nothing.
     result = idx.apply_suggestion(db(), payload.term, payload.target)
     # An applied term should not come back as a suggestion either.
     idx.dismiss_term(payload.term, "applied")
-    idx.rebuild(db())
     return result
 
 
