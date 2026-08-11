@@ -358,17 +358,17 @@ FORMATS = [
                    "folder and any image anywhere under it with a matching name is "
                    "found and embedded automatically, wherever it actually sits on disk.",
         "example": json.dumps({
-            "name": "Storage Fundamentals",
+            "name": "Guide name",
             "topics": [{
-                "id": "raid", "category": "Storage", "title": "RAID levels",
-                "question": "What are the common RAID levels?",
-                "answer": "**RAID 0** stripes...  \nSupports full markdown.",
-                "images": ["raid-levels-diagram.png", "raid5-parity.png"],
+                "id": "topic-id", "category": "Category", "title": "Topic title",
+                "question": "Question shown for this topic",
+                "answer": "Answer, in markdown",
+                "images": ["screenshot.png"],
                 "quiz": [{
-                    "question": "Which level has no redundancy?",
-                    "options": ["RAID 0", "RAID 1", "RAID 5"],
+                    "question": "Quiz question text",
+                    "options": ["Option A", "Option B"],
                     "answer": 0,
-                    "why": "Striping only — one disk lost is all data lost.",
+                    "why": "Why that option is correct",
                 }],
             }],
         }, indent=2),
