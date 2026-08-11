@@ -101,11 +101,19 @@ def _embed_html(name: str, caption: str | None, size: str | None, idx: int) -> s
     # when unset. data-caption/data-fallback let the frontend's click-to-edit
     # tell "no caption yet" apart from "caption happens to equal filename".
     cap_shown = html.escape(caption) if caption else html.escape(name)
+    # CSS truncates this to one line (see .embed-cap-text) so an unbroken
+    # filename with no spaces -- an imported guide's deterministic media name
+    # can run 60+ characters -- can't wrap the whole figure open. The title
+    # attribute keeps the full text one hover away.
+    cap_title = html.escape(caption or name, quote=True)
+    view_link = (f'<a class="embed-view" href="{url}" target="_blank" rel="noopener" '
+                 f'title="Open at full size">View</a>') if kind == "image" else ""
     return (f'<figure class="embed g2{sized}" data-kind="{kind}" data-embed-index="{idx}"{style}>'
             f'<div class="embed-media">{inner}</div>'
             f'<figcaption class="embed-cap"><span class="kind">{kind.upper()}</span>'
             f'<span class="embed-cap-text" data-caption="{html.escape(caption or "", quote=True)}" '
-            f'data-fallback="{html.escape(name, quote=True)}">{cap_shown}</span></figcaption></figure>')
+            f'data-fallback="{html.escape(name, quote=True)}" title="{cap_title}">{cap_shown}</span>'
+            f'{view_link}</figcaption></figure>')
 
 
 def _embed_runs(body: str, stash) -> tuple[str, list[str]]:

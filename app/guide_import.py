@@ -95,12 +95,19 @@ def _media_name(slug: str, filename: str) -> str:
 
 
 def _place_images(slug: str, wanted: list[str], available: dict[str, Path | bytes],
-                   dry_run: bool) -> tuple[list[str], list[str]]:
+                   dry_run: bool) -> tuple[list[tuple[str, str]], list[str]]:
     """Resolve a topic's requested image filenames against the images found
     under the search root, writing matches into vault media under a name
-    derived from this note. Returns (embedded media names, filenames that
-    matched nothing) -- a miss is reported, not fatal, so one typo'd filename
-    in a 40-topic guide doesn't block the other 39.
+    derived from this note. Returns (embedded [(media name, original
+    filename), ...], filenames that matched nothing) -- a miss is reported,
+    not fatal, so one typo'd filename in a 40-topic guide doesn't block the
+    other 39.
+
+    The original filename comes back alongside the media name so the caller
+    can caption the embed with it: the on-disk name is `{slug}--{filename}`,
+    unique across the vault, but every one of a note's own images repeats
+    that note's own (possibly long) title back at the reader as a prefix --
+    exactly the string a caption should *not* be.
 
     `available` values are a Path when they came from vault.find_images (a
     server-side directory scan) or raw bytes when they came from files the
@@ -117,7 +124,7 @@ def _place_images(slug: str, wanted: list[str], available: dict[str, Path | byte
         if not dry_run:
             data = src.read_bytes() if isinstance(src, Path) else src
             vault.import_media(name, data)
-        embedded.append(name)
+        embedded.append((name, filename))
     return embedded, missing
 
 
@@ -253,8 +260,12 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
         if embedded:
             # No blank line between the embeds -- render.py groups adjacent
             # embeds into one row, and sequential slide screenshots read
-            # better side by side than stacked one per line.
-            body += "\n\n" + "\n".join(f"![[{n}]]" for n in embedded)
+            # better side by side than stacked one per line. The original
+            # filename becomes the caption (`|` is the embed syntax's own
+            # field separator, so the rare filename containing one falls
+            # back to no caption rather than a mis-parsed embed).
+            body += "\n\n" + "\n".join(
+                f"![[{n}]]" if "|" in orig else f"![[{n}|{orig}]]" for n, orig in embedded)
             images_embedded += len(embedded)
         if missing:
             missing_images.append({"topic": title_, "files": missing})

@@ -268,11 +268,11 @@ with TestClient(app) as c:
     note = next(n for n in c.get("/api/notes").json() if n["title"] == "Diagram Topic")
     body = open(f"{A}/notes/{note['slug']}.md").read()
     ck("diagram embedded under a deterministic (note-scoped) name",
-       f"![[{note['slug']}--diagram.png]]" in body, body)
+       f"![[{note['slug']}--diagram.png|diagram.png]]" in body, body)
     ck("extra (found two folders deep) embedded too",
-       f"![[{note['slug']}--extra.png]]" in body, body)
+       f"![[{note['slug']}--extra.png|extra.png]]" in body, body)
     ck("dup embedded despite the collision -- first match still wins, not dropped",
-       f"![[{note['slug']}--dup.png]]" in body, body)
+       f"![[{note['slug']}--dup.png|dup.png]]" in body, body)
     ck("ghost never got an embed", "ghost" not in body, body)
     media_before = set(os.listdir(f"{A}/media"))
     ck("media files actually written to disk", {
@@ -332,8 +332,9 @@ with TestClient(app) as c:
 
     unote = next(n for n in c.get("/api/notes").json() if n["title"] == "Upload Diagram Topic")
     ubody = open(f"{A}/notes/{unote['slug']}.md").read()
-    ck("both uploaded images embedded under deterministic names",
-       f"![[{unote['slug']}--shot1.png]]" in ubody and f"![[{unote['slug']}--shot2.png]]" in ubody,
+    ck("both uploaded images embedded under deterministic names, captioned with the short original",
+       f"![[{unote['slug']}--shot1.png|shot1.png]]" in ubody
+       and f"![[{unote['slug']}--shot2.png|shot2.png]]" in ubody,
        ubody)
 
     umedia_before = set(os.listdir(f"{A}/media"))

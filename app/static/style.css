@@ -424,11 +424,18 @@ body[data-wall="aurora"] .newnote:hover{
 /* the caption bar: click the text to edit it in place. Data-caption empty
    means "showing the filename fallback" -- text-transform lowercase there
    only, so a real caption (mixed case, sentences) reads differently from
-   the bare filename it's standing in for. */
-.embed-cap-text{flex:1;min-width:0;cursor:text;padding:2px 4px;margin:-2px -4px;border-radius:5px;transition:background .15s var(--ease)}
+   the bare filename it's standing in for. Truncated to one line rather than
+   left to wrap: an unbroken filename with no spaces (an imported guide's
+   deterministic media name, easily 60+ characters) wraps at every hyphen
+   instead, stretching the whole figure to fill the note. */
+.embed-cap-text{flex:1;min-width:0;cursor:text;padding:2px 4px;margin:-2px -4px;border-radius:5px;transition:background .15s var(--ease);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .embed-cap-text:hover{background:rgba(255,255,255,.08)}
 .embed-cap-text[data-caption=""]{text-transform:lowercase;opacity:.75}
 .embed-cap-input{flex:1;min-width:0;font:inherit;color:inherit;background:rgba(0,0,0,.28);border:1px solid rgba(var(--acc),.5);border-radius:5px;padding:2px 4px;margin:-2px -4px;outline:none}
+.embed-view{flex:none;padding:2.5px 9px;border-radius:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;
+  color:var(--muted);background:rgba(255,255,255,.06);border:1px solid var(--edge);text-decoration:none;transition:.15s var(--ease)}
+.embed-view:hover{background:rgba(255,255,255,.16);color:var(--paper)}
 .embed.missing{border:1px dashed rgba(var(--apricot),.5);background:rgba(var(--apricot),.06)}
 .embed.missing .kind{background:rgba(var(--apricot),.2);border-color:rgba(var(--apricot),.4);color:#FFD2B8}
 

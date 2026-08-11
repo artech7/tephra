@@ -1474,12 +1474,13 @@ function enhanceEmbeds() {
     fig.addEventListener('dragstart', (e) => {
       // A resize handle already preventDefault()s its own mousedown, which
       // should already stop native drag from starting on it -- this is a
-      // second line of defense, not the primary guard. The caption text is
-      // a click target of its own (to edit it, or just to place a cursor in
-      // it), and a native figure-drag starting underneath it would hijack
-      // that gesture into a reorder instead.
+      // second line of defense, not the primary guard. The caption text and
+      // the view-full-size link are each a click target of their own, and a
+      // native figure-drag starting underneath either would hijack that
+      // gesture into a reorder (or, for the link, into a browser link-drag)
+      // instead.
       if (e.target.closest('.embed-handle')) { e.preventDefault(); return; }
-      if (e.target.closest('.embed-cap-text, .embed-cap-input')) { e.preventDefault(); return; }
+      if (e.target.closest('.embed-cap-text, .embed-cap-input, .embed-view')) { e.preventDefault(); return; }
       e.dataTransfer.setData('text/plain', String(fig.dataset.embedIndex));
       e.dataTransfer.effectAllowed = 'move';
       fig.classList.add('dragging');
