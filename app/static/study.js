@@ -70,6 +70,10 @@
     // "graded", since picking stops being instant the moment more than one
     // box can be checked.
     quiz: [], quizIx: 0, quizPicked: null, quizSubmitted: false, quizScore: 0, quizDone: false,
+    // Rolled up by default -- a topic's quiz answers sit right under its
+    // prose, and showing them open by default spoils the topic before the
+    // reader gets to it.
+    quizPeekOpen: false,
   };
 
   const api = window.tephraApi;
@@ -685,18 +689,23 @@
     main.appendChild(body);
 
     if (item.quiz.length) {
-      const h = el('div', 'eyebrow');
-      h.innerHTML = `<span>Questions on this topic</span><span>${item.quiz.length}</span>`;
-      h.style.borderTop = '1px solid var(--edge)';
-      h.style.paddingTop = '18px';
+      const open = S.quizPeekOpen;
+      const h = el('button', 'sv-qpeek-toggle');
+      h.type = 'button';
+      h.setAttribute('aria-expanded', String(open));
+      h.innerHTML = '<span class="sv-qpeek-caret">▸</span><span>Questions on this topic</span>'
+        + `<span class="sv-qpeek-count">${item.quiz.length}</span>`;
+      h.onclick = () => { S.quizPeekOpen = !S.quizPeekOpen; render(); };
       main.appendChild(h);
-      for (const q of item.quiz) {
-        const b = el('div', 'sv-qpeek');
-        b.appendChild(el('div', 'sv-qpeek-q', q.question));
-        const ans = el('div', 'sv-qpeek-a', '✓ ' + q.answers.map((i) => q.options[i]).join(', '));
-        b.appendChild(ans);
-        if (q.why) b.appendChild(el('div', 'sv-qpeek-w', q.why));
-        main.appendChild(b);
+      if (open) {
+        for (const q of item.quiz) {
+          const b = el('div', 'sv-qpeek');
+          b.appendChild(el('div', 'sv-qpeek-q', q.question));
+          const ans = el('div', 'sv-qpeek-a', '✓ ' + q.answers.map((i) => q.options[i]).join(', '));
+          b.appendChild(ans);
+          if (q.why) b.appendChild(el('div', 'sv-qpeek-w', q.why));
+          main.appendChild(b);
+        }
       }
     }
 

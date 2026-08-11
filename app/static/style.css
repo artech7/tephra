@@ -858,6 +858,14 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .chipinput:focus{outline:none;border-color:rgba(var(--acc),.55)}
 input.sv-select{cursor:text}
 .sv-cat-hint{font-family:var(--mono);font-size:9.5px;color:#FFD2B8}
+.sv-qpeek-toggle{display:flex;align-items:center;gap:8px;width:100%;margin-top:18px;padding:10px 2px;
+  border:0;border-top:1px solid var(--edge);border-radius:0;background:none;cursor:pointer;
+  font:inherit;font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--faint);transition:.18s var(--ease)}
+.sv-qpeek-toggle:hover{color:var(--paper)}
+.sv-qpeek-caret{font-size:9px;transition:transform .22s var(--ease)}
+.sv-qpeek-toggle[aria-expanded="true"] .sv-qpeek-caret{transform:rotate(90deg)}
+.sv-qpeek-count{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
 .sv-qpeek{padding:13px 0;border-top:1px solid var(--edge)}
 .sv-qpeek-q{font-family:var(--serif);font-size:15px;margin-bottom:6px}
 .sv-qpeek-a{font-size:13px;color:var(--accent);margin-bottom:5px}

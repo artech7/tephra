@@ -70,8 +70,12 @@ window.tephraApi = async (p, opts = {}) => {
   if (p === '/vault/info') return { vault: '/v', files_on_disk: 2, indexed: 2, study_items: studyState.items.length };
   if (p.startsWith('/study/item/')) {
     const it = studyState.items.find((i) => i.slug === p.split('/').pop());
+    const quiz = it.slug === 'icmp'
+      ? [{ question: 'Which layer?', options: ['L2', 'L3'], answers: [1], why: 'Rides on IP.' },
+         { question: 'Ping uses which protocol?', options: ['TCP', 'ICMP'], answers: [1], why: '' }]
+      : [];
     return { slug: it.slug, title: it.title, category: it.category, source: it.source,
-      confidence: null, question: it.question, prose: '', html: '<p>body</p>', quiz: [], updated: '' };
+      confidence: null, question: it.question, prose: '', html: '<p>body</p>', quiz, updated: '' };
   }
   const catMatch = p.match(/^\/study\/([^/]+)\/category$/);
   if (catMatch) {
@@ -142,6 +146,23 @@ ck('applies the typed name as the category',
    doc.querySelector('.sv-c-cat')?.textContent === 'Custom Group', doc.querySelector('.sv-c-cat')?.textContent);
 ck('a human-typed name is ground truth, not an auto guess',
    studyState.items.find((i) => i.slug === 'icmp').source === 'manual');
+
+console.log('\n── quiz items are rolled up by default ──');
+icmpCard.onclick(); await new Promise((r) => setTimeout(r, 30));
+let qToggle = doc.querySelector('.sv-qpeek-toggle');
+ck('toggle is rendered', !!qToggle);
+ck('collapsed by default', qToggle?.getAttribute('aria-expanded') === 'false');
+ck('no answers shown yet', doc.querySelectorAll('.sv-qpeek').length === 0);
+
+qToggle.onclick(); await new Promise((r) => setTimeout(r, 30));
+qToggle = doc.querySelector('.sv-qpeek-toggle');
+ck('expands on click', qToggle.getAttribute('aria-expanded') === 'true');
+ck('shows every quiz item once expanded', doc.querySelectorAll('.sv-qpeek-q').length === 2);
+
+qToggle.onclick(); await new Promise((r) => setTimeout(r, 30));
+ck('collapses again on a second click',
+   doc.querySelector('.sv-qpeek-toggle').getAttribute('aria-expanded') === 'false'
+   && doc.querySelectorAll('.sv-qpeek').length === 0);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
