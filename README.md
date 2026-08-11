@@ -40,6 +40,40 @@ delete at any time without losing anything.
 - **A real graph view**, not a toy — force-directed or a zero-crossing radial
   tree, with stub/leaf filters to cut through a large vault.
 
+## Screenshots
+
+### Notes and the graph
+
+A note, with backlinks and its local graph on the right:
+
+![A note open in Tephra, showing backlinks and its local graph](docs/screenshots/notes.png)
+
+The whole vault, clustered layout:
+
+![The vault graph in clustered layout](docs/screenshots/graph.png)
+
+Hovering a `[[wikilink]]` previews the note it points to, without leaving the page:
+
+![A hover preview card for a wikilink](docs/screenshots/wikilink-hover.png)
+
+### Crucible — study mode
+
+Topics grouped by category:
+
+![Crucible's Browse mode, topics grouped by category](docs/screenshots/crucible-browse.png)
+
+A flashcard, front and flipped to its answer:
+
+<img src="docs/screenshots/flashcard-front.png" width="49%"> <img src="docs/screenshots/flashcard-back.png" width="49%">
+
+Quiz setup — pick a length, drill your weakest questions first, or flagged-only:
+
+![Quiz setup screen](docs/screenshots/quiz-setup.png)
+
+Any note can carry its own quiz block, editable right there in the note:
+
+![A note with an inline quiz editor](docs/screenshots/quiz-editor.png)
+
 ## What's next
 
 - A filesystem watcher, so edits made outside the app appear without a
