@@ -119,11 +119,27 @@ ck('deleting triggered a save', quizPuts.length === 3);
 ck('the deleted question is not in the payload',
    !quizPuts[quizPuts.length - 1].items.some((it) => it.question === 'Existing question?'));
 
+console.log('\n── quiz section is rolled up by default, with a toggle ──');
+const toggle = doc.querySelector('#quizEditToggle');
+const body = doc.querySelector('#quizEditBody');
+ck('collapsed on load', body.hidden === true && toggle.getAttribute('aria-expanded') === 'false');
+ck('count badge reflects the question total', doc.querySelector('#quizEditCount').textContent === '1 question');
+
+toggle.click();
+ck('expands on click', body.hidden === false && toggle.getAttribute('aria-expanded') === 'true');
+
+toggle.click();
+ck('collapses again on a second click', body.hidden === true && toggle.getAttribute('aria-expanded') === 'false');
+
+toggle.click();   // leave it open -- switching notes below should not re-collapse it
+ck('opened again for the note-switch check', body.hidden === false);
+
 console.log('\n── a hand-edited markdown quiz re-syncs the form ──');
 quiz = [{ id: 'alpha:handwritten', question: 'Hand-written in source mode', options: ['A', 'B'], answers: [1], why: '' }];
 window.tephraQuizEdit.render(quiz, 'alpha');
 ck('form now shows exactly the hand-written question',
    cards().length === 1 && cards()[0].querySelector('.quizitem-q').value === 'Hand-written in source mode');
+ck('re-rendering (e.g. a note switch) does not re-collapse an opened section', body.hidden === false);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

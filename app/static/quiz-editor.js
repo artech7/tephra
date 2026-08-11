@@ -27,6 +27,10 @@
   let items = [];          // working copy: [{question, options:[...], answers:[...], why}]
   let saveTimer = null;
   let dirty = false;
+  // Rolled up by default, and deliberately not reset per note -- switching
+  // notes keeps whatever the user last chose instead of re-hiding a section
+  // they just opened to work in.
+  let open = false;
 
   function autoGrow(node) {
     node.style.height = 'auto';
@@ -37,6 +41,19 @@
     const c = $('#quizSaveChip');
     c.dataset.state = state;
     c.textContent = text;
+  }
+
+  // A collapsed section has display:none, so scrollHeight reads 0 for
+  // anything sized while hidden -- autoGrow() run during a hidden renderList()
+  // would pin every textarea at 0px. Re-measure once the section is visible.
+  function syncOpen() {
+    $('#quizEditToggle').setAttribute('aria-expanded', String(open));
+    $('#quizEditBody').hidden = !open;
+    if (open) {
+      requestAnimationFrame(() => {
+        $('#quizList').querySelectorAll('.quizitem-q, .quizitem-why').forEach(autoGrow);
+      });
+    }
   }
 
   function touched() {
@@ -85,12 +102,15 @@
     }));
     chip('', '');
     renderList();
+    syncOpen();
   }
 
   function renderList() {
     const host = $('#quizList');
     host.innerHTML = '';
     items.forEach((item, i) => host.appendChild(buildCard(item, i)));
+    $('#quizEditCount').textContent = items.length
+      ? `${items.length} question${items.length === 1 ? '' : 's'}` : '';
   }
 
   function buildCard(item, index) {
@@ -192,6 +212,8 @@
     row.appendChild(del);
     return row;
   }
+
+  $('#quizEditToggle').onclick = () => { open = !open; syncOpen(); };
 
   $('#quizAdd').onclick = () => {
     items.push({ question: '', options: ['', ''], answers: [], why: '' });

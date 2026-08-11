@@ -321,11 +321,18 @@ body[data-wall="aurora"] .newnote:hover{
    heading already occupied, just no longer rendered a second time as
    plain markdown inside .body (see get_note's prose-only html). */
 .quizedit{margin-top:40px;padding-top:22px;border-top:1px solid var(--edge)}
-.quizedit-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.quizedit-head{display:flex;align-items:center;gap:9px;width:100%;font:inherit;background:none;
+  border:0;border-radius:8px;margin:-6px -8px 14px;padding:6px 8px;cursor:pointer;text-align:left;
+  transition:.18s var(--ease)}
+.quizedit-head:hover{background:rgba(255,255,255,.05)}
+.quizedit-caret{font-size:10px;color:var(--faint);transition:transform .22s var(--ease)}
+.quizedit-head[aria-expanded="true"] .quizedit-caret{transform:rotate(90deg)}
 .quizedit-title{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:-.02em;color:#fff}
-.quizedit-save{font-family:var(--mono);font-size:10px;color:var(--faint);transition:color .3s var(--ease)}
+.quizedit-count{font-family:var(--mono);font-size:10px;color:var(--faint)}
+.quizedit-save{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);transition:color .3s var(--ease)}
 .quizedit-save[data-state="saving"]{color:#FFD2B8}
 .quizedit-save[data-state="error"]{color:#FFB3B3}
+.quizedit-body[hidden]{display:none}
 .quizedit-list{display:flex;flex-direction:column;gap:14px}
 .quizitem{padding:16px 18px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--edge)}
 .quizitem-qrow{display:flex;gap:8px;align-items:flex-start;margin-bottom:12px}
