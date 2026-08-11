@@ -780,6 +780,15 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .sv-reviewlist li::before{content:'';position:absolute;left:2px;top:7px;width:5px;height:5px;border-radius:50%;background:rgb(var(--accent))}
 
 #svImportModalError{margin-bottom:16px}
+/* Real per-topic progress off the background job's own poll (see
+   postImport/setImportProgress in study.js) -- width is set from
+   done/total, not animated as an indeterminate guess. */
+.sv-progress{margin-bottom:16px}
+.sv-progress[hidden]{display:none}
+.sv-progress-bar{height:6px;border-radius:4px;background:rgba(0,0,0,.28);border:1px solid var(--edge);overflow:hidden}
+.sv-progress-fill{height:100%;width:0%;background:var(--accent);box-shadow:0 0 8px var(--accent);
+  transition:width .25s var(--ease)}
+.sv-progress-label{margin-top:7px;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 .sv-importmodal-actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 18px;margin:0 -18px -20px;border-top:1px solid var(--edge)}
 
 /* ══ IMAGE LIGHTBOX ══════════════════════════════════════════

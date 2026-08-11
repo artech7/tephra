@@ -21,6 +21,23 @@ let vaultInfo = { vault: '/Users/dylan/Documents/Tephra', files_on_disk: 3, inde
 let failCreate = false;
 let afterVaultSwitchCalls = 0;
 window.tephraAfterVaultSwitch = async () => { afterVaultSwitchCalls++; };
+
+// ── background import job mock (postImport now posts, then polls status) ──
+let jobSeq = 0;
+const jobs = new Map();
+// How many /study/import/status polls a job takes to report finished:true.
+// 1 (the default) finishes on the very first poll, so most tests don't pay
+// postImport's inter-poll delay; bumped to 2+ by the one test that actually
+// exercises the progress bar mid-import, then reset back to 1 after.
+let jobPollsUntilDone = 1;
+const JOB_TOTAL = 62;
+function jobResult(dry) {
+  return { topics: 62, questions: 135, categories: 13, created: 60, updated: 2,
+           vault: vaultInfo.vault, reindexed: dry ? undefined : 79, images_embedded: 4,
+           collisions: [], skipped_duplicates: 0, duplicates: [], missing_images: [], duplicate_image_names: [],
+           dry_run: dry };
+}
+
 window.tephraApi = async (path, opts = {}) => {
   calls.push({ path, method: opts.method || 'GET', body: opts.body });
   if (path === '/study') return JSON.parse(JSON.stringify(study));
@@ -44,10 +61,21 @@ window.tephraApi = async (path, opts = {}) => {
       study.categories = [{ category: 'SAN & Fibre Channel', topics: 5, questions: 14 }];
       study.items = [{ slug: 'icmp', title: 'ICMP', category: 'SAN & Fibre Channel', source: 'import', questions: 3, question: 'q?', needs_review: false }];
     }
-    return { topics: 62, questions: 135, categories: 13, created: 60, updated: 2,
-             vault: vaultInfo.vault, reindexed: dry ? undefined : 79, images_embedded: 4,
-             collisions: [], skipped_duplicates: 0, duplicates: [], missing_images: [], duplicate_image_names: [],
-             dry_run: dry };
+    const job_id = `job${++jobSeq}`;
+    jobs.set(job_id, { polls: 0, result: jobResult(dry) });
+    return { job_id };
+  }
+  if (path.startsWith('/study/import/status/')) {
+    const job_id = path.slice('/study/import/status/'.length);
+    const job = jobs.get(job_id);
+    if (!job) throw new Error('{"detail":"unknown import job"}');
+    job.polls += 1;
+    if (job.polls < jobPollsUntilDone) {
+      const done = Math.round(JOB_TOTAL * job.polls / jobPollsUntilDone);
+      return { done, total: JOB_TOTAL, finished: false, result: null, error: null };
+    }
+    jobs.delete(job_id);
+    return { done: JOB_TOTAL, total: JOB_TOTAL, finished: true, result: job.result, error: null };
   }
   throw new Error('unexpected ' + path);
 };
@@ -137,6 +165,29 @@ await tick();
 ck('drop summary names the lone guide, no folder required',
    document.querySelector('#svImportDropS').textContent.includes('lone_guide.json'));
 ck('confirm enabled off a single file', document.querySelector('#svImportModalConfirm').disabled === false);
+document.querySelector('#svImportModalCancel').click();
+
+console.log('\n── the progress bar tracks a multi-poll import and hides again after ──');
+document.querySelector('#svImport').click();
+document.querySelector('.sv-modebtn[data-mode="merge"]').click();
+jobPollsUntilDone = 3;
+Object.defineProperty(filePicker(), 'files', { value: [loneFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
+await tick();
+ck('progress bar hidden before review starts', document.querySelector('#svImportProgress').hidden === true);
+document.querySelector('#svMergeReviewBtn').click();
+await tick(50);   // let the first (immediate) status poll land
+ck('progress bar visible with a partial fill mid-import', (() => {
+  const p = document.querySelector('#svImportProgress');
+  const w = document.querySelector('#svImportProgressFill').style.width;
+  return p.hidden === false && w !== '0%' && w !== '100%';
+})(), document.querySelector('#svImportProgressFill').style.width);
+await tick(700);   // let the remaining 300ms-apart polls resolve
+ck('progress bar hidden again once the review completes',
+   document.querySelector('#svImportProgress').hidden === true);
+ck('review still completed successfully despite the extra polling',
+   document.querySelectorAll('#svMergeReviewOut .sv-reviewlist li').length > 0);
+jobPollsUntilDone = 1;
 document.querySelector('#svImportModalCancel').click();
 
 console.log('\n── new-vault mode: picking files prefills the name and previews the path ──');

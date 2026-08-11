@@ -247,6 +247,11 @@
 
         <div class="sv-warn" id="svImportModalError" hidden></div>
 
+        <div class="sv-progress" id="svImportProgress" hidden>
+          <div class="sv-progress-bar"><div class="sv-progress-fill" id="svImportProgressFill"></div></div>
+          <div class="sv-progress-label" id="svImportProgressLabel"></div>
+        </div>
+
         <div class="sv-importmodal-actions">
           <button type="button" class="sv-btn" id="svImportModalCancel">Cancel</button>
           <button type="button" class="sv-btn primary" id="svImportModalConfirm" disabled>Create Vault &amp; Import</button>
@@ -325,6 +330,25 @@
     setModalErrorText(detail.slice(0, 300));
   }
 
+  /* A large guide's own import runs as a background job (see postImport) so
+     the bar can track real per-topic progress instead of an indeterminate
+     spinner sitting there for however long a hundred-topic guide takes. */
+  function showImportProgress() {
+    $('#svImportProgressFill').style.width = '0%';
+    $('#svImportProgressLabel').textContent = 'Starting…';
+    $('#svImportProgress').hidden = false;
+  }
+  function setImportProgress(done, total) {
+    const pane = $('#svImportProgress');
+    if (pane.hidden) return;   // a stale poll landing after cancel/close
+    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    $('#svImportProgressFill').style.width = pct + '%';
+    $('#svImportProgressLabel').textContent = total
+      ? `Importing — ${done} of ${total} topic${total === 1 ? '' : 's'} (${pct}%)`
+      : 'Parsing the guide…';
+  }
+  function hideImportProgress() { $('#svImportProgress').hidden = true; }
+
   function setPickedFiles(files) {
     IM.files = files;
     IM.reviewed = false;
@@ -396,10 +420,28 @@
     out.appendChild(list);
   }
 
-  async function postImport(files, { dryRun = false } = {}) {
+  const importPollMs = 300;
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Kicks off the import as a background job (see /api/study/import/upload)
+  // and polls its status until it finishes -- a big guide's own write loop
+  // can run long enough that holding one request open would leave nothing
+  // for the UI to show but a frozen spinner. onProgress, if given, is called
+  // with (done, total) on every poll so the caller can drive a progress bar.
+  async function postImport(files, { dryRun = false, onProgress } = {}) {
     const fd = new FormData();
     for (const f of files) fd.append('files', f, f.name);
-    return api('/study/import/upload' + (dryRun ? '?dry_run=true' : ''), { method: 'POST', body: fd });
+    const { job_id } = await api('/study/import/upload' + (dryRun ? '?dry_run=true' : ''),
+      { method: 'POST', body: fd });
+    for (;;) {
+      const job = await api(`/study/import/status/${job_id}`);
+      if (onProgress) onProgress(job.done, job.total);
+      if (job.finished) {
+        if (job.error) throw new Error(job.error);
+        return job.result;
+      }
+      await tick(importPollMs);
+    }
   }
 
   $('#svMergeReviewBtn').onclick = async () => {
@@ -407,14 +449,16 @@
     const btn = $('#svMergeReviewBtn');
     btn.disabled = true; btn.textContent = 'Reviewing…';
     hideModalError();
+    showImportProgress();
     try {
-      const r = await postImport(IM.files, { dryRun: true });
+      const r = await postImport(IM.files, { dryRun: true, onProgress: setImportProgress });
       IM.reviewed = true;
       renderMergeReview(r);
     } catch (e) {
       IM.reviewed = false;
       showModalError(e);
     } finally {
+      hideImportProgress();
       btn.textContent = 'Review merge';
       syncModalUI();
     }
@@ -444,12 +488,14 @@
       await ensureSuggestedParent();
       const path = `${(S.suggestedParent || '').replace(/\/+$/, '')}/${name}`;
       await api('/vault/create', { method: 'POST', body: JSON.stringify({ path }) });
-      const r = await postImport(IM.files);
+      showImportProgress();
+      const r = await postImport(IM.files, { onProgress: setImportProgress });
       if (window.tephraAfterVaultSwitch) await window.tephraAfterVaultSwitch();
       await afterSuccessfulImport(r, `Created "${name}" — `);
     } catch (e) {
       showModalError(e);
     } finally {
+      hideImportProgress();
       IM.busy = false; syncModalUI();
     }
   }
@@ -457,12 +503,14 @@
   async function confirmMerge() {
     if (!IM.reviewed || !IM.files) return;
     IM.busy = true; syncModalUI(); hideModalError();
+    showImportProgress();
     try {
-      const r = await postImport(IM.files);
+      const r = await postImport(IM.files, { onProgress: setImportProgress });
       await afterSuccessfulImport(r);
     } catch (e) {
       showModalError(e);
     } finally {
+      hideImportProgress();
       IM.busy = false; syncModalUI();
     }
   }

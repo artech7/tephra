@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -872,12 +874,50 @@ def study_import_path(payload: StudyImportPathIn):
     return summary
 
 
+# A large guide can take a while to write -- per-topic image placement and
+# dedupe scoring against every existing note -- so the actual import runs off
+# the request thread. The browser gets a job id back immediately and polls
+# /api/study/import/status/<id> to drive a progress bar, rather than holding
+# the connection open with nothing to show but a spinner. Plain module-level
+# dict + lock, matching the Conn wrapper's own reasoning in index.py: this is
+# a single-user, single-process app, not a service with real contention.
+_import_jobs: dict[str, dict] = {}
+_import_jobs_lock = threading.Lock()
+
+
+def _run_import_job(job_id: str, source: str, dry_run: bool, filename: str,
+                     title: str | None, images: dict[str, bytes], dupes: list[str]) -> None:
+    def on_progress(done: int, total: int) -> None:
+        with _import_jobs_lock:
+            _import_jobs[job_id].update(done=done, total=total)
+
+    try:
+        summary = guide_import.run_import(source, dry_run=dry_run, filename=filename,
+                                          title=title, images=images, progress=on_progress)
+        summary["duplicate_image_names"] = sorted(set(dupes))
+        if not dry_run:
+            summary["reindexed"] = idx.rebuild(db())
+            st.ensure_fitted(st.all_items(), force=True)
+        with _import_jobs_lock:
+            _import_jobs[job_id].update(finished=True, result=summary, error=None)
+    except (importers.ImportError_, ValueError) as exc:
+        with _import_jobs_lock:
+            _import_jobs[job_id].update(finished=True, result=None, error=str(exc))
+    except Exception as exc:
+        # Parsing/validation errors above are the expected failure shape;
+        # this is the backstop for anything else, because a job that raises
+        # unnoticed here just leaves the browser polling forever with no way
+        # to find out -- there's no request handler left to catch it for us.
+        with _import_jobs_lock:
+            _import_jobs[job_id].update(finished=True, result=None, error=f"import failed: {exc}")
+
+
 @app.post("/api/study/import/upload")
 async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool = False,
                                title: str | None = Form(None)):
     """Import a guide plus its images from files the browser itself read --
-    a folder picked via a native OS dialog, or dragged in -- and never asks
-    the server to resolve a path at all. This is the one that works no
+    a folder or a plain multi-file pick, or files dragged in -- and never
+    asks the server to resolve a path at all. This is the one that works no
     matter what machine is running the server: a container, a headless box
     on the other side of the network, anything.
 
@@ -885,6 +925,10 @@ async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool
     file is treated as a candidate image, matched to topics by filename the
     same way /api/study/import/path matches against a directory scan --
     just against an in-memory map instead of files on disk.
+
+    Returns a job id immediately; the actual import (and, if this isn't a
+    dry run, the reindex) happens in the background -- see
+    /api/study/import/status/<id>.
     """
     total = 0
     guide_name: str | None = None
@@ -928,18 +972,29 @@ async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool
     except UnicodeDecodeError:
         raise HTTPException(400, f"could not read {guide_name} as text")
 
-    try:
-        summary = guide_import.run_import(source, dry_run=dry_run, filename=guide_name,
-                                          title=title, images=image_bytes)
-    except importers.ImportError_ as exc:
-        raise HTTPException(400, str(exc))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    summary["duplicate_image_names"] = sorted(set(dupes))
-    if not dry_run:
-        summary["reindexed"] = idx.rebuild(db())
-        st.ensure_fitted(st.all_items(), force=True)
-    return summary
+    job_id = uuid.uuid4().hex
+    with _import_jobs_lock:
+        _import_jobs[job_id] = {"done": 0, "total": 0, "finished": False, "result": None, "error": None}
+    threading.Thread(target=_run_import_job,
+                     args=(job_id, source, dry_run, guide_name, title, image_bytes, dupes),
+                     daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/study/import/status/{job_id}")
+def study_import_status(job_id: str):
+    """Polled by the browser every few hundred ms after a POST to
+    /api/study/import/upload, to drive a progress bar off `done`/`total`
+    while a large guide's topics are written. One-shot: a finished job's
+    entry is dropped as soon as this hands it back, since the frontend only
+    ever needs to observe `finished: true` once."""
+    with _import_jobs_lock:
+        job = _import_jobs.get(job_id)
+        if job is not None and job["finished"]:
+            del _import_jobs[job_id]
+    if job is None:
+        raise HTTPException(404, "unknown or already-collected import job")
+    return job
 
 
 @app.get("/api/study/item/{slug}")

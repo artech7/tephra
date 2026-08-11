@@ -13,6 +13,7 @@ import ast
 import itertools
 import re
 from pathlib import Path
+from typing import Callable
 
 from . import dedupe, study, vault
 
@@ -130,8 +131,18 @@ def _place_images(slug: str, wanted: list[str], available: dict[str, Path | byte
 
 def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
                 title: str | None = None,
-                images: dict[str, Path | bytes] | None = None) -> dict:
+                images: dict[str, Path | bytes] | None = None,
+                progress: Callable[[int, int], None] | None = None) -> dict:
     """Merges into the vault -- never overwrites a note it doesn't own.
+
+    `progress`, if given, is called with (done, total) once right after
+    parsing (done=0, so a caller learns the total before any topic has been
+    touched) and again after each topic is stepped past in the main loop --
+    written, updated, or skipped as a near-duplicate, whichever applied.
+    `done` reaches `total` exactly once every topic has been visited, so a
+    caller can render a plain N-of-M bar without caring which outcome each
+    topic got. Purely an observability hook; dry runs call it too; a caller
+    with no interest in progress just doesn't pass one.
 
     `images` is a lowercased-filename -> (path or bytes) map: paths from
     vault.find_images (run_import_from_path's server-side directory scan),
@@ -173,6 +184,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     """
     from . import importers
     topics = importers.parse(filename, source)
+    if progress:
+        progress(0, len(topics))
     root_note = root_title_for(filename, title)
     vault.ensure_dirs()
     existing = {n.slug: n for n in vault.all_notes()}
@@ -211,7 +224,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     by_category: dict[str, list[str]] = {}
     missing_images: list[dict] = []
 
-    for t in topics:
+    total_topics = len(topics)
+    for i, t in enumerate(topics, 1):
         title_ = t["title"]
         category = t["category"]
         content = dedupe.content_text(title_, t["question"], t["answer"])
@@ -240,6 +254,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
                 if skip:
                     skipped_duplicates += 1
                     batch_corpus.append((title_, content))
+                    if progress:
+                        progress(i, total_topics)
                     continue
 
         batch_corpus.append((title_, content))
@@ -298,6 +314,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
             vault.write(note)
         updated += 1 if prior else 0
         created += 0 if prior else 1
+        if progress:
+            progress(i, total_topics)
 
     # Category indexes: shared, importer-owned navigation pages. A plain
     # category name already taken by a note we don't own is a real
@@ -380,7 +398,8 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
     }
 
 
-def run_import_from_path(path: str, dry_run: bool = False, title: str | None = None) -> dict:
+def run_import_from_path(path: str, dry_run: bool = False, title: str | None = None,
+                          progress: Callable[[int, int], None] | None = None) -> dict:
     """Import a guide plus its images straight off disk -- the counterpart to
     run_import's upload path, for guides that come with more image files than
     a browser upload should reasonably carry.
@@ -400,7 +419,7 @@ def run_import_from_path(path: str, dry_run: bool = False, title: str | None = N
 
     images, dupes = vault.find_images(search_root)
     summary = run_import(source, dry_run=dry_run, filename=guide_path.name, title=title,
-                          images=images)
+                          images=images, progress=progress)
     summary["image_dir"] = str(search_root)
     summary["duplicate_image_names"] = dupes
     return summary

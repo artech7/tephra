@@ -1,5 +1,5 @@
 """Vault switching and multi-format import."""
-import io, json, os, shutil, sys
+import io, json, os, shutil, sys, time
 from pathlib import Path
 os.environ.setdefault("TEPHRA_CONFIG_DIR", os.path.realpath("/tmp") + "/tephra-test-cfg/Tephra")
 # Everything under one parent that gets wiped: rename creates sibling folders,
@@ -20,6 +20,26 @@ def ck(l, c, x=""):
     global ok, fail
     if c: ok += 1; print(f"  PASS  {l} {x}")
     else: fail += 1; print(f"  FAIL  {l} {x}")
+
+def upload_and_wait(c, files, timeout=5):
+    """/api/study/import/upload now returns a job id and runs the actual
+    import in the background (see main.py's _run_import_job) -- this polls
+    /api/study/import/status/<id> to completion and hands back the same
+    summary dict the endpoint used to return directly, so every call site
+    below that predates the change over the upload's own body."""
+    r = c.post("/api/study/import/upload", files=files)
+    if r.status_code != 200:
+        return r
+    job_id = r.json()["job_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        body = c.get(f"/api/study/import/status/{job_id}").json()
+        if body["finished"]:
+            if body["error"]:
+                raise AssertionError(f"import job failed: {body['error']}")
+            return body["result"]
+        time.sleep(0.02)
+    raise AssertionError("import job never finished")
 
 print("── answer resolution, the part that silently drops questions ──")
 opts = ["RAID 0", "RAID 1", "RAID 5"]
@@ -323,7 +343,7 @@ with TestClient(app) as c:
         ("files", ("shot1.png", io.BytesIO(PNG), "image/png")),
         ("files", ("shot2.png", io.BytesIO(PNG), "image/png")),
     ]
-    r = c.post("/api/study/import/upload", files=up_files).json()
+    r = upload_and_wait(c, up_files)
     ck("uploaded guide + images imports", r.get("topics") == 1, r)
     ck("both present images embedded, the typo'd one is not", r.get("images_embedded") == 2, r)
     ck("missing image reported, not fatal",
@@ -338,7 +358,7 @@ with TestClient(app) as c:
        ubody)
 
     umedia_before = set(os.listdir(f"{A}/media"))
-    c.post("/api/study/import/upload", files=up_files)
+    upload_and_wait(c, up_files)
     umedia_after = set(os.listdir(f"{A}/media"))
     ck("re-uploading the same batch overwrites in place, no duplicate copies",
        umedia_after == umedia_before, umedia_after ^ umedia_before)
@@ -350,7 +370,7 @@ with TestClient(app) as c:
         ("files", ("dup.png", io.BytesIO(PNG), "image/png")),
         ("files", ("dup.png", io.BytesIO(PNG), "image/png")),
     ]
-    r = c.post("/api/study/import/upload", files=dup_up_files).json()
+    r = upload_and_wait(c, dup_up_files)
     ck("two uploaded files sharing a filename are reported as a collision",
        r.get("duplicate_image_names") == ["dup.png"], r)
     ck("the first copy is still used, not dropped", r.get("images_embedded") == 1, r)
