@@ -9,7 +9,8 @@ tracking) that can be built straight from your notes or imported from a
 structured guide.
 
 Your data is never locked in. A vault is just a directory: `notes/*.md` with
-YAML frontmatter, a `media/` folder, and a disposable SQLite index you can
+a plain `key: value` header block (YAML-like, hand-parsed — not a full YAML
+implementation), a `media/` folder, and a disposable SQLite index you can
 delete at any time without losing anything.
 
 ## Strengths
