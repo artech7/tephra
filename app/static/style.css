@@ -530,6 +530,19 @@ body[data-wall="aurora"] .newnote:hover{
   transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
 #health.on{transform:translateX(0)}
 
+/* ══ IMPORT FORMAT REFERENCE DRAWER ══════════════════════════
+   Same right-edge slide-in as Appearance and Vault Health -- reachable from
+   Crucible's header at any time (see study.js), not just while the vault is
+   still empty, so it sits above #studyview (z-index 5) the same way the
+   other two drawers already do. */
+#svFormats{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:420px;border-radius:var(--radius);
+  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
+  border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 46px 100px -34px rgba(0,0,0,.85);
+  transform:translateX(calc(100% + var(--inset) + 14px));
+  transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
+#svFormats.on{transform:translateX(0)}
+#svFormats .th-body{display:flex;flex-direction:column;gap:14px}
+
 .th-head{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
 .th-head h4{font-size:15px;font-weight:600;letter-spacing:-.02em}
 .th-body{overflow-y:auto;padding:4px 18px 20px}
@@ -718,7 +731,10 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 /* Its own visually separate section of the header, not just another button
    crowded in next to the mode toggle -- a plain left border reads as a
    section break without costing a whole extra row of vertical space. */
-.sv-importbox{padding-left:20px;border-left:1px solid var(--edge)}
+.sv-importbox{display:flex;align-items:center;gap:8px;padding-left:20px;border-left:1px solid var(--edge)}
+.sv-formats-btn{font:inherit;font-size:12px;padding:6px 13px;border-radius:9px;cursor:pointer;
+  color:var(--muted);background:rgba(255,255,255,.06);border:1px solid var(--edge);transition:.22s var(--ease)}
+.sv-formats-btn:hover{background:rgba(255,255,255,.12);color:var(--paper)}
 .sv-body{display:grid;grid-template-columns:236px 1fr;min-height:0}
 .sv-cats{border-right:1px solid var(--edge);padding:16px 12px;overflow-y:auto;background:rgba(0,0,0,.10)}
 .sv-main{overflow-y:auto;padding:26px 32px 60px}
@@ -1085,15 +1101,8 @@ input.sv-select{cursor:text}
 .wiz-dots i.on{background:var(--accent);box-shadow:0 0 8px var(--accent)}
 #wizPathPreview.warn{color:#FFC9C9}
 
-/* ── format reference on the importer ── */
-.sv-formats{width:100%;text-align:left;border-radius:12px;border:1px solid var(--edge);
-  background:rgba(255,255,255,.04);padding:10px 13px}
-.sv-formats summary{cursor:pointer;font-size:12.5px;color:var(--muted);list-style:none}
-.sv-formats summary::-webkit-details-marker{display:none}
-.sv-formats summary:before{content:'▸ ';color:var(--accent)}
-.sv-formats[open] summary:before{content:'▾ '}
-.sv-formats summary:hover{color:var(--paper)}
-.sv-formats-body{margin-top:12px;display:flex;flex-direction:column;gap:14px;max-height:46vh;overflow-y:auto}
+/* ── format reference, reachable from the header at any time (#svFormats
+   drawer below), not just while the vault is empty ── */
 .sv-fmt-h{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);margin-bottom:5px}
 .sv-fmt-s{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:7px}
 .sv-fmt pre{font-family:var(--mono);font-size:10.5px;line-height:1.55;color:#DDEDE9;

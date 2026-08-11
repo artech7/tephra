@@ -23,6 +23,11 @@ window.tephraApi = async (path, opts = {}) => {
     throw new Error('{"detail":"that file is not valid Python: bad"}');
   if (path === '/study') return JSON.parse(JSON.stringify(study));
   if (path === '/vault/info') return { vault: '/Users/dylan/Documents/Tephra', files_on_disk: 3, indexed: 3, study_items: 0 };
+  if (path === '/study/formats') {
+    return { accepted: ['.json', '.py'], formats: [
+      { id: 'json', label: 'JSON', extensions: ['.json'], summary: 'Portable.', example: '{"topics":[]}' },
+    ] };
+  }
   if (path === '/study/import/upload') {
     study.totals = { topics: 62, questions: 135, needs_review: 0 };
     study.categories = [{ category: 'SAN & Fibre Channel', topics: 5, questions: 14 }];
@@ -63,6 +68,16 @@ ck('it sits in its own section, not lumped in with the mode toggle',
    !!document.querySelector('.sv-importbox > #svImport'));
 ck('the old server-path panel is gone', !document.querySelector('#svPathImport'));
 
+console.log('\n── the format reference is reachable before any import ──');
+ck('reference button exists in the header', !!document.querySelector('#svFormatsBtn'));
+document.querySelector('#svFormatsBtn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await new Promise((r) => setTimeout(r, 20));
+ck('drawer opens on click', document.querySelector('#svFormats').classList.contains('on'));
+ck('fetched the format list', calls.some((c) => c.path === '/study/formats'));
+ck('renders the fetched format', document.querySelector('#svFormatsBody .sv-fmt-h')?.textContent.includes('JSON'));
+document.querySelector('#svFormatsClose').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+ck('close button closes it', !document.querySelector('#svFormats').classList.contains('on'));
+
 console.log('\n── clicking opens the (one) dialog exactly once ──');
 let clicks = 0;
 folderInputs[0].click = () => { clicks++; };
@@ -88,6 +103,15 @@ ck('both files attached under the same "files" field', post && post.body.getAll(
 ck('sidebar + graph refreshed after import', calls.some((c) => c.path === 'RELOAD_SIDEBAR'));
 ck('view re-rendered with content', !document.querySelector('.sv-drop'));
 ck('topics now visible', !!document.querySelector('.sv-card'));
+
+console.log('\n── ...and still reachable now that the vault is no longer empty ──');
+// This is the actual bug: the reference used to live only inside the
+// empty-state screen and vanished the moment a single item existed.
+ck('the dropzone (and the old inline reference) are gone', !document.querySelector('.sv-drop'));
+ck('the header button is still there', !!document.querySelector('#svFormatsBtn'));
+document.querySelector('#svFormatsBtn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+ck('still opens with real study items on screen', document.querySelector('#svFormats').classList.contains('on'));
+document.querySelector('#svFormatsClose').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
 console.log('\n── dropping a single file also goes through the same endpoint ──');
 calls.length = 0;

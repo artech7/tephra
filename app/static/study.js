@@ -128,6 +128,9 @@
         <button class="sv-import" id="svImport"
           title="Pick a folder with your study guide — and any images it references — and import it into this vault. Reads the folder on this device, so it works no matter where the server runs.">
           Import/Merge</button>
+        <button class="sv-formats-btn" id="svFormatsBtn"
+          title="Reference: accepted file formats, and how to list a topic's images">
+          What can I upload?</button>
       </div>
     </div>
     <div class="sv-body">
@@ -137,6 +140,42 @@
   // Lives inside the deck so the app header stays put while only the body
   // below it slides. Appending to <body> would have covered the header.
   (document.querySelector('.deck') || document.body).appendChild(view);
+
+  /* A right-edge slide-in drawer, same mechanic as the Appearance and Vault
+     Health drawers (#theme / #health in app.js) -- reachable from the header
+     button no matter what's showing in the body below (empty state, browse
+     grid, a flashcard, a quiz), unlike the old copy that only existed inside
+     the empty-state screen and vanished the moment the vault had one item in
+     it. Lives on <body>, not inside `view`, so Crucible's own mode switches
+     never tear it down. */
+  const formatsDrawer = el('aside');
+  formatsDrawer.id = 'svFormats';
+  formatsDrawer.innerHTML = `
+    <div class="th-head"><h4>What can I upload?</h4><button class="mini" id="svFormatsClose">×</button></div>
+    <div class="th-body" id="svFormatsBody"><div class="sv-formats-load">Loading…</div></div>`;
+  document.body.appendChild(formatsDrawer);
+  let formatsLoaded = false;
+  async function openFormats() {
+    formatsDrawer.classList.add('on');
+    if (formatsLoaded) return;
+    const body = $('#svFormatsBody');
+    try {
+      const { formats } = await api('/study/formats');
+      formatsLoaded = true;
+      body.innerHTML = '';
+      for (const f of formats) {
+        const blk = el('div', 'sv-fmt');
+        blk.appendChild(el('div', 'sv-fmt-h', `${f.label} — ${f.extensions.join(' ')}`));
+        blk.appendChild(el('div', 'sv-fmt-s', f.summary));
+        const pre = el('pre');
+        pre.textContent = f.example;
+        blk.appendChild(pre);
+        body.appendChild(blk);
+      }
+    } catch { body.textContent = 'Could not load the format list.'; }
+  }
+  $('#svFormatsBtn').onclick = openFormats;
+  $('#svFormatsClose').onclick = () => formatsDrawer.classList.remove('on');
 
   // Available whatever the current state — the dropzone only appears when the
   // guide is empty, which made importing unreachable the moment anything at
@@ -746,33 +785,6 @@
     drop.onclick = () => pickFolder(drop);
     wireDrop(drop);
     wrap.appendChild(drop);
-
-    // A reference, not a link out: someone authoring a guide for a different
-    // product needs the exact shape, and needs it here.
-    const help = el('details', 'sv-formats');
-    help.innerHTML = '<summary>What formats can I upload?</summary>';
-    const body = el('div', 'sv-formats-body');
-    body.appendChild(el('div', 'sv-formats-load', 'Loading…'));
-    help.appendChild(body);
-    help.addEventListener('toggle', async () => {
-      if (!help.open || help.dataset.loaded) return;
-      help.dataset.loaded = '1';
-      try {
-        const { formats } = await api('/study/formats');
-        body.innerHTML = '';
-        for (const f of formats) {
-          const blk = el('div', 'sv-fmt');
-          blk.appendChild(el('div', 'sv-fmt-h',
-            `${f.label} — ${f.extensions.join(' ')}`));
-          blk.appendChild(el('div', 'sv-fmt-s', f.summary));
-          const pre = el('pre');
-          pre.textContent = f.example;
-          blk.appendChild(pre);
-          body.appendChild(blk);
-        }
-      } catch { body.textContent = 'Could not load the format list.'; }
-    }, false);
-    wrap.appendChild(help);
 
     if (S.vault) {
       const info = el('div', 'sv-vaultinfo');
