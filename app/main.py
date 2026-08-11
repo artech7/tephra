@@ -523,6 +523,21 @@ def repair(dry_run: bool = False):
     return report
 
 
+@app.post("/api/study/import/reconcile")
+def reconcile_study_indexes(dry_run: bool = False):
+    """Drop dead [[links]] from importer-owned category index notes -- the
+    "Part of [[Guide]]" line and topic bullet list an import writes.
+    Neither is pruned by the import itself when a topic or a whole guide's
+    root note is later deleted by hand, so this is the way to clean up
+    that backlog without re-importing anything.
+    """
+    report = guide_import.reconcile_indexes(dry_run=dry_run)
+    if (report["changed"] or report["removed"]) and not dry_run:
+        idx.rebuild(db())
+        st.ensure_fitted(st.all_items(), force=True)
+    return report
+
+
 @app.post("/api/reindex")
 def reindex():
     return {"notes": idx.rebuild(db())}

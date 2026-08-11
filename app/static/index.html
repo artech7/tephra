@@ -397,6 +397,15 @@
       <div id="dupList"></div>
       <div class="th-note">Compares every note's content and lists pairs that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Delete either note right here; nothing happens automatically.</div>
     </div>
+    <div class="th-sect">
+      <div class="th-l"><span>Study guide indexes</span></div>
+      <div id="reconcileResult" class="th-note">Not checked yet.</div>
+      <div class="th-row">
+        <button class="sv-btn" id="reconcileCheck">Check for dead references</button>
+        <button class="sv-btn primary" id="reconcileRun" disabled>Clean up</button>
+      </div>
+      <div class="th-note">A guide's category page keeps listing every topic and every guide that ever contributed to it, even after you delete the topic or the whole guide — deleting a duplicate leaves the surviving page still linking to it. This drops references to whatever no longer exists, and removes a category page left with no topics at all. Only touches index pages an import wrote, never a note you wrote by hand.</div>
+    </div>
   </div>
 </aside>
 

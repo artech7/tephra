@@ -78,5 +78,89 @@ with TestClient(app) as c:
     check("400 with no job id -- no recognised guide file among the uploads",
           r5.status_code == 400 and "job_id" not in r5.json(), r5.text)
 
+print("\n── two guides sharing a category: the index page accumulates both ──")
+guide_a = json.dumps({"topics": [
+    {"title": "Shared Topic A", "category": "Shared Cat",
+     "answer": "Some real prose about topic A, long enough to be its own thing."},
+]})
+guide_b = json.dumps({"topics": [
+    {"title": "Shared Topic B", "category": "Shared Cat",
+     "answer": "Some real prose about topic B, unrelated to A but same category."},
+]})
+guide_import.run_import(guide_a, filename="Guide A.json")
+guide_import.run_import(guide_b, filename="Guide B.json")
+from app import vault as _vault
+cat_note = next(n for n in _vault.all_notes() if n.title == "Shared Cat")
+check("both guides' topics are listed",
+      "[[Shared Topic A]]" in cat_note.body and "[[Shared Topic B]]" in cat_note.body, cat_note.body)
+check("both guides are named in the Part of line",
+      "[[Guide A]]" in cat_note.body and "[[Guide B]]" in cat_note.body, cat_note.body)
+
+print("\n── deleting one guide's topic and root note by hand leaves a stale stub ──")
+topic_b = next(n for n in _vault.all_notes() if n.title == "Shared Topic B")
+root_b = next(n for n in _vault.all_notes() if n.title == "Guide B")
+_vault.delete(topic_b.slug)
+_vault.delete(root_b.slug)
+stale = next(n for n in _vault.all_notes() if n.slug == cat_note.slug)
+check("the category page still links the now-deleted topic and guide (nothing prunes on delete)",
+      "[[Shared Topic B]]" in stale.body and "[[Guide B]]" in stale.body, stale.body)
+
+print("\n── /api/study/import/reconcile drops the dead references ──")
+with TestClient(app) as c:
+    preview = c.post("/api/study/import/reconcile", params={"dry_run": "true"}).json()
+    check("dry run reports the category as changed, writes nothing",
+          cat_note.title in preview["changed"], preview)
+    stillstale = next(n for n in _vault.all_notes() if n.slug == cat_note.slug)
+    check("dry run did not touch the file", "[[Shared Topic B]]" in stillstale.body)
+
+    r = c.post("/api/study/import/reconcile").json()
+    check("real run reports it changed", cat_note.title in r["changed"], r)
+    fixed = next(n for n in _vault.all_notes() if n.slug == cat_note.slug)
+    check("the dead topic link is gone", "[[Shared Topic B]]" not in fixed.body, fixed.body)
+    check("the dead guide is gone from Part of", "[[Guide B]]" not in fixed.body, fixed.body)
+    check("the surviving topic and guide are untouched",
+          "[[Shared Topic A]]" in fixed.body and "[[Guide A]]" in fixed.body, fixed.body)
+
+    print("\n── running it again is a no-op ──")
+    r2 = c.post("/api/study/import/reconcile").json()
+    check("nothing left to change", r2["changed"] == [] and r2["removed"] == [], r2)
+
+print("\n── a category with every topic deleted loses its index page entirely ──")
+last_topic = next(n for n in _vault.all_notes() if n.title == "Shared Topic A")
+_vault.delete(last_topic.slug)
+with TestClient(app) as c:
+    r3 = c.post("/api/study/import/reconcile").json()
+    check("the now-empty category page is removed, not left as a hollow shell",
+          cat_note.title in r3["removed"], r3)
+check("it's actually gone from disk",
+      not any(n.slug == cat_note.slug for n in _vault.all_notes()))
+
+print("\n── re-importing self-heals a stale category without reconcile ──")
+guide_c = json.dumps({"topics": [
+    {"title": "Heal Topic A", "category": "Heal Cat",
+     "answer": "Prose for the topic that will stay, distinct enough to skip dedupe."},
+]})
+guide_d = json.dumps({"topics": [
+    {"title": "Heal Topic B", "category": "Heal Cat",
+     "answer": "Prose for the topic that will be deleted before the next import."},
+]})
+guide_import.run_import(guide_c, filename="Heal Guide C.json")
+guide_import.run_import(guide_d, filename="Heal Guide D.json")
+heal_cat = next(n for n in _vault.all_notes()
+                if n.meta.get("study_index") == "true" and "import_roots" in n.meta
+                and "Heal Topic A" in n.body)
+_vault.delete(next(n for n in _vault.all_notes() if n.title == "Heal Topic B").slug)
+_vault.delete(next(n for n in _vault.all_notes() if n.title == "Heal Guide D").slug)
+# Re-import guide C (the survivor) -- its own regeneration pass should drop
+# the now-dead Heal Topic B / Heal Guide D references on its own.
+guide_import.run_import(guide_c, filename="Heal Guide C.json")
+healed = next(n for n in _vault.all_notes() if n.slug == heal_cat.slug)
+check("re-importing dropped the dead topic reference on its own",
+      "[[Heal Topic B]]" not in healed.body, healed.body)
+check("re-importing dropped the dead guide from Part of",
+      "[[Heal Guide D]]" not in healed.body, healed.body)
+check("the surviving topic and guide are still there",
+      "[[Heal Topic A]]" in healed.body and "[[Heal Guide C]]" in healed.body, healed.body)
+
 print(f"\n  {ok} passed, {fail} failed")
 raise SystemExit(1 if fail else 0)

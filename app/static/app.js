@@ -2381,6 +2381,47 @@ $('#dupRun').onclick = async () => {
   finally { clearInterval(tick); }
 };
 
+/* Study guide index pages accumulate every topic and every guide that ever
+   touched a category and never drop one on their own -- deleting a
+   duplicate topic or an entire guide leaves the surviving index page still
+   linking to it. Same check-then-run shape as Audit/Repair above. */
+function describeReconcile(r) {
+  const bits = [];
+  if (r.changed.length) bits.push(`${r.changed.length} index page${r.changed.length === 1 ? '' : 's'} cleaned up`);
+  if (r.removed.length) bits.push(`${r.removed.length} empty index page${r.removed.length === 1 ? '' : 's'} removed`);
+  return bits.join('; ') || 'Nothing to clean up';
+}
+
+$('#reconcileCheck').onclick = async () => {
+  const out = $('#reconcileResult');
+  out.textContent = 'Checking…';
+  try {
+    const preview = await api('/study/import/reconcile?dry_run=true', { method: 'POST' });
+    if (!preview.changed.length && !preview.removed.length) {
+      out.textContent = 'No dead references found.';
+      $('#reconcileRun').disabled = true;
+      return;
+    }
+    out.textContent = describeReconcile(preview) + '.';
+    $('#reconcileRun').disabled = false;
+  } catch { out.textContent = 'Could not run the check.'; }
+};
+
+$('#reconcileRun').onclick = async () => {
+  const out = $('#reconcileResult');
+  out.textContent = 'Cleaning up…';
+  try {
+    const r = await api('/study/import/reconcile', { method: 'POST' });
+    out.textContent = describeReconcile(r) + '.';
+    $('#reconcileRun').disabled = true;
+    toast(out.textContent, 6000);
+    await loadList();
+    await loadGraph();
+    if (state.slug) await openNote(state.slug, false);
+    window.tephraStudy?.refresh();
+  } catch { out.textContent = 'Clean-up failed.'; }
+};
+
 /* ══ AMBIENT AURORA ══════════════════════════════════════════ */
 (function () {
   const c = $('#aurora'), x = c.getContext('2d');

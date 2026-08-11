@@ -55,6 +55,13 @@ def _linked_titles(body: str) -> list[str]:
     return re.findall(r"^- \[\[(.+?)\]\]", body, flags=re.M)
 
 
+def _category_index_line(cat_title: str, roots: list[str]) -> str:
+    if not roots:
+        return f"Study topics in **{cat_title}**."
+    return (f"Study topics in **{cat_title}**. Part of "
+            + ", ".join(f"[[{r}]]" for r in roots) + ".")
+
+
 def resolve_guide_source(path: str) -> tuple[Path, Path]:
     """A path the user typed or browsed to -> (the guide file, the folder to
     search for its images).
@@ -337,12 +344,23 @@ def run_import(source: str, dry_run: bool = False, filename: str = "guide.py",
             cslug = vault.unique_slug(category)
         category_title[category] = cat_title
 
-        linked = set(_linked_titles(cprior.body)) if cprior else set()
+        # `linked` and `import_roots` both accumulate across every import
+        # that has ever touched this category and neither is pruned when a
+        # topic note or a whole guide's root note is later deleted by hand
+        # -- so a stale title here would otherwise survive forever as a
+        # dead [[link]] this importer itself wrote. Filtering against
+        # title_to_slug (the vault as it stood before this run started)
+        # drops anything that no longer resolves, every time the category
+        # is touched by another import. reconcile_indexes() does the same
+        # filtering on demand, for the case where nothing gets re-imported.
+        linked = {t for t in (_linked_titles(cprior.body) if cprior else ())
+                  if t.strip().lower() in title_to_slug}
         all_titles = sorted(set(titles) | linked)
-        roots = sorted(set(cprior.meta.get("import_roots") or []) | {root_note}) if cprior else [root_note]
+        prior_roots = {r for r in (cprior.meta.get("import_roots") or ())
+                       if r.strip().lower() in title_to_slug} if cprior else set()
+        roots = sorted(prior_roots | {root_note})
 
-        lines = [f"Study topics in **{cat_title}**. Part of "
-                 + ", ".join(f"[[{r}]]" for r in roots) + ".", ""]
+        lines = [_category_index_line(cat_title, roots), ""]
         lines += [f"- [[{t}]]" for t in all_titles]
         if not dry_run:
             vault.write(vault.Note(
@@ -423,3 +441,52 @@ def run_import_from_path(path: str, dry_run: bool = False, title: str | None = N
     summary["image_dir"] = str(search_root)
     summary["duplicate_image_names"] = dupes
     return summary
+
+
+def reconcile_indexes(dry_run: bool = False) -> dict:
+    """Drop dead references from importer-owned category index notes.
+
+    run_import already filters a category's `linked` titles and
+    `import_roots` against the vault every time that category gets
+    re-imported (see the comment above that filtering) -- but a topic note
+    or a whole guide's root note deleted by hand between imports leaves
+    those stubs stale until the next import happens to touch that same
+    category, which may be never. This runs the identical filter on
+    demand, so cleaning up a duplicate guide doesn't require re-importing
+    anything.
+
+    Only touches notes with `import_roots` in their frontmatter -- the
+    category index notes this importer generates and owns outright, never
+    a hand-written note. A category with no topic left at all is removed
+    rather than kept as an empty shell.
+    """
+    notes = vault.all_notes()
+    existing_titles = {n.title.strip().lower() for n in notes}
+    report = {"scanned": 0, "changed": [], "removed": [], "dry_run": dry_run}
+    for note in notes:
+        if "import_roots" not in note.meta:
+            continue
+        report["scanned"] += 1
+        all_titles = sorted(t for t in _linked_titles(note.body)
+                            if t.strip().lower() in existing_titles)
+        roots = sorted(r for r in (note.meta.get("import_roots") or ())
+                       if r.strip().lower() in existing_titles)
+
+        if not all_titles:
+            report["removed"].append(note.title)
+            if not dry_run:
+                vault.delete(note.slug)
+            continue
+
+        body = "\n".join([_category_index_line(note.title, roots), ""]
+                         + [f"- [[{t}]]" for t in all_titles])
+        # vault.write() round-trips a note's body through .strip() -- compare
+        # stripped on both sides, or a fresh reconstruction with no trailing
+        # newline reads as "changed" against every already-clean note too.
+        if body.strip() != note.body.strip() or roots != sorted(note.meta.get("import_roots") or ()):
+            report["changed"].append(note.title)
+            if not dry_run:
+                note.meta["import_roots"] = roots
+                note.body = body
+                vault.write(note)
+    return report
