@@ -8,11 +8,18 @@ Set-Location (Join-Path $PSScriptRoot "..")
 $Version = if ($env:VERSION) { $env:VERSION } else { "1.0.0" }
 
 Write-Host "==> deps"
-python -m pip install -q -r requirements-desktop.txt
+# A venv, not the system python -- a disposable build environment, kept
+# deliberately separate from run.py's own .venv\ (which doesn't carry
+# PyInstaller and shouldn't).
+$Venv = Join-Path $PWD ".venv-build"
+if (-not (Test-Path $Venv)) { python -m venv $Venv }
+$Py = Join-Path $Venv "Scripts\python.exe"
+& $Py -m pip install -q --upgrade pip
+& $Py -m pip install -q -r requirements-desktop.txt
 
 Write-Host "==> freeze"
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-python -m PyInstaller tephra.spec --noconfirm --log-level WARN
+& $Py -m PyInstaller tephra.spec --noconfirm --log-level WARN
 if (-not (Test-Path "dist\Tephra\Tephra.exe")) { throw "freeze produced no exe" }
 
 if ($env:SIGN_PFX) {

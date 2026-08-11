@@ -12,7 +12,15 @@ ARCH="$(uname -m)"
 DMG="dist/Tephra-${VERSION}-macos-${ARCH}.dmg"
 
 echo "==> deps"
-python3 -m pip install -q -r requirements-desktop.txt
+# A venv, not the system/Homebrew python3 -- Homebrew's Python is
+# externally-managed (PEP 668) and refuses a bare `pip install` outright.
+# This is a disposable build environment, deliberately separate from
+# run.py's own .venv/ (which doesn't carry PyInstaller and shouldn't).
+VENV="$PWD/.venv-build"
+[ -d "$VENV" ] || python3 -m venv "$VENV"
+PY="$VENV/bin/python3"
+"$PY" -m pip install -q --upgrade pip
+"$PY" -m pip install -q -r requirements-desktop.txt
 
 echo "==> icon"
 # .icns can only be produced by iconutil, which is macOS-only.
@@ -20,7 +28,7 @@ iconutil -c icns packaging/icon.iconset -o packaging/icon.icns
 
 echo "==> freeze"
 rm -rf build dist
-python3 -m PyInstaller tephra.spec --noconfirm --log-level WARN
+"$PY" -m PyInstaller tephra.spec --noconfirm --log-level WARN
 
 APP="dist/Tephra.app"
 [ -d "$APP" ] || { echo "no app bundle produced"; exit 1; }

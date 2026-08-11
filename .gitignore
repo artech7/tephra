@@ -4,6 +4,9 @@ vault/
 # run.py bootstrap (.tephra-deps stamp lives inside)
 .venv/
 
+# packaging/build_macos.sh and build_windows.ps1's disposable build env
+.venv-build/
+
 # python
 __pycache__/
 *.py[cod]
