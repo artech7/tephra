@@ -46,6 +46,12 @@
       <button aria-pressed="false" data-view="graph">Graph</button>
       <button aria-pressed="false" data-view="links">Links<span class="tabbadge" id="linksBadge" hidden></span></button>
     </div>
+    <button class="sv-import" id="svImport"
+      title="Import a study guide, with confirmation — into a brand-new vault by default, or merge into this one if you explicitly choose to.">
+      Import/Merge</button>
+    <button class="sv-formats-btn" id="svFormatsBtn"
+      title="Reference: accepted file formats, and how to list a topic's images">
+      What can I upload?</button>
     <button class="iconbtn" id="vaultBtn" title="Vaults">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
@@ -89,10 +95,23 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
         New note
       </button>
+      <div class="sidebar-grip" id="sidebarGrip" title="Drag to resize"></div>
     </aside>
 
     <main class="editor" id="editor">
       <div class="dropzone">Drop to attach</div>
+      <div class="findbar" id="findBar" hidden>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input type="text" id="findInput" placeholder="Find in note…" autocomplete="off">
+        <span id="findCount">0/0</span>
+        <button type="button" id="findPrev" title="Previous match (Shift+Enter)">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M18 15l-6-6-6 6"/></svg>
+        </button>
+        <button type="button" id="findNext" title="Next match (Enter)">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button type="button" id="findClose" title="Close (Esc)">×</button>
+      </div>
       <div class="doc" id="doc">
         <div class="doc-inner">
           <div class="doc-crumb" id="docCrumb" hidden></div>

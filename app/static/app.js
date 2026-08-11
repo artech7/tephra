@@ -492,6 +492,7 @@ async function openNote(slug, push = true) {
   catch { toast('That note is gone'); return loadList(); }
 
   state.slug = slug; state.note = note; state.editing = false;
+  $('#findBar').hidden = true;   // stale matches would otherwise point at the note just left
   if (push && location.hash.slice(1) !== slug) location.hash = slug;
 
   // The topbar shows which vault you are in; the note names itself in its own
@@ -1116,6 +1117,7 @@ async function setEditing(on) {
   $('#editHint').textContent = on
     ? '⌘E OR CLICK AWAY TO PREVIEW · [[LINK]] · ![[EMBED]] · DRAG FILES IN'
     : 'DOUBLE-CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH';
+  if (!on) $('#findBar').hidden = true;   // the textarea it searches is about to disappear
   if (on) {
     const ta = $('#noteSrc');
     ta.style.height = 'auto';
@@ -1147,6 +1149,82 @@ $('#noteBody').addEventListener('dblclick', (e) => {
   setEditing(true);
 });
 $('#noteSrc').addEventListener('blur', () => setEditing(false));
+
+/* ══ FIND IN NOTE ════════════════════════════════════════════
+   ⌘F/Ctrl+F is a browser feature, but the browser's own Find cannot see
+   into a <textarea> at all -- while editing, the note's text lives in
+   #noteSrc's value, not the DOM, so native Find silently finds nothing.
+   This searches that value directly and moves the textarea's own
+   selection to each hit. */
+const F = { matches: [], i: -1 };
+
+function findMatches(term) {
+  F.matches = [];
+  if (!term) return;
+  const body = $('#noteSrc').value.toLowerCase();
+  const t = term.toLowerCase();
+  for (let from = 0, idx; (idx = body.indexOf(t, from)) !== -1; from = idx + t.length) {
+    F.matches.push(idx);
+  }
+}
+
+// Textareas don't auto-scroll to a selection set via setSelectionRange, so
+// the target scrollTop is estimated from the match's line number.
+function scrollTextareaTo(pos) {
+  const ta = $('#noteSrc');
+  const line = ta.value.slice(0, pos).split('\n').length - 1;
+  const cs = getComputedStyle(ta);
+  const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+  ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 2 + lineHeight);
+}
+
+function showMatch(i) {
+  if (!F.matches.length) return;
+  F.i = ((i % F.matches.length) + F.matches.length) % F.matches.length;
+  const start = F.matches[F.i], term = $('#findInput').value;
+  const ta = $('#noteSrc');
+  ta.focus();
+  ta.setSelectionRange(start, start + term.length);
+  scrollTextareaTo(start);
+  $('#findCount').textContent = `${F.i + 1}/${F.matches.length}`;
+  $('#findCount').classList.remove('nomatch');
+}
+
+function runFind() {
+  const term = $('#findInput').value;
+  findMatches(term);
+  const has = F.matches.length > 0;
+  $('#findPrev').disabled = $('#findNext').disabled = !has;
+  if (has) { showMatch(0); return; }
+  F.i = -1;
+  $('#findCount').textContent = '0/0';
+  $('#findCount').classList.toggle('nomatch', term.length > 0);
+}
+
+function openFind() {
+  if (!state.editing) return;
+  $('#findBar').hidden = false;
+  const ta = $('#noteSrc');
+  const selected = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  const input = $('#findInput');
+  if (selected && !selected.includes('\n')) input.value = selected;
+  input.focus();
+  input.select();
+  runFind();
+}
+function closeFind(focusBack) {
+  $('#findBar').hidden = true;
+  if (focusBack !== false) $('#noteSrc').focus();
+}
+
+$('#findInput').addEventListener('input', runFind);
+$('#findInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); showMatch(F.i + (e.shiftKey ? -1 : 1)); }
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
+});
+$('#findNext').onclick = () => showMatch(F.i + 1);
+$('#findPrev').onclick = () => showMatch(F.i - 1);
+$('#findClose').onclick = () => closeFind();
 
 /* ══ IMAGE LIGHTBOX ══════════════════════════════════════════ */
 function openLightbox(src, caption) {
@@ -1833,10 +1911,12 @@ addEventListener('keydown', (e) => {
   if (mod && k === 'k') { e.preventDefault(); openPal(); return; }
   if (mod && k === 's') { e.preventDefault(); flush(); toast('Saved — autosave is always on'); return; }
   if (mod && k === 'e') { e.preventDefault(); setEditing(!state.editing); return; }
+  if (mod && k === 'f' && state.editing) { e.preventDefault(); openFind(); return; }
   if (e.key === 'Escape') {
     closePal();
     // Close the topmost thing only, so Escape doesn't also dump you out of
     // Graph on the way past.
+    if (!$('#findBar').hidden) return closeFind();
     if (!$('#imgLightbox').hidden) return closeLightbox();
     if (window.tephraStudy?.isOpen()) return setStudy(false);
     if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
@@ -1866,6 +1946,38 @@ $('#newNote').onclick = async () => {
   $('#noteTitle').focus();
   $('#noteTitle').select();
 };
+
+/* ══ SIDEBAR RESIZE ══════════════════════════════════════════ */
+(() => {
+  const MIN = 200, MAX = 520, STORE_KEY = 'tephra:sidebarW';
+  const grip = $('#sidebarGrip');
+  const saved = parseInt(localStorage.getItem(STORE_KEY), 10);
+  if (saved >= MIN && saved <= MAX) {
+    document.documentElement.style.setProperty('--sidebar-w', saved + 'px');
+  }
+  let startX = 0, startW = 0;
+  const onMove = (e) => {
+    const w = Math.min(MAX, Math.max(MIN, startW + (e.clientX - startX)));
+    document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.classList.remove('resizing-sidebar');
+    grip.classList.remove('dragging');
+    const w = parseInt(document.documentElement.style.getPropertyValue('--sidebar-w'), 10);
+    if (w) localStorage.setItem(STORE_KEY, String(w));
+  };
+  grip.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    startW = document.querySelector('.sidebar').getBoundingClientRect().width;
+    document.body.classList.add('resizing-sidebar');
+    grip.classList.add('dragging');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
 
 /* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
 $('#themeBtn').onclick = () => {

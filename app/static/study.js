@@ -154,14 +154,6 @@
         <button data-mode="quiz"    aria-pressed="false">Quiz</button>
         <button data-mode="search"  aria-pressed="false">Search</button>
       </div>
-      <div class="sv-importbox">
-        <button class="sv-import" id="svImport"
-          title="Import a study guide, with confirmation — into a brand-new vault by default, or merge into this one if you explicitly choose to.">
-          Import/Merge</button>
-        <button class="sv-formats-btn" id="svFormatsBtn"
-          title="Reference: accepted file formats, and how to list a topic's images">
-          What can I upload?</button>
-      </div>
     </div>
     <div class="sv-body">
       <aside class="sv-cats"><div class="eyebrow"><span>Categories</span></div><div id="svCatList"></div></aside>
@@ -528,6 +520,10 @@
     $('#svMergeReviewOut').innerHTML = '';
     hideModalError();
     modal.hidden = false;
+    // Reachable from the topbar without ever opening Crucible, so S.vault
+    // (the merge banner's "into <this vault>" name) can't rely on open()
+    // having already fetched it.
+    if (!S.vault) api('/vault/info').then((v) => { S.vault = v; syncModalUI(); }).catch(() => {});
     ensureSuggestedParent().then(syncModalUI);
     if (prefilledFiles && prefilledFiles.length) setPickedFiles(prefilledFiles);
     else syncModalUI();
@@ -1271,5 +1267,5 @@
 
   window.tephraStudy = { open, close, openFlagged, isOpen: () => S.open, refresh: async () => {
     if (S.open) { S.data = await api('/study'); renderCats(); renderStats(); render(); }
-  } };
+  }, openImportModal, openFormats };
 })();
