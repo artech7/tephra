@@ -356,7 +356,10 @@ FORMATS = [
                    "topic, or sit in a flat array that references topics by id or title. "
                    "A topic's `images` names files by filename only — import from a "
                    "folder and any image anywhere under it with a matching name is "
-                   "found and embedded automatically, wherever it actually sits on disk.",
+                   "found and embedded automatically, wherever it actually sits on disk. "
+                   "`question` and `answer` are plain markdown, so ordinary "
+                   "`[link text](https://example.com)` hyperlinks work with no separate "
+                   "field for them — write them straight into the string.",
         "example": json.dumps({
             "name": "Guide name",
             "topics": [{
