@@ -98,6 +98,19 @@
   folderInput.multiple = true;
   folderInput.hidden = true;
   document.body.appendChild(folderInput);
+  // A folder picker can't select a lone file that isn't already isolated in
+  // its own folder -- the OS dialog only lets you descend into or choose a
+  // whole directory. This plain multi-file picker is the counterpart: pick
+  // one guide file, or select it together with its images (multi-select in
+  // the same folder), with no directory requirement at all. Nested image
+  // subfolders still need the folder picker below, since a flat file picker
+  // can't walk into them.
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.multiple = true;
+  fileInput.accept = '.json,.py,.csv,.tsv,.md,image/*';
+  fileInput.hidden = true;
+  document.body.appendChild(fileInput);
   // Picking (or dropping -- see wireDrop) files never imports anything by
   // itself; it only hands the file list to whichever caller asked for it
   // (openImportModal, or setPickedFiles on an already-open modal). Nothing
@@ -111,6 +124,13 @@
     if (files.length && onFolderPicked) onFolderPicked(files);
   });
   function pickFolder(cb) { onFolderPicked = cb; folderInput.click(); }
+  let onFilesPicked = null;
+  fileInput.addEventListener('change', () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = '';
+    if (files.length && onFilesPicked) onFilesPicked(files);
+  });
+  function pickFiles(cb) { onFilesPicked = cb; fileInput.click(); }
 
   /* ── shell ── */
   const view = el('div');
@@ -206,9 +226,11 @@
         </div>
 
         <div class="sv-drop sv-importdrop" id="svImportDrop">
-          <span class="sv-drop-t">Choose a folder…</span>
-          <span class="sv-drop-s" id="svImportDropS">No folder chosen yet — click here, or drop a guide file
-            (or a whole folder with its images) anywhere on this card.</span>
+          <span class="sv-drop-t">Choose files…</span>
+          <span class="sv-drop-s" id="svImportDropS">No files chosen yet — click here to pick a guide file
+            (alone, or together with its images), or drop a guide file (or a whole folder with its images)
+            anywhere on this card.</span>
+          <button type="button" class="sv-drop-alt" id="svImportPickFolder">…or choose a folder instead</button>
         </div>
 
         <div id="svNewVaultPane">
@@ -255,13 +277,14 @@
 
   function importDropSummary(files) {
     if (!files || !files.length) {
-      return 'No folder chosen yet — click here, or drop a guide file (or a whole folder with its images) anywhere on this card.';
+      return 'No files chosen yet — click here to pick a guide file (alone, or together with its images), '
+        + 'or drop a guide file (or a whole folder with its images) anywhere on this card.';
     }
     const guide = files.find(isGuideFile);
     const images = files.length - (guide ? 1 : 0);
     if (!guide) {
       return `${files.length} file${files.length === 1 ? '' : 's'} chosen, but none looks like a study `
-        + 'guide (.json/.py/.csv/.tsv/.md) — pick the folder that has the guide file in it.';
+        + 'guide (.json/.py/.csv/.tsv/.md) — pick the guide file itself, or the folder it lives in.';
     }
     return `Guide: ${guide.name}` + (images ? ` — ${images} other file${images === 1 ? '' : 's'} alongside it` : '');
   }
@@ -334,7 +357,11 @@
   });
   $('#svNewVaultName').oninput = syncModalUI;
 
-  $('#svImportDrop').onclick = () => pickFolder(setPickedFiles);
+  $('#svImportDrop').onclick = (e) => {
+    if (e.target.closest('#svImportPickFolder')) return;   // handled by its own listener below
+    pickFiles(setPickedFiles);
+  };
+  $('#svImportPickFolder').onclick = (e) => { e.stopPropagation(); pickFolder(setPickedFiles); };
   wireDrop($('#svImportDrop'), setPickedFiles);
   wireDrop(modal, setPickedFiles);   // drop anywhere on the card, not just the drop target itself
 
@@ -1061,7 +1088,7 @@
 
     const drop = el('div', 'sv-drop');
     drop.innerHTML = `<span class="sv-drop-t">Import/Merge study guide</span>
-      <span class="sv-drop-s">Click to choose a folder — guide plus any images it
+      <span class="sv-drop-s">Click to choose a guide file — alone, or together with any images it
         references — or drop a <code>.json</code> <code>.py</code> <code>.csv</code>
         <code>.md</code> file, or a whole folder, right here</span>`;
     drop.onclick = () => openImportModal();

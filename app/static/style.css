@@ -951,6 +951,13 @@ input.sv-select{cursor:text}
 .sv-drop-t{font-size:15px;font-weight:600}
 .sv-drop-s{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 .sv-drop-s code{background:rgba(0,0,0,.3);border:1px solid var(--edge);padding:1px 5px;border-radius:4px}
+/* Sits inside the same clickable drop zone as the file picker, so its own
+   click has to stop short of also triggering the parent's (see the
+   e.target.closest guard in study.js) -- otherwise picking a folder would
+   pop both dialogs. */
+.sv-drop-alt{margin-top:2px;padding:0;border:0;background:transparent;font-family:var(--mono);font-size:10px;
+  color:var(--faint);text-decoration:underline;text-underline-offset:2px;cursor:pointer;transition:.15s var(--ease)}
+.sv-drop-alt:hover{color:var(--paper)}
 .sv-vaultinfo{font-family:var(--mono);font-size:10.5px;color:var(--faint);line-height:1.6}
 .sv-vaultinfo code{background:rgba(0,0,0,.3);border:1px solid var(--edge);padding:1px 5px;border-radius:4px;color:var(--muted)}
 .sv-warn{font-family:var(--mono);font-size:10.5px;color:#FFD2B8}

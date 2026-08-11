@@ -59,15 +59,25 @@ window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventL
 window.eval(fs.readFileSync(`${ROOT}/study.js`, 'utf8'));
 
 const modal = () => document.querySelector('#svImportModal');
-const folderInput = () => [...document.querySelectorAll('input[type=file]')].find((i) => i.webkitdirectory);
+// The study importer owns two inputs -- a plain multi-file picker (default:
+// works on a lone guide file with no folder requirement) and a folder picker
+// (for images nested in subfolders). Both accept every file the OS hands
+// back; only `multiple` (not webkitdirectory) tells them apart from the
+// wallpaper picker, which is single-file and lives in the static markup.
+const studyInputs = () => [...document.querySelectorAll('input[type=file]')].filter((i) => i.multiple);
+const folderInput = () => studyInputs().find((i) => i.webkitdirectory);
+const filePicker = () => studyInputs().find((i) => !i.webkitdirectory);
 
-console.log('── one import control: a folder picker, not three separate buttons ──');
+console.log('── two import controls: a plain file picker and a folder picker ──');
 const allFile = [...document.querySelectorAll('input[type=file]')];
-console.log(`        (page has ${allFile.length} file input(s) total: wallpaper picker + the study importer)`);
-ck('exactly one study import input', allFile.filter((i) => i.webkitdirectory).length === 1);
-ck('accepts every file the OS hands back', folderInput().multiple === true);
-ck('NOT nested inside a label', folderInput().closest('label') === null);
-ck('lives directly on body', folderInput().parentElement === document.body);
+console.log(`        (page has ${allFile.length} file input(s) total: wallpaper picker + the two study importer inputs)`);
+ck('exactly two study import inputs', studyInputs().length === 2);
+ck('exactly one is a folder picker', studyInputs().filter((i) => i.webkitdirectory).length === 1);
+ck('exactly one is a plain (non-directory) file picker', studyInputs().filter((i) => !i.webkitdirectory).length === 1);
+ck('folder picker accepts every file the OS hands back', folderInput().multiple === true);
+ck('file picker accepts every file the OS hands back', filePicker().multiple === true);
+ck('neither is nested inside a label', folderInput().closest('label') === null && filePicker().closest('label') === null);
+ck('both live directly on body', folderInput().parentElement === document.body && filePicker().parentElement === document.body);
 
 console.log('\n── open the study view with an empty guide ──');
 await window.tephraStudy.open();
@@ -89,11 +99,12 @@ ck('fetched the format list', calls.some((c) => c.path === '/study/formats'));
 document.querySelector('#svFormatsClose').click();
 
 console.log('\n── clicking the header button opens the CONFIRM MODAL, not a file dialog ──');
-let dialogClicks = 0;
-folderInput().click = () => { dialogClicks++; };
+let folderDialogClicks = 0, fileDialogClicks = 0;
+folderInput().click = () => { folderDialogClicks++; };
+filePicker().click = () => { fileDialogClicks++; };
 document.querySelector('#svImport').click();
 ck('modal opens', modal().hidden === false);
-ck('the OS dialog was NOT opened yet', dialogClicks === 0);
+ck('the OS dialog was NOT opened yet', folderDialogClicks === 0 && fileDialogClicks === 0);
 ck('defaults to "Import → new vault"',
    document.querySelector('.sv-modebtn[data-mode="new"]').getAttribute('aria-pressed') === 'true');
 ck('merge pane starts hidden', document.querySelector('#svMergePane').hidden === true);
@@ -107,17 +118,33 @@ ck('no API calls were made just from opening/cancelling',
 console.log('\n── the empty-state dropzone also opens the modal, not the OS dialog ──');
 dz().click();
 ck('dropzone click opens the modal', modal().hidden === false);
-ck('still no OS dialog', dialogClicks === 0);
-ck('choosing a folder inside the modal DOES open the OS dialog', (() => {
+ck('still no OS dialog', folderDialogClicks === 0 && fileDialogClicks === 0);
+ck('choosing files inside the modal opens the plain file dialog by default', (() => {
   document.querySelector('#svImportDrop').click();
-  return dialogClicks === 1;
+  return fileDialogClicks === 1 && folderDialogClicks === 0;
 })());
+ck('the "...or choose a folder instead" control opens the folder dialog, not the file one', (() => {
+  document.querySelector('#svImportPickFolder').click();
+  return folderDialogClicks === 1 && fileDialogClicks === 1;
+})());
+
+console.log('\n── a lone guide file with no images imports fine through the plain file picker ──');
+const loneFile = new window.File(['{"topics":[]}'], 'lone_guide.json', { type: 'application/json' });
+document.querySelector('#svImport').click();
+Object.defineProperty(filePicker(), 'files', { value: [loneFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
+await tick();
+ck('drop summary names the lone guide, no folder required',
+   document.querySelector('#svImportDropS').textContent.includes('lone_guide.json'));
+ck('confirm enabled off a single file', document.querySelector('#svImportModalConfirm').disabled === false);
+document.querySelector('#svImportModalCancel').click();
 
 console.log('\n── new-vault mode: picking files prefills the name and previews the path ──');
 const gFile = new window.File(['{"topics":[]}'], 'ldap_overview_guide.json', { type: 'application/json' });
 const iFile = new window.File(['x'], 'slide1.png', { type: 'image/png' });
-Object.defineProperty(folderInput(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
-folderInput().dispatchEvent(new window.Event('change'));
+document.querySelector('#svImport').click();   // fresh modal -- reset the name field the previous section typed into
+Object.defineProperty(filePicker(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
 await tick();
 ck('drop summary names the guide file',
    document.querySelector('#svImportDropS').textContent.includes('ldap_overview_guide.json'));
@@ -145,8 +172,8 @@ ck('modal closed on success', modal().hidden === true);
 
 console.log('\n── vault creation failing keeps the modal open with the reason shown ──');
 document.querySelector('#svImport').click();
-Object.defineProperty(folderInput(), 'files', { value: [gFile], writable: true, configurable: true });
-folderInput().dispatchEvent(new window.Event('change'));
+Object.defineProperty(filePicker(), 'files', { value: [gFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
 await tick();
 failCreate = true;
 document.querySelector('#svImportModalConfirm').click();
@@ -171,8 +198,8 @@ ck('review button starts disabled (nothing picked yet)',
 ck('confirm starts disabled (nothing reviewed yet)',
    document.querySelector('#svImportModalConfirm').disabled === true);
 
-Object.defineProperty(folderInput(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
-folderInput().dispatchEvent(new window.Event('change'));
+Object.defineProperty(filePicker(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
 await tick();
 ck('review button enabled once a guide is picked',
    document.querySelector('#svMergeReviewBtn').disabled === false);
@@ -200,14 +227,14 @@ ck('modal closed after merging', modal().hidden === true);
 console.log('\n── picking new files after a review resets the gate ──');
 document.querySelector('#svImport').click();
 document.querySelector('.sv-modebtn[data-mode="merge"]').click();
-Object.defineProperty(folderInput(), 'files', { value: [gFile], writable: true, configurable: true });
-folderInput().dispatchEvent(new window.Event('change'));
+Object.defineProperty(filePicker(), 'files', { value: [gFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
 await tick();
 document.querySelector('#svMergeReviewBtn').click();
 await tick(60);
 ck('confirm enabled right after review', document.querySelector('#svImportModalConfirm').disabled === false);
-Object.defineProperty(folderInput(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
-folderInput().dispatchEvent(new window.Event('change'));
+Object.defineProperty(filePicker(), 'files', { value: [gFile, iFile], writable: true, configurable: true });
+filePicker().dispatchEvent(new window.Event('change'));
 await tick();
 ck('re-picking files revokes the gate until reviewed again',
    document.querySelector('#svImportModalConfirm').disabled === true);
