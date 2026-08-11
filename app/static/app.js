@@ -1148,6 +1148,29 @@ $('#noteBody').addEventListener('click', (e) => {
 });
 $('#noteSrc').addEventListener('blur', () => setEditing(false));
 
+/* ══ IMAGE LIGHTBOX ══════════════════════════════════════════ */
+function openLightbox(src, caption) {
+  $('#lbImg').src = src;
+  $('#lbImg').alt = caption || '';
+  $('#lbCap').textContent = caption || '';
+  $('#imgLightbox').hidden = false;
+}
+function closeLightbox() {
+  $('#imgLightbox').hidden = true;
+  $('#lbImg').src = '';
+}
+$('#lbClose').onclick = closeLightbox;
+// Only the backdrop itself closes it -- the image and caption are their own
+// targets, so clicking them doesn't dismiss the view underneath the tap.
+$('#imgLightbox').addEventListener('click', (e) => { if (e.target.id === 'imgLightbox') closeLightbox(); });
+$('#noteBody').addEventListener('click', (e) => {
+  const link = e.target.closest('.embed-view');
+  if (!link) return;
+  e.preventDefault();
+  const capText = link.closest('.embed')?.querySelector('.embed-cap-text');
+  openLightbox(link.href, capText?.textContent || '');
+});
+
 /* wikilink navigation, including creating the missing page */
 $('#noteBody').addEventListener('click', async (e) => {
   const a = e.target.closest('a.wl');
@@ -1814,6 +1837,7 @@ addEventListener('keydown', (e) => {
     closePal();
     // Close the topmost thing only, so Escape doesn't also dump you out of
     // Graph on the way past.
+    if (!$('#imgLightbox').hidden) return closeLightbox();
     if (window.tephraStudy?.isOpen()) return setStudy(false);
     if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
     if ($('#health').classList.contains('on')) return $('#health').classList.remove('on');

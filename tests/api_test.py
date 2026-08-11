@@ -104,8 +104,8 @@ with TestClient(app) as c:
           'data-caption="A caption"' in h and ">A caption</span>" in h, h)
 
     h = rendered("![[busbar-layout.png]]")
-    check("an image embed gets a view-full-size link",
-          '<a class="embed-view" href="/media/busbar-layout.png" target="_blank" rel="noopener"' in h, h)
+    check("an image embed gets a view-full-size link, opened in-app rather than a new tab",
+          '<a class="embed-view" href="/media/busbar-layout.png"' in h and 'target="_blank"' not in h, h)
     check("the caption span carries the full text as a title, even though CSS truncates it visually",
           'title="busbar-layout.png"' in h, h)
 

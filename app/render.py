@@ -106,7 +106,7 @@ def _embed_html(name: str, caption: str | None, size: str | None, idx: int) -> s
     # can run 60+ characters -- can't wrap the whole figure open. The title
     # attribute keeps the full text one hover away.
     cap_title = html.escape(caption or name, quote=True)
-    view_link = (f'<a class="embed-view" href="{url}" target="_blank" rel="noopener" '
+    view_link = (f'<a class="embed-view" href="{url}" '
                  f'title="Open at full size">View</a>') if kind == "image" else ""
     return (f'<figure class="embed g2{sized}" data-kind="{kind}" data-embed-index="{idx}"{style}>'
             f'<div class="embed-media">{inner}</div>'

@@ -782,6 +782,20 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
 #svImportModalError{margin-bottom:16px}
 .sv-importmodal-actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 18px;margin:0 -18px -20px;border-top:1px solid var(--edge)}
 
+/* ══ IMAGE LIGHTBOX ══════════════════════════════════════════
+   Same scrim+content-in-one-element shape as .sv-importmodal. Sits below
+   the toast (95) so a save/error message stays legible over it, above
+   everything else including the import modal (92). */
+#imgLightbox{position:fixed;inset:0;z-index:93;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:40px;background:rgba(3,8,9,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+#imgLightbox[hidden]{display:none}
+#imgLightbox img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8)}
+.lb-cap{font-family:var(--serif);font-size:13.5px;color:var(--muted);text-align:center;max-width:70vw}
+.lb-cap:empty{display:none}
+.lb-close{position:fixed;top:22px;right:26px;width:36px;height:36px;border-radius:50%;border:1px solid var(--edge);
+  background:rgba(255,255,255,.08);color:var(--paper);font-size:15px;cursor:pointer;transition:.2s var(--ease)}
+.lb-close:hover{background:rgba(255,255,255,.16)}
+
 .sv-body{display:grid;grid-template-columns:236px 1fr;min-height:0}
 .sv-cats{border-right:1px solid var(--edge);padding:16px 12px;overflow-y:auto;background:rgba(0,0,0,.10)}
 .sv-main{overflow-y:auto;padding:26px 32px 60px}
