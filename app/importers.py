@@ -394,13 +394,17 @@ FORMATS = [
         "id": "markdown", "label": "Markdown", "extensions": [".md"],
         "summary": "Tephra's own note shape: frontmatter plus a body, with an optional "
                    "`## Quiz` section. One file is one topic — for many topics at once "
-                   "use JSON, Python or CSV instead. You can also skip the importer "
-                   "and drop the file straight into vault/notes/, then reindex.",
+                   "use JSON, Python or CSV instead. A single topic can still carry many "
+                   "quiz questions: stack as many `Q:` blocks as you like under the one "
+                   "`## Quiz` heading. You can also skip the importer and drop the file "
+                   "straight into vault/notes/, then reindex.",
         "example": "---\ntitle: RAID levels\ncategory: Storage\n"
                    "question: What are the common RAID levels?\n---\n\n"
                    "**RAID 0** stripes...\n\n## Quiz\n\n"
                    "Q: Which level has no redundancy?\n- [x] RAID 0\n- RAID 1\n"
-                   "Why: Striping only.",
+                   "Why: Striping only.\n\n"
+                   "Q: Which level mirrors data across disks?\n- RAID 0\n- [x] RAID 1\n"
+                   "Why: Every write is duplicated to a second disk.",
     },
 ]
 
