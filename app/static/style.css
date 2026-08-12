@@ -207,7 +207,34 @@ body.resizing-sidebar{cursor:col-resize!important;user-select:none}
 /* The dot shifts opposite the row and by less -- foreground moving against
    background is what reads as parallax rather than just a nudge. */
 .node:hover .dot{transform:translateX(calc(var(--node-shift,0) * -3px))}
-.node[aria-current]{background:rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;box-shadow:0 1px 0 var(--edge-hi) inset}
+.node[aria-current]{position:relative;background:rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;box-shadow:0 1px 0 var(--edge-hi) inset}
+/* Same Windows-11-Settings-style spotlight border as .sv-card and #lens --
+   a radial-gradient clipped to just the border ring via a content-box/
+   border-box mask XOR. Deliberately NOT mouse-driven like those two: the
+   open note stays current whether or not the cursor is anywhere near the
+   sidebar (you're usually typing in the editor, not hovering the list), so
+   there's no --mx/--my to read. A slow ambient drift of the gradient's own
+   position instead, so the ring still reads as "alive" without needing a
+   pointer. Flat context, no nearby perspective/3D transform -- unlike the
+   flashcard flip, where this same mask technique broke twice -- so this is
+   the same safe, working context .sv-card already proves it out in. */
+.node[aria-current]>*{position:relative;z-index:1}
+.node[aria-current]::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:0;pointer-events:none;
+  padding:1.5px;
+  background-image:radial-gradient(circle,var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  background-size:220% 220%;
+  background-position:20% 30%;
+  animation:node-holo-drift 6s ease-in-out infinite alternate;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude}
+@keyframes node-holo-drift{
+  0%{background-position:15% 25%}
+  100%{background-position:85% 75%}
+}
+@media (prefers-reduced-motion: reduce){
+  .node[aria-current]::before{animation:none;background-position:50% 50%}
+}
 .node .dot{width:5px;height:5px;border-radius:50%;background:var(--faint);flex:none;transition:.24s var(--ease)}
 .node[aria-current] .dot{background:var(--accent);box-shadow:0 0 9px var(--accent)}
 .node .n{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);flex:none}
