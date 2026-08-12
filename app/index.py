@@ -494,9 +494,19 @@ def _mine_suggestions(con) -> tuple[dict, list]:
         linked[r["src"]].add(r["target"].strip().lower())
 
     # 1. existing titles mentioned as plain text
+    #
+    # The floor here is 3, not the emerging-phrase miner's 4 below -- this
+    # loop only ever matches a title someone already deliberately gave a
+    # real note (RPO, RTO, ...), never a guessed n-gram, so a 3-letter
+    # acronym is exactly the case worth catching: high confidence, a
+    # concrete existing target to link to, not a guess. The word-boundary
+    # regex below is what keeps this safe at that length -- "RPO" can only
+    # match whole-word, never as a fragment of a longer word. 1-2 character
+    # titles stay excluded; those would just be common English words/letters
+    # by themselves and flood the list with noise no boundary check saves.
     unlinked_by_slug: dict[str, dict] = {}
     for tslug, title in titles.items():
-        if len(title) < 4:
+        if len(title) < 3:
             continue
         pat = re.compile(r"(?<![\w\[])" + re.escape(title) + r"(?![\w\]])", re.I)
         hits = []

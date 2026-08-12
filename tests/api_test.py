@@ -251,6 +251,44 @@ with TestClient(app) as c:
             body = c.get(f"/api/notes/{sl}").json()["body"]
             check(f"{sl}: linked", "[[Actuation]]" in body, body)
 
+    print("\n── a short acronym with its own page is still suggested ──")
+    # Regression: RPO/RTO -- real 3-letter titles a user had already created
+    # pages for -- never showed up as "unlinked" suggestions no matter how
+    # often they were typed as plain text elsewhere. The floor guarding
+    # *this* loop (existing titles) used to match the emerging-phrase
+    # miner's floor below, but the two aren't the same risk: this one only
+    # ever matches a title someone deliberately gave a real note, not a
+    # guessed n-gram, so a short acronym is exactly the high-confidence case
+    # worth catching -- unlike a guessed phrase, there's already a concrete
+    # page to point at. 1-2 character titles ("RP" here) stay excluded --
+    # too close to bare letters/common short words to be useful signal even
+    # with a word-boundary match.
+    rpo_slug = c.post("/api/notes", json={"title": "RPO"}).json()["slug"]
+    c.post("/api/notes", json={"title": "RP"})
+    mention_notes = []
+    for i, body in enumerate([
+        "Our RPO target is under 15 minutes for this tier.",
+        "RPO and RTO both factor into the DR runbook.",
+        "Snapshot cadence is tuned to the RPO we committed to.",
+    ]):
+        sl = c.post("/api/notes", json={"title": f"DR Note {i}"}).json()["slug"]
+        c.put(f"/api/notes/{sl}", json={"body": body})
+        mention_notes.append(sl)
+    sugg = c.get("/api/suggestions", params={"limit": 100}).json()
+    rpo = next((s for s in sugg if s["kind"] == "unlinked" and s["term"] == "RPO"), None)
+    check("the 3-letter title surfaces as an existing-page suggestion",
+          rpo is not None, [s["term"] for s in sugg if s["kind"] == "unlinked"])
+    if rpo:
+        check("points at the actual RPO note, not a guess", rpo["target"] == rpo_slug, rpo)
+        check("counted in all three notes that mention it", rpo["notes"] == 3, rpo)
+        res = c.post("/api/suggestions/apply", json={"term": "RPO", "target": rpo_slug}).json()
+        check("applied across all three mentions", res["notes_updated"] == 3, res)
+        for sl in mention_notes:
+            body = c.get(f"/api/notes/{sl}").json()["body"]
+            check(f"{sl}: linked, not left as plain text", "[[RPO]]" in body, body)
+    check("a 1-2 character title stays excluded even so",
+          not any(s["term"] == "RP" for s in sugg), [s["term"] for s in sugg])
+
     print("\n── apply_suggestion is not fooled by a stale index ──")
     # Regression for a real bug report: a suggestion's toast said "Linked
     # across 1 note" when 4 notes actually had the phrase. The index is
