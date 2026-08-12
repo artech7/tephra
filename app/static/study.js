@@ -62,7 +62,9 @@
   const S = {
     open: false, mode: 'browse', data: null,
     category: '', item: null,
-    cards: [], cardIx: 0, cardFlipped: false,
+    // cardsCategory starts undefined (never equal to S.category, which
+    // starts '') so renderCards's very first call always fetches.
+    cards: [], cardsCategory: undefined, cardIx: 0, cardFlipped: false,
     // quizPicked is always an array of chosen option indices, even for a
     // single-answer question -- one question shape, whether it has one
     // correct answer or several. quizSubmitted separates "still choosing"
@@ -775,11 +777,36 @@
     return wrap;
   }
 
-  /* ── flashcards ── */
+  /* ── flashcards ──
+     Cards are quiz questions, not topics -- one per Q: entry under a note's
+     ## Quiz heading, same pool /api/study/quiz draws from for the
+     multiple-choice mode. The whole point of a flashcard over multiple
+     choice is recalling the answer yourself before it's shown, so the back
+     is the marked-correct option(s) plus Why:, not the note's whole prose.
+     n is the category's own ceiling (S.data.max_quiz), not the quiz mode's
+     12-per-round default -- flipping through a deck should see everything
+     available, not a sampled round of it. */
+  async function loadCards() {
+    const params = new URLSearchParams({ n: String(S.data.max_quiz || 200) });
+    if (S.category) params.set('category', S.category);
+    const r = await api('/study/quiz?' + params);
+    S.cards = r.questions;
+    S.cardsCategory = S.category;
+    S.cardIx = 0; S.cardFlipped = false;
+  }
+
   function renderCards(main) {
-    S.cards = S.data.items.filter(inCat).filter((i) => i.question);
+    // Fetched once per category and reused across flips/next/prev -- a fresh
+    // load only when the category actually changes, tracked separately from
+    // S.category because resetBrowse() (category switch) can't itself await.
+    if (S.cardsCategory !== S.category) {
+      main.appendChild(el('div', 'empty', 'Loading…'));
+      loadCards().then(render);
+      return;
+    }
     if (!S.cards.length) {
-      main.appendChild(el('div', 'empty', 'No flashcards here — topics need a question line.'));
+      main.appendChild(el('div', 'empty',
+        'No flashcards here — add a ## Quiz section with a Q: line to a note.'));
       return;
     }
     if (S.cardIx >= S.cards.length) S.cardIx = 0;
@@ -802,10 +829,26 @@
 
     const back = el('div', 'sv-flash-face back');
     back.appendChild(el('div', 'sv-c-cat', it.category || ''));
-    back.appendChild(el('div', 'sv-flash-title', it.title));
-    const answerBody = el('div', 'body sv-flash-answer');
-    answerBody.innerHTML = '<p style="color:var(--faint)">Loading…</p>';
-    back.appendChild(answerBody);
+    back.appendChild(el('div', 'sv-flash-title',
+      it.answers.map((i) => it.options[i]).join(' · ')));
+    if (it.why) {
+      // .sv-flash-answer is the scroller resize() measures by class name
+      // (see its own note below); .sv-why inside is the same boxed-
+      // explanation look Quiz mode reveals after answering, so the two
+      // modes read as one system rather than two different designs.
+      const scroller = el('div', 'sv-flash-answer');
+      scroller.appendChild(el('div', 'sv-why', it.why));
+      back.appendChild(scroller);
+    }
+    if (it.slug) {
+      const jump = el('button', 'sv-back', `Read the full topic: ${it.title} →`);
+      jump.onclick = async (e) => {
+        e.stopPropagation();
+        S.item = await api('/study/item/' + it.slug);
+        setMode('browse');
+      };
+      back.appendChild(jump);
+    }
     back.appendChild(el('div', 'sv-flash-hint', 'click to flip back'));
 
     flip.append(front, back);
@@ -813,18 +856,6 @@
     const glow = el('div', 'sv-flash-glow');
     tilt.appendChild(glow);
     wrap.appendChild(tilt);
-
-    // Fetched once per card and cached on the item itself, so flipping
-    // back and forth never re-fetches -- matches the old lazy-load, just
-    // no longer re-requested on every flip.
-    async function ensureAnswerLoaded() {
-      if (it._html == null) {
-        try { it._html = (await api('/study/item/' + it.slug)).html; }
-        catch { it._html = '<p style="color:var(--faint)">Could not load.</p>'; }
-      }
-      answerBody.innerHTML = it._html;
-      resize();
-    }
 
     // Faces are position:absolute (so both can occupy the same spot for the
     // flip), which means .sv-flash-flip needs an explicit height -- nothing
@@ -860,12 +891,10 @@
     tilt.onclick = () => {
       S.cardFlipped = !S.cardFlipped;
       flip.classList.toggle('flipped', S.cardFlipped);
-      if (S.cardFlipped) ensureAnswerLoaded();
       resize();
     };
     if (!reduce) wireTilt(tilt, glow);
     resize();
-    if (S.cardFlipped) ensureAnswerLoaded();
 
     const nav = el('div', 'sv-nav');
     const prev = el('button', 'sv-btn', '← Previous');

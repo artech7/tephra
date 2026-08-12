@@ -7,24 +7,47 @@ const { window } = dom; const doc = window.document;
 let ok = 0, fail = 0;
 const ck = (l, c, x = '') => { c ? (ok++, console.log(`  PASS  ${l} ${x}`)) : (fail++, console.log(`  FAIL  ${l} ${x}`)); };
 
-const items = [
-  { slug: 'raid', title: 'RAID levels', category: 'Storage', question: 'Which RAID level has no redundancy?' },
-  { slug: 'icmp', title: 'ICMP', category: 'Networking', question: 'What does ICMP do?' },
+// Flashcards draw from the same pool /study/quiz feeds multiple-choice mode --
+// one card per Q: entry, not one per topic. Two questions in Storage, one in
+// Networking, so category switching has something to actually prove.
+const allQuestions = [
+  { id: 'q1', question: 'Which RAID level has no redundancy?', options: ['RAID 0', 'RAID 1', 'RAID 5'],
+    answers: [0], why: 'RAID 0 stripes data with no parity or mirroring.',
+    slug: 'raid', title: 'RAID levels', category: 'Storage', stats: { seen: 0, right: 0 }, flagged: false },
+  { id: 'q2', question: 'Which RAID level mirrors data?', options: ['RAID 0', 'RAID 1', 'RAID 5'],
+    answers: [1], why: 'RAID 1 duplicates every write to a second disk.',
+    slug: 'raid', title: 'RAID levels', category: 'Storage', stats: { seen: 0, right: 0 }, flagged: false },
+  { id: 'q3', question: 'What does ICMP do?', options: ['Routes packets', 'Reports network errors', 'Encrypts traffic'],
+    answers: [1], why: '',
+    slug: 'icmp', title: 'ICMP', category: 'Networking', stats: { seen: 0, right: 0 }, flagged: false },
 ];
 const data = {
-  items, categories: [{ category: 'Storage', topics: 1, questions: 0 }, { category: 'Networking', topics: 1, questions: 0 }],
+  items: [
+    { slug: 'raid', title: 'RAID levels', category: 'Storage', question: 'About RAID', questions: 2, source: 'manual', confidence: null, needs_review: false, flags: 0 },
+    { slug: 'icmp', title: 'ICMP', category: 'Networking', question: 'About ICMP', questions: 1, source: 'manual', confidence: null, needs_review: false, flags: 0 },
+  ],
+  categories: [{ category: 'Storage', topics: 1, questions: 2 }, { category: 'Networking', topics: 1, questions: 1 },
+               { category: 'Empty Cat', topics: 0, questions: 0 }],
   known_categories: ['Storage', 'Networking'],
   progress: { answered: 0, correct: 0, flagged: 0 },
   settings: { quiz_count: 12 }, max_quiz: 200,
-  totals: { topics: 2, questions: 2, needs_review: 0 },
+  totals: { topics: 2, questions: 3, needs_review: 0 },
 };
 const calls = [];
 window.tephraApi = async (p) => {
   calls.push(p);
   if (p === '/study') return JSON.parse(JSON.stringify(data));
   if (p === '/vault/info') return { vault: '/v', files_on_disk: 2, indexed: 2, study_items: 2 };
-  if (p === '/study/item/raid') return { html: '<p>RAID 0 stripes data with no redundancy.</p>' };
-  if (p === '/study/item/icmp') return { html: '<p>ICMP handles diagnostics like ping.</p>' };
+  if (p.startsWith('/study/quiz')) {
+    const params = new URLSearchParams(p.split('?')[1]);
+    const cat = params.get('category');
+    const pool = allQuestions.filter((q) => !cat || q.category === cat);
+    return { questions: JSON.parse(JSON.stringify(pool)), pool: pool.length };
+  }
+  if (p === '/study/item/raid') {
+    return { slug: 'raid', title: 'RAID levels', category: 'Storage', question: 'About RAID',
+             html: '<p>whole note prose</p>', quiz: [], tags: [], updated: '2026-08-12T00:00:00Z' };
+  }
   throw new Error(p);
 };
 window.tephraToast = () => {}; window.tephraOpenNote = () => {};
@@ -46,37 +69,44 @@ await new Promise((r) => setTimeout(r, 20));
 const tilt = () => doc.querySelector('.sv-flash-tilt');
 const flip = () => doc.querySelector('.sv-flash-flip');
 
-console.log('── front face on open ──');
-ck('shows the first card\'s question', doc.querySelector('.sv-flash-q')?.textContent === items[0].question,
+console.log('── cards come from the quiz pool, not the topic list ──');
+ck('fetched /study/quiz for the deck', calls.some((c) => c.startsWith('/study/quiz')), calls);
+ck('front shows a QUESTION\'S text, not a topic-level one-liner',
+   doc.querySelector('.sv-flash-q')?.textContent === allQuestions[0].question,
    doc.querySelector('.sv-flash-q')?.textContent);
+ck('all 3 questions loaded (no category filter yet)', doc.querySelector('.sv-count')?.textContent === '1 / 3',
+   doc.querySelector('.sv-count')?.textContent);
 ck('hints to click', doc.querySelector('.front .sv-flash-hint')?.textContent === 'click to reveal');
 ck('not flipped yet', !flip().classList.contains('flipped'));
-ck('answer not fetched yet', !calls.includes('/study/item/raid'), calls);
 
-console.log('\n── flipping reveals the answer, fetched once ──');
+console.log('\n── flipping reveals the marked-correct answer and Why -- no extra fetch needed ──');
+const callsBeforeFlip = calls.length;
 tilt().onclick();
 await new Promise((r) => setTimeout(r, 20));
 ck('flipped class applied', flip().classList.contains('flipped'));
-ck('back shows the title', doc.querySelector('.sv-flash-title')?.textContent === 'RAID levels');
-ck('answer html loaded into the back face',
-   doc.querySelector('.sv-flash-answer')?.innerHTML.includes('stripes data with no redundancy'));
-ck('fetched exactly once', calls.filter((c) => c === '/study/item/raid').length === 1, calls);
+ck('back shows the CORRECT option, not the topic title',
+   doc.querySelector('.sv-flash-title')?.textContent === 'RAID 0',
+   doc.querySelector('.sv-flash-title')?.textContent);
+ck('the Why explanation is shown',
+   doc.querySelector('.sv-why')?.textContent === allQuestions[0].why,
+   doc.querySelector('.sv-why')?.textContent);
+ck('a link back to the source topic is offered',
+   doc.querySelector('.sv-back')?.textContent === 'Read the full topic: RAID levels →');
+ck('flipping did not fetch anything -- the answer was already in the card data',
+   calls.length === callsBeforeFlip, calls.slice(callsBeforeFlip));
 
-console.log('\n── flip back and forth again: no re-fetch ──');
-tilt().onclick();
-await new Promise((r) => setTimeout(r, 10));
-ck('back to the front', !flip().classList.contains('flipped'));
-ck('question still intact', doc.querySelector('.sv-flash-q')?.textContent === items[0].question);
-tilt().onclick();
-await new Promise((r) => setTimeout(r, 10));
-ck('flipped again', flip().classList.contains('flipped'));
-ck('still exactly one fetch for this card -- cached, not re-requested',
-   calls.filter((c) => c === '/study/item/raid').length === 1, calls);
+console.log('\n── the "read the full topic" link opens the note in Browse mode ──');
+doc.querySelector('.sv-back').onclick({ stopPropagation() {} });
+await new Promise((r) => setTimeout(r, 20));
+ck('fetched the full topic', calls.includes('/study/item/raid'), calls);
+ck('switched to Browse mode', doc.querySelector('.sv-modes button[data-mode="browse"]').getAttribute('aria-pressed') === 'true');
+doc.querySelector('.sv-modes button[data-mode="cards"]').onclick();
+await new Promise((r) => setTimeout(r, 20));
 
-console.log('\n── Next moves to the next card, unflipped ──');
+console.log('\n── Next moves to the next question, unflipped ──');
 doc.querySelector('.sv-nav .sv-btn.primary').onclick();
 await new Promise((r) => setTimeout(r, 20));
-ck('shows the second card\'s question', doc.querySelector('.sv-flash-q')?.textContent === items[1].question,
+ck('shows the second question', doc.querySelector('.sv-flash-q')?.textContent === allQuestions[1].question,
    doc.querySelector('.sv-flash-q')?.textContent);
 ck('starts unflipped again', !flip().classList.contains('flipped'));
 
@@ -90,6 +120,26 @@ ck('transform set while tracking the pointer', tilt().style.transform.includes('
 ck('glow follows too', tilt().querySelector('.sv-flash-glow').style.background.includes('radial-gradient'));
 tilt().dispatchEvent(new window.MouseEvent('mouseleave', { bubbles: true }));
 ck('resets on mouseleave', tilt().style.transform === '');
+
+console.log('\n── switching category reloads the deck scoped to it ──');
+const callsBeforeCat = calls.length;
+doc.querySelectorAll('#svCatList .node').forEach((n) => {
+  if (n.querySelector('.t')?.textContent === 'Networking') n.onclick();
+});
+await new Promise((r) => setTimeout(r, 20));
+ck('re-fetched /study/quiz with the new category', calls.slice(callsBeforeCat).some((c) => c.startsWith('/study/quiz') && c.includes('category=Networking')),
+   calls.slice(callsBeforeCat));
+ck('only the Networking question is in the deck now', doc.querySelector('.sv-count')?.textContent === '1 / 1',
+   doc.querySelector('.sv-count')?.textContent);
+ck('shows the Networking question', doc.querySelector('.sv-flash-q')?.textContent === allQuestions[2].question);
+
+console.log('\n── a category with no quiz questions shows an empty state, not a crash ──');
+doc.querySelectorAll('#svCatList .node').forEach((n) => {
+  if (n.querySelector('.t')?.textContent === 'Empty Cat') n.onclick();
+});
+await new Promise((r) => setTimeout(r, 20));
+ck('empty message shown', doc.querySelector('.empty')?.textContent.includes('No flashcards'),
+   doc.querySelector('.empty')?.textContent);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
