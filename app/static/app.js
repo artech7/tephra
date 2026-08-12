@@ -1151,7 +1151,16 @@ $('#noteBody').addEventListener('dblclick', (e) => {
   if (Date.now() - lastResizeAt < 400) return;
   setEditing(true);
 });
-$('#noteSrc').addEventListener('blur', () => setEditing(false));
+// openFind() below focuses #findInput, which blurs #noteSrc -- without this
+// guard that read as "left the editor" and setEditing(false) closed it right
+// back out (and hid #findBar with it) the instant the shortcut was pressed.
+// relatedTarget is the element focus is moving *to*, so this only exempts a
+// move into the find bar; clicking away to anything else still exits edit
+// mode as before.
+$('#noteSrc').addEventListener('blur', (e) => {
+  if (e.relatedTarget?.closest('#findBar')) return;
+  setEditing(false);
+});
 
 /* ══ FIND IN NOTE ════════════════════════════════════════════
    ⌘F/Ctrl+F is a browser feature, but the browser's own Find cannot see
