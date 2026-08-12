@@ -181,6 +181,25 @@
   // below it slides. Appending to <body> would have covered the header.
   (document.querySelector('.deck') || document.body).appendChild(view);
 
+  // Same cursor-local glare + parallax shift as the note list on the
+  // Tephra side (#noteList in app.js) -- .node is a shared class, so the
+  // :hover rules that read --node-mx/--node-shift already apply here, but
+  // nothing was ever writing them for this list, leaving the category rows
+  // with only the flat 50%-centered fallback and none of the tracking.
+  // Delegated on the container rather than per-row, same reasoning as
+  // there: survives renderCats() rebuilding the rows and never runs more
+  // than one row at a time.
+  if (!reduce) {
+    $('#svCatList').addEventListener('mousemove', (e) => {
+      const row = e.target.closest('.node');
+      if (!row) return;
+      const r = row.getBoundingClientRect();
+      const frac = (e.clientX - r.left) / (r.width || 1);
+      row.style.setProperty('--node-mx', (frac * 100).toFixed(1) + '%');
+      row.style.setProperty('--node-shift', (frac - 0.5).toFixed(3));
+    });
+  }
+
   /* A right-edge slide-in drawer, same mechanic as the Appearance and Vault
      Health drawers (#theme / #health in app.js) -- reachable from the header
      button no matter what's showing in the body below (empty state, browse
