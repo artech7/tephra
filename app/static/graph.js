@@ -37,10 +37,6 @@
     // layout different every open, which is disorienting.
     const groups = [...new Set(nodes.map((d) => d.category || d.kind || ''))].sort();
     nodes.forEach((d, i) => {
-      // A node that already has a home point (the islands layout pre-places
-      // nodes near their island's packed anchor) keeps its seed position --
-      // this circular seeding is only for the shared-centre layouts.
-      if (d.hx !== undefined) { d.vx = d.vy = 0; return; }
       const g = Math.max(groups.indexOf(d.category || d.kind || ''), 0);
       const ring = 120 + (g % 4) * 90;
       const ang = (i / Math.max(n, 1)) * Math.PI * 2 + g * 0.7;
@@ -101,13 +97,10 @@
           }
         }
 
-        // gravity + integrate. Nodes with a home point (islands layout) pull
-        // toward their own island's anchor instead of the shared centre.
+        // gravity + integrate
         for (const d of nodes) {
-          const hx = d.hx !== undefined ? d.hx : W / 2;
-          const hy = d.hy !== undefined ? d.hy : H / 2;
-          d.vx += (hx - d.x) * t.gravity * a;
-          d.vy += (hy - d.y) * t.gravity * a;
+          d.vx += (W / 2 - d.x) * t.gravity * a;
+          d.vy += (H / 2 - d.y) * t.gravity * a;
           d.vx *= t.velocityDecay; d.vy *= t.velocityDecay;
           if (d.fixed) { d.vx = d.vy = 0; continue; }
           d.vx = Math.max(-t.maxStep, Math.min(t.maxStep, d.vx));
@@ -220,71 +213,6 @@
     return { parent };
   }
 
-  /* ── islands ─────────────────────────────────────────────────────────
-     A category and its topics settle on their own patch of canvas instead
-     of joining one shared blob -- each becomes a compact little cluster
-     with its own local shape, and only the links that actually cross
-     categories have to travel between patches. This sidesteps the tidy
-     tree's worst failure mode: a hub note (a guide root linking straight
-     to dozens of specific topics) no longer forces every one of those
-     links through a single distant point, because there is no shared
-     hierarchy for them to be routed along -- a cross-category link is
-     just drawn straight, same as the plain force layout draws every link.
-
-     Anchor points are placed with an outward spiral search (the same
-     technique word-cloud packing uses): biggest category first, each
-     next one walking out along the spiral until it lands somewhere that
-     doesn't overlap an already-placed island. The actual shape *within*
-     an island still comes from the ordinary force sim -- packIslands only
-     picks where each node starts and what point it's pulled toward, via
-     the sim's per-node home-point support (see createSim above).
-     ───────────────────────────────────────────────────────────────────── */
-  function packIslands(nodes, opts = {}) {
-    const cx = W / 2, cy = H / 2;
-    const groups = new Map();
-    nodes.forEach((d, i) => {
-      const g = d.category || d.kind || '';
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(i);
-    });
-    // Biggest island first (and placed dead centre) so the spiral search
-    // for everything smaller has the least already-claimed ground to work
-    // around -- same reasoning as tidyTree rooting components by degree.
-    const order = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
-    const margin = opts.margin ?? 30;
-    const placed = [];
-    for (const [, idxs] of order) {
-      // Area, not radius, should scale with node count, so the footprint
-      // grows as sqrt(n) -- otherwise a 20-topic category and a 2-topic
-      // one end up with barely different territory.
-      const r = Math.max(45, 24 * Math.sqrt(idxs.length));
-      let ax = cx, ay = cy;
-      if (placed.length) {
-        let ang = 0, ok = false;
-        const step = 0.5, grow = 3;
-        for (let iter = 0; iter < 4000; iter++) {
-          ang += step;
-          const rad = grow * ang;
-          const tx = cx + Math.cos(ang) * rad, ty = cy + Math.sin(ang) * rad;
-          if (placed.every((p) => Math.hypot(p.x - tx, p.y - ty) > p.r + r + margin)) {
-            ax = tx; ay = ty; ok = true; break;
-          }
-        }
-        if (!ok) { ax = cx + Math.cos(ang) * grow * ang; ay = cy + Math.sin(ang) * grow * ang; }
-      }
-      placed.push({ x: ax, y: ay, r });
-      idxs.forEach((i, k) => {
-        const d = nodes[i];
-        const ang = (k / Math.max(idxs.length, 1)) * Math.PI * 2;
-        const seedR = idxs.length > 1 ? r * 0.5 : 0;
-        d.hx = ax; d.hy = ay;
-        d.x = ax + Math.cos(ang) * seedR;
-        d.y = ay + Math.sin(ang) * seedR;
-        d.vx = d.vy = 0;
-      });
-    }
-  }
-
   /* ── hierarchical edge bundling ──────────────────────────────────────
      A tidy tree only has zero crossings for its own spanning-tree edges.
      Every other link in the graph (the "cross" links: a related topic in
@@ -371,7 +299,7 @@
   }
 
   window.__tephraGraphInternals = {
-    createSim, hitTest, toScreen, toWorld, tidyTree, packIslands, W, H, TUNING,
+    createSim, hitTest, toScreen, toWorld, tidyTree, W, H, TUNING,
     treePath, blendPath, buildBundles, bundleKey,
   };
 
@@ -494,18 +422,6 @@
       G.bundles = buildBundles(nodes, links, parent);
       if (!keepView) { G.userMoved = false; fit(); }
       redraw();
-    } else if (G.layout === 'islands') {
-      G.bundles = null;
-      packIslands(nodes, links);
-      // Tuned for a compact per-island shape rather than one shared blob:
-      // weaker, shorter-range repulsion so a 5-topic island settles inside
-      // its own packed footprint instead of pushing past it into the next
-      // one, and stronger gravity so it snaps to its anchor quickly.
-      G.sim = createSim(nodes, links, {
-        charge: -900, linkDistance: 34, linkStrength: 0.25, gravity: 0.06, cluster: 0,
-      });
-      if (!keepView) G.userMoved = false;
-      start();
     } else {
       G.bundles = null;
       G.sim = createSim(nodes, links);
