@@ -59,9 +59,21 @@ ck('still editing -- source textarea still shown', !doc.querySelector('#noteSrc'
 ck('still editing -- rendered body still hidden', doc.querySelector('#noteBody').hidden === true);
 ck('focus landed in the find input', doc.activeElement === doc.querySelector('#findInput'));
 
-console.log('\n── it actually finds matches in the textarea\'s value ──');
+console.log('\n── typing a whole word keeps focus in the find box the entire time ──');
+// Each keystroke used to call showMatch(), which called #noteSrc.focus() to
+// paint the match -- yanking focus out of #findInput after the very first
+// letter, so every character after it landed nowhere near the search box.
+// Typed one character at a time, like a real keypress, not set in one shot.
 const findInput = doc.querySelector('#findInput');
-findInput.value = 'widget';
+for (const partial of ['w', 'wi', 'wid', 'widg', 'widge', 'widget']) {
+  findInput.value = partial;
+  findInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 5));
+  ck(`focus still in the find box after typing "${partial}"`, doc.activeElement === findInput);
+}
+ck('the full word made it into the input, not just the first letter', findInput.value === 'widget', findInput.value);
+
+console.log('\n── it actually finds matches in the textarea\'s value ──');
 findInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 await new Promise(r => setTimeout(r, 20));
 ck('found both occurrences of "widget"', doc.querySelector('#findCount').textContent === '1/2',

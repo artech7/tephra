@@ -1195,7 +1195,12 @@ function showMatch(i) {
   F.i = ((i % F.matches.length) + F.matches.length) % F.matches.length;
   const start = F.matches[F.i], term = $('#findInput').value;
   const ta = $('#noteSrc');
-  ta.focus();
+  // Not ta.focus() -- this runs on every keystroke via runFind(), and
+  // focusing the textarea mid-word yanked input focus out of #findInput,
+  // so only the first letter of whatever was typed ever reached the find
+  // box. setSelectionRange works on an unfocused textarea just fine (the
+  // browser just renders the selection dimmed instead of solid); typing
+  // stays in #findInput until the user deliberately clicks or tabs away.
   ta.setSelectionRange(start, start + term.length);
   scrollTextareaTo(start);
   $('#findCount').textContent = `${F.i + 1}/${F.matches.length}`;
