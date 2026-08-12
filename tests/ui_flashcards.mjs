@@ -136,6 +136,34 @@ ck('resets on mouseleave', tilt().style.transform === '');
 ck('--mx/--my reset to centered on mouseleave',
    tilt().style.getPropertyValue('--mx') === '50%' && tilt().style.getPropertyValue('--my') === '50%');
 
+console.log('\n── flipping does not compound with a lingering hover tilt (the "ghost double card") ──');
+// The flip (rotateY on .sv-flash-flip) and the tilt (rotate3d on
+// .sv-flash-tilt itself) are two independent 3D rotations. Leaving the
+// last hover tilt applied while a flip is also mid-transition composes
+// them into a lopsided rotation that renders as two overlapping card-
+// shaped planes through perspective -- this is the actual bug report.
+const rect2 = tilt().getBoundingClientRect();
+tilt().dispatchEvent(new window.MouseEvent('mousemove', {
+  clientX: rect2.left + rect2.width * 0.8, clientY: rect2.top + rect2.height * 0.2, bubbles: true,
+}));
+ck('a tilt is applied from hovering', tilt().style.transform.includes('rotate3d'), tilt().style.transform);
+tilt().onclick();
+ck('the lingering tilt is cleared the instant a flip starts', tilt().style.transform === '', tilt().style.transform);
+tilt().dispatchEvent(new window.MouseEvent('mousemove', {
+  clientX: rect2.left + rect2.width * 0.3, clientY: rect2.top + rect2.height * 0.7, bubbles: true,
+}));
+ck('tilt stays suppressed for further hover movement while the flip is still transitioning',
+   tilt().style.transform === '', tilt().style.transform);
+const transformEvt = new window.Event('transitionend', { bubbles: true });
+transformEvt.propertyName = 'transform';
+flip().dispatchEvent(transformEvt);
+tilt().dispatchEvent(new window.MouseEvent('mousemove', {
+  clientX: rect2.left + rect2.width * 0.8, clientY: rect2.top + rect2.height * 0.2, bubbles: true,
+}));
+ck('tilt resumes once the flip\'s own transitionend fires', tilt().style.transform.includes('rotate3d'), tilt().style.transform);
+tilt().dispatchEvent(new window.MouseEvent('mouseleave', { bubbles: true }));
+tilt().onclick();   // back to front, for the sections below
+
 console.log('\n── switching category reloads the deck scoped to it ──');
 const callsBeforeCat = calls.length;
 doc.querySelectorAll('#svCatList .node').forEach((n) => {

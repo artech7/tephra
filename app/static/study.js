@@ -22,16 +22,29 @@
      rather than adding a second mousemove listener that would just fight
      this one over style.transform) for tiltEl's own spotlight-border
      pseudo-element in style.css -- the same Windows-11-style holo border
-     effect .sv-card and #lens use, driven by wireFoil there. */
-  function wireTilt(tiltEl, glowEl) {
+     effect .sv-card and #lens use, driven by wireFoil there.
+
+     isBusy, if given, is checked before touching tiltEl's own transform --
+     the flip (a rotateY on the *child* .sv-flash-flip) and this tilt (a
+     rotate3d on tiltEl itself) are two independent 3D rotations that were
+     never meant to compose. Leaving the last hover-driven tilt applied
+     while a flip is also mid-transition combines them into a lopsided
+     compound rotation that, through perspective, renders as what looks
+     like two overlapping card-shaped planes crossing each other -- the
+     "ghost" double-card this guards against. --mx/--my and the glow are
+     unaffected either way since neither is a 3D transform, so the border
+     and specular highlight can keep tracking the pointer through a flip. */
+  function wireTilt(tiltEl, glowEl, isBusy) {
     tiltEl.addEventListener('mousemove', (e) => {
       const b = tiltEl.getBoundingClientRect();
       const cx = e.clientX - b.left - b.width / 2;
       const cy = e.clientY - b.top - b.height / 2;
-      const dist = Math.sqrt(cx * cx + cy * cy);
-      const deg = Math.min(Math.log(dist + 1) * 2, 10);
-      tiltEl.style.transform =
-        `scale3d(1.025,1.025,1.025) rotate3d(${cy / 140},${-cx / 140},0,${deg}deg)`;
+      if (!isBusy || !isBusy()) {
+        const dist = Math.sqrt(cx * cx + cy * cy);
+        const deg = Math.min(Math.log(dist + 1) * 2, 10);
+        tiltEl.style.transform =
+          `scale3d(1.025,1.025,1.025) rotate3d(${cy / 140},${-cx / 140},0,${deg}deg)`;
+      }
       glowEl.style.background = `radial-gradient(circle at ${cx * 1.3 + b.width / 2}px `
         + `${cy * 1.3 + b.height / 2}px, rgba(255,255,255,.18), transparent 60%)`;
       tiltEl.style.setProperty('--mx', ((cx + b.width / 2) / b.width * 100).toFixed(1) + '%');
@@ -911,12 +924,26 @@
       });
     }
 
+    // Set for the duration of the flip's own CSS transition (cleared on its
+    // transitionend, not a hardcoded timeout that could drift from the .6s
+    // in style.css) so wireTilt below skips updating tilt's own rotate3d
+    // while it's true -- see wireTilt's own note for why composing that
+    // with the flip's rotateY is what produced the "ghost" double-card.
+    // Reset immediately on click too: the last hover-driven tilt is likely
+    // still applied at that instant, and would otherwise keep compounding
+    // with the flip for however long it takes flipping to flip back false.
+    let flipping = false;
     tilt.onclick = () => {
+      flipping = true;
+      tilt.style.transform = '';
       S.cardFlipped = !S.cardFlipped;
       flip.classList.toggle('flipped', S.cardFlipped);
       resize();
     };
-    if (!reduce) wireTilt(tilt, glow);
+    flip.addEventListener('transitionend', (e) => {
+      if (e.target === flip && e.propertyName === 'transform') flipping = false;
+    });
+    if (!reduce) wireTilt(tilt, glow, () => flipping);
     resize();
 
     const nav = el('div', 'sv-nav');
