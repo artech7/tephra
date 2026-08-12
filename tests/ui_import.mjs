@@ -113,9 +113,9 @@ ck('fetched study data', calls.some((c) => c.path === '/study'));
 ck('fetched vault path', calls.some((c) => c.path === '/vault/info'));
 const dz = () => document.querySelector('.sv-drop:not(.sv-importdrop)');
 ck('empty state shows the dropzone', !!dz());
-ck('exactly one import button in the header', document.querySelectorAll('.sv-head .sv-import').length === 1);
-ck('it sits in its own section, not lumped in with the mode toggle',
-   !!document.querySelector('.sv-importbox > #svImport'));
+ck('exactly one import button in the topbar', document.querySelectorAll('header.topbar .sv-import').length === 1);
+ck('it lives in the app topbar, reachable without opening Crucible at all',
+   !!document.querySelector('header.topbar > #svImport') && !document.querySelector('.sv-modes .sv-import'));
 ck('the confirmation modal exists but starts hidden', modal() && modal().hidden === true);
 
 console.log('\n── the format reference is reachable before any import ──');
