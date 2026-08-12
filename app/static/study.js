@@ -17,7 +17,12 @@
      small rotate3d and a specular highlight that slides across it, both
      scoped to this one element's own mousemove/mouseleave -- never a
      viewport-wide pointer listener, so it can't repeat the old dynamic-
-     glass mistake of several things tracking the cursor independently. */
+     glass mistake of several things tracking the cursor independently.
+     Also writes --mx/--my (reusing the same cx/cy already computed here
+     rather than adding a second mousemove listener that would just fight
+     this one over style.transform) for .sv-flash-face's own spotlight-
+     border pseudo-element in style.css -- the same Windows-11-style holo
+     border effect .sv-card and #lens use, driven by wireFoil there. */
   function wireTilt(tiltEl, glowEl) {
     tiltEl.addEventListener('mousemove', (e) => {
       const b = tiltEl.getBoundingClientRect();
@@ -29,10 +34,14 @@
         `scale3d(1.025,1.025,1.025) rotate3d(${cy / 140},${-cx / 140},0,${deg}deg)`;
       glowEl.style.background = `radial-gradient(circle at ${cx * 1.3 + b.width / 2}px `
         + `${cy * 1.3 + b.height / 2}px, rgba(255,255,255,.18), transparent 60%)`;
+      tiltEl.style.setProperty('--mx', ((cx + b.width / 2) / b.width * 100).toFixed(1) + '%');
+      tiltEl.style.setProperty('--my', ((cy + b.height / 2) / b.height * 100).toFixed(1) + '%');
     });
     tiltEl.addEventListener('mouseleave', () => {
       tiltEl.style.transform = '';
       glowEl.style.background = '';
+      tiltEl.style.setProperty('--mx', '50%');
+      tiltEl.style.setProperty('--my', '50%');
     });
   }
 
@@ -875,10 +884,24 @@
         const scroller = face.querySelector('.sv-flash-answer');
         let full;
         if (scroller) {
-          const prevOverflow = scroller.style.overflowY, prevHeight = scroller.style.height;
+          // .sv-flash-answer is flex:1, which is flex-grow:1 flex-shrink:1
+          // flex-basis:0% -- flex-basis wins over any height set here
+          // whenever it isn't itself `auto`, so setting height:auto (the
+          // previous approach) never actually released this from flex
+          // sizing. It kept measuring "however much of the CURRENT,
+          // possibly still-too-small flip height flex-grow handed it" as
+          // if that were the full content height, so flip never grew past
+          // whatever it happened to already be -- exactly the cut-off
+          // answer with its own stray internal scrollbar this replaces.
+          // flex:none swaps it for ordinary content-based sizing so
+          // face.scrollHeight reports the true full height needed.
+          const prevFlex = scroller.style.flex, prevOverflow = scroller.style.overflowY,
+                prevHeight = scroller.style.height;
+          scroller.style.flex = 'none';
           scroller.style.overflowY = 'visible';
           scroller.style.height = 'auto';
           full = face.scrollHeight;
+          scroller.style.flex = prevFlex;
           scroller.style.overflowY = prevOverflow;
           scroller.style.height = prevHeight;
         } else {

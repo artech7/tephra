@@ -112,14 +112,29 @@ ck('starts unflipped again', !flip().classList.contains('flipped'));
 
 console.log('\n── tilt tracks the cursor while hovering ──');
 ck('no transform at rest', tilt().style.transform === '');
+// Not set inline yet -- the CSS default (--mx:50% in style.css) is what
+// applies until wireTilt's first mousemove writes an inline value over it,
+// same as real browsers; jsdom has no layout engine to compute cx/cy
+// against (getBoundingClientRect stays 0x0), so the exact percentage isn't
+// worth asserting on, only that wireTilt actually writes *something*.
+ck('--mx/--my not set inline before any pointer movement',
+   tilt().style.getPropertyValue('--mx') === '' && tilt().style.getPropertyValue('--my') === '');
 const rect = tilt().getBoundingClientRect();
 tilt().dispatchEvent(new window.MouseEvent('mousemove', {
   clientX: rect.left + rect.width * 0.8, clientY: rect.top + rect.height * 0.2, bubbles: true,
 }));
 ck('transform set while tracking the pointer', tilt().style.transform.includes('rotate3d'), tilt().style.transform);
 ck('glow follows too', tilt().querySelector('.sv-flash-glow').style.background.includes('radial-gradient'));
+// --mx/--my drive .sv-flash-face's own spotlight-border pseudo-element (see
+// style.css) -- the same holo-border effect .sv-card and #lens use. Set on
+// .sv-flash-tilt, not each face, so they inherit down to whichever face is
+// currently showing without wireTilt needing to know or care which one that is.
+ck('--mx written by the mousemove handler', tilt().style.getPropertyValue('--mx') !== '', tilt().style.getPropertyValue('--mx'));
+ck('--my written by the mousemove handler', tilt().style.getPropertyValue('--my') !== '', tilt().style.getPropertyValue('--my'));
 tilt().dispatchEvent(new window.MouseEvent('mouseleave', { bubbles: true }));
 ck('resets on mouseleave', tilt().style.transform === '');
+ck('--mx/--my reset to centered on mouseleave',
+   tilt().style.getPropertyValue('--mx') === '50%' && tilt().style.getPropertyValue('--my') === '50%');
 
 console.log('\n── switching category reloads the deck scoped to it ──');
 const callsBeforeCat = calls.length;

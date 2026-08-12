@@ -950,7 +950,8 @@ input.sv-select{cursor:text}
    read as one object rotating instead of a content swap. */
 .sv-flash-tilt{position:relative;border-radius:20px;cursor:pointer;perspective:1200px;
   box-shadow:0 1px 0 var(--edge-hi) inset,0 10px 30px -14px rgba(0,0,0,.6);
-  transition:transform .3s ease-out,box-shadow .3s ease-out}
+  transition:transform .3s ease-out,box-shadow .3s ease-out;
+  --mx:50%;--my:50%}
 .sv-flash-tilt:hover{transition-duration:.15s;box-shadow:0 1px 0 var(--edge-hi) inset,0 22px 50px -18px rgba(0,0,0,.7)}
 .sv-flash-flip{position:relative;width:100%;transform-style:preserve-3d;
   transition:transform .6s cubic-bezier(.4,.15,.2,1),height .4s var(--ease)}
@@ -965,6 +966,24 @@ input.sv-select{cursor:text}
   background:rgba(255,255,255,.09);border:1px solid var(--edge)}
 .sv-flash-face.front{justify-content:center;text-align:center}
 .sv-flash-face.back{justify-content:flex-start;text-align:left;transform:rotateY(180deg);border-color:rgba(var(--acc),.4)}
+/* Same Windows-11-Settings-style spotlight border as .sv-card and #lens --
+   a radial-gradient clipped to just the border ring via a content-box/
+   border-box mask XOR, positioned at --mx/--my (updated by wireTilt in
+   study.js, extended to also track this element's own mousemove for the
+   flip's tilt/glow rather than adding a second competing listener). Lives
+   on .sv-flash-face rather than .sv-flash-tilt because each face has its
+   own border to light up, and --mx/--my inherit down from the shared
+   ancestor to whichever face is currently showing. */
+.sv-flash-face>*{position:relative;z-index:3}
+.sv-flash-face::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:2;pointer-events:none;
+  padding:1.5px;
+  background:radial-gradient(240px circle at var(--mx) var(--my),var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude;
+  opacity:0;
+  transition:opacity .35s var(--ease)}
+.sv-flash-tilt:hover .sv-flash-face::before{opacity:1}
 .sv-flash-glow{position:absolute;inset:0;border-radius:20px;pointer-events:none;z-index:2;transition:background .2s var(--ease)}
 .sv-flash-q{font-family:var(--serif);font-size:21px;line-height:1.45}
 .sv-flash-hint{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
