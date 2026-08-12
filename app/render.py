@@ -7,6 +7,9 @@ a folder of documents:
     ![[picture.png]]        an embed, resolved to img/video/audio/file by extension
     ![[picture.png|400]]    an embed sized to 400px wide (or |50% of the column)
     ![[picture.png|caption|400]]   caption and size together
+    ![alt|400](url)         a plain markdown image sized the same way, so a
+                             note's own inline (non-attachment) images can be
+                             corner-dragged too, not just ![[embeds]]
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
@@ -92,6 +95,45 @@ _SIZE_RE = re.compile(r"^\d+%?$")
 # re.MULTILINE, which let two embeds separated by a *blank* line (two
 # newlines) pass this check and get grouped into a row by mistake.
 _ADJACENT_RE = re.compile(r"[ \t]*\n?[ \t]*")
+
+# Obsidian resizes a *standard* markdown image the same way it resizes its
+# own ![[embed]] syntax: a size tacked onto the end of the alt text with a
+# `|`, e.g. ![a photo|400](pic.png). Reusing that convention here means a
+# note dragged in from Obsidian already means the same thing, and one typed
+# by hand needs no new syntax to learn beyond what embeds already use.
+_INLINE_IMG_SIZE_RE = re.compile(r"^(.*)\|(\d+%?)$", re.S)
+
+
+def _split_inline_img_alt(alt: str) -> tuple[str, str | None]:
+    m = _INLINE_IMG_SIZE_RE.match(alt)
+    if not m:
+        return alt, None
+    return m.group(1), m.group(2)
+
+
+# Overrides markdown-it's own image rendering so a plain ![alt](url) --
+# unlike ![[embed]], which is caught and rendered before md.render() ever
+# runs -- can still carry a size and a stable index for the frontend's
+# corner-drag resize to target. data-img-index counts images in the order
+# markdown-it visits them, which for a single render() call is document
+# order; a callout's own nested md.render() call (see _callout_html) starts
+# its own count from 0, same scoping _embed_runs already uses per callout.
+def _inline_image_rule(tokens, idx, options, env):
+    token = tokens[idx]
+    raw_alt = md.renderer.renderInlineAsText(token.children, options, env) if token.children else ""
+    alt, size = _split_inline_img_alt(raw_alt)
+    token.attrSet("alt", alt)
+    token.attrSet("loading", "lazy")
+    i = env.get("_img_i", 0)
+    env["_img_i"] = i + 1
+    css_width = size if size and size.endswith("%") else f"{size}px" if size else None
+    style = f' style="width:{html.escape(css_width, quote=True)}"' if css_width else ""
+    sized = " sized" if size else ""
+    inner = md.renderer.renderToken(tokens, idx, options, env)
+    return f'<span class="inline-img{sized}" data-img-index="{i}"{style}>{inner}</span>'
+
+
+md.renderer.rules["image"] = _inline_image_rule
 
 
 def _split_embed_extra(raw: str | None) -> tuple[str | None, str | None]:

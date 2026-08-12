@@ -503,6 +503,7 @@ async function openNote(slug, push = true) {
   autoGrow($('#noteTitle'));
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
+  enhanceInlineImages();
   enhanceCodeBlocks();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
@@ -1403,7 +1404,9 @@ function insertAtCursor(ta, text) {
    for image width) rather than anywhere client-side, so it survives a
    reload and reads sanely if the note is ever opened outside Tephra.
    Mirrors app/render.py's own parsing so the Nth embed here is the Nth
-   embed there. ═══════════════════════════════════════ */
+   embed there. Below this, the same drag machinery (startResize/onResizeUp)
+   is shared with plain inline ![alt](url) images -- see setInlineImgWidth
+   and enhanceInlineImages further down. ═══════════════════════════════════════ */
 const EMBED_RE_G = /!\[\[\s*([^\]|]+?)\s*(?:\|([^\]]*))?\]\]/g;
 const EMBED_SIZE_RE = /^\d+%?$/;
 
@@ -1441,6 +1444,30 @@ function setEmbedCaption(body, index, caption) {
     if (caption) fields.push(caption);
     if (size) fields.push(size);
     return `![[${fields.join('|')}]]`;
+  });
+}
+
+/* A plain markdown ![alt](url) image -- not an ![[embed]] attachment, just a
+   picture inline in running text -- gets the same drag-to-resize treatment,
+   sized the same way Obsidian itself sizes a standard image link: a size
+   tacked onto the end of the alt text with a `|`. Mirrors app/render.py's
+   own _inline_image_rule so the Nth image here is the Nth image there. */
+const INLINE_IMG_RE_G = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g;
+const INLINE_IMG_SIZE_RE = /^(.*)\|(\d+%?)$/s;
+
+function splitInlineImgAlt(alt) {
+  const m = INLINE_IMG_SIZE_RE.exec(alt);
+  return m ? [m[1], m[2]] : [alt, null];
+}
+
+function setInlineImgWidth(body, index, widthPx) {
+  let i = -1;
+  return body.replace(INLINE_IMG_RE_G, (whole, alt, url, title) => {
+    i++;
+    if (i !== index) return whole;
+    const [baseAlt] = splitInlineImgAlt(alt);
+    const titlePart = title != null ? ` "${title}"` : '';
+    return `![${baseAlt}|${widthPx}](${url}${titlePart})`;
   });
 }
 
@@ -1530,6 +1557,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   state.note = note;
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
+  enhanceInlineImages();
   enhanceCodeBlocks();
 }
 
@@ -1634,6 +1662,27 @@ function dropSide(e, fig) {
   return (e.clientX - r.left) < r.width / 2 ? 'before' : 'after';
 }
 
+/* Corner handles for a plain inline ![alt](url) image -- just resize, none
+   of enhanceEmbeds()'s caption-edit or drag-to-reorder machinery, since a
+   word inline in a sentence doesn't have a position to reorder within a row. */
+function enhanceInlineImages() {
+  for (const fig of $('#noteBody').querySelectorAll('.inline-img')) {
+    const img = fig.querySelector('img');
+    if (img) {
+      img.draggable = false;
+      img.addEventListener('dragstart', (e) => e.preventDefault());
+    }
+    if (!fig.querySelector('.embed-handle')) {
+      for (const corner of ['nw', 'ne', 'sw', 'se']) {
+        const h = document.createElement('span');
+        h.className = `embed-handle ${corner}`;
+        h.addEventListener('mousedown', (e) => startResize(e, fig, corner, 'img'));
+        fig.appendChild(h);
+      }
+    }
+  }
+}
+
 /* ══ IMAGE CAPTION ═════════════════════════════════════
    Click the caption bar to edit it in place. Swaps in a real <input> rather
    than making the span contenteditable -- one less cross-browser paste/
@@ -1689,7 +1738,7 @@ let resizeState = null;
 // the #noteBody click handler below.
 let lastResizeAt = 0;
 
-function startResize(e, fig, corner) {
+function startResize(e, fig, corner, kind = 'embed') {
   e.preventDefault();
   e.stopPropagation();
   fig.classList.add('resizing', 'sized');
@@ -1697,7 +1746,7 @@ function startResize(e, fig, corner) {
   // which both looks wrong and can itself derail the drag in some browsers.
   document.body.classList.add('resize-live');
   resizeState = {
-    fig, corner, startX: e.clientX, slug: state.slug,
+    fig, corner, kind, startX: e.clientX, slug: state.slug,
     startW: fig.getBoundingClientRect().width,
     minW: 60,
     maxW: (fig.parentElement || fig).clientWidth || fig.getBoundingClientRect().width,
@@ -1724,7 +1773,7 @@ async function onResizeUp() {
   document.removeEventListener('mouseup', onResizeUp);
   document.body.classList.remove('resize-live');
   if (!resizeState) return;
-  const { fig, slug, startW, lastW } = resizeState;
+  const { fig, slug, startW, lastW, kind } = resizeState;
   resizeState = null;
   // The mouseup that ends a drag is always followed by a synthesized click,
   // wherever the pointer physically landed -- almost never still over the
@@ -1740,9 +1789,12 @@ async function onResizeUp() {
   // style just set, which is a needless thing to depend on when the value is
   // already in hand.
   const w = lastW ?? Math.round(startW);
-  const idx = Number(fig.dataset.embedIndex);
+  const dataKey = kind === 'img' ? 'imgIndex' : 'embedIndex';
+  const idx = Number(fig.dataset[dataKey]);
   if (Number.isNaN(idx)) return;
-  const newBody = setEmbedWidth(state.note.body, idx, w);
+  const newBody = kind === 'img'
+    ? setInlineImgWidth(state.note.body, idx, w)
+    : setEmbedWidth(state.note.body, idx, w);
   if (newBody === state.note.body) return;
   state.note.body = newBody;
   $('#noteSrc').value = newBody;

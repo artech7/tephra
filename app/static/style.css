@@ -522,6 +522,22 @@ body[data-wall="aurora"] .newnote:hover{
    can't select surrounding note text on the way. */
 .resize-live,.resize-live *{user-select:none!important;cursor:nwse-resize!important}
 
+/* a plain markdown ![alt](url) image, inline in running text rather than
+   its own attachment figure. display:inline-block (not the .embed figure's
+   block layout) so it keeps flowing with surrounding words; position:
+   relative so the corner handles below -- shared with .embed, injected by
+   the same enhanceInlineImages()/enhanceEmbeds() pattern in app.js -- have
+   something to anchor to. */
+.inline-img{position:relative;display:inline-block;max-width:100%;vertical-align:top;line-height:0}
+.inline-img img{display:block;max-width:100%;height:auto;max-height:60vh;-webkit-user-drag:none;user-select:none;border-radius:8px}
+/* Once corner-dragged to an explicit width, the height cap above would
+   fight the drag exactly like .body pre's old max-height fought its resize
+   handle -- an explicit size the user chose by hand should not be capped
+   by the unsized default. */
+.inline-img.sized img{width:100%;max-height:none}
+.inline-img:hover .embed-handle{opacity:1}
+.inline-img.resizing .embed-handle{opacity:1}
+
 .bookmark{margin:24px 0;display:flex;gap:14px;align-items:flex-start;padding:14px;border-radius:16px;cursor:pointer;transition:.28s var(--ease);text-decoration:none!important;color:inherit}
 .bookmark:hover{background:rgba(255,255,255,.11);transform:translateY(-2px);border-color:rgba(var(--apricot),.4)}
 .favicon{width:38px;height:38px;border-radius:11px;flex:none;background:linear-gradient(140deg,rgb(var(--apricot)),#C4563A);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#2A0F06;box-shadow:0 1px 0 rgba(255,255,255,.4) inset}
