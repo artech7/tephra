@@ -73,14 +73,48 @@ for (const partial of ['w', 'wi', 'wid', 'widg', 'widge', 'widget']) {
 }
 ck('the full word made it into the input, not just the first letter', findInput.value === 'widget', findInput.value);
 
-console.log('\n── it actually finds matches in the textarea\'s value ──');
+console.log('\n── it counts matches live, but does not jump to one yet (that would steal focus back) ──');
 findInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 await new Promise(r => setTimeout(r, 20));
-ck('found both occurrences of "widget"', doc.querySelector('#findCount').textContent === '1/2',
+ck('both occurrences of "widget" counted, none current yet', doc.querySelector('#findCount').textContent === '0/2',
    doc.querySelector('#findCount').textContent);
+ck('focus is still in the find box (typing was not interrupted)', doc.activeElement === findInput);
+ck('no selection made in the textarea yet',
+   doc.querySelector('#noteSrc').selectionStart === doc.querySelector('#noteSrc').selectionEnd);
+
+console.log('\n── Enter jumps to and actually highlights the first match ──');
+const ta = doc.querySelector('#noteSrc');
+findInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+await new Promise(r => setTimeout(r, 20));
+ck('now on match 1 of 2', doc.querySelector('#findCount').textContent === '1/2', doc.querySelector('#findCount').textContent);
+ck('the word is actually selected in the textarea', ta.value.slice(ta.selectionStart, ta.selectionEnd) === 'widget');
+ck('the selection is the FIRST occurrence', ta.selectionStart === noteBody.indexOf('widget'));
+ck('focus moved to the textarea so the highlight is visible (browsers only paint a focused textarea\'s selection)',
+   doc.activeElement === ta);
+
+console.log('\n── Enter again advances to the next match ──');
+findInput.focus();   // as if the user tabbed/clicked back to keep searching
+findInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+await new Promise(r => setTimeout(r, 20));
+ck('now on match 2 of 2', doc.querySelector('#findCount').textContent === '2/2', doc.querySelector('#findCount').textContent);
+ck('the selection is the SECOND occurrence', ta.selectionStart === noteBody.indexOf('widget', noteBody.indexOf('widget') + 1));
+
+console.log('\n── Shift+Enter steps backward ──');
+findInput.focus();
+findInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+await new Promise(r => setTimeout(r, 20));
+ck('back on match 1 of 2', doc.querySelector('#findCount').textContent === '1/2', doc.querySelector('#findCount').textContent);
+
+console.log('\n── the Next/Prev buttons do the same jump ──');
+doc.querySelector('#findNext').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await new Promise(r => setTimeout(r, 20));
+ck('Next moved to match 2 of 2', doc.querySelector('#findCount').textContent === '2/2', doc.querySelector('#findCount').textContent);
+doc.querySelector('#findPrev').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await new Promise(r => setTimeout(r, 20));
+ck('Prev moved back to match 1 of 2', doc.querySelector('#findCount').textContent === '1/2', doc.querySelector('#findCount').textContent);
 
 console.log('\n── Escape closes the bar and returns focus to the textarea, still editing ──');
-doc.querySelector('#findInput').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 await new Promise(r => setTimeout(r, 20));
 ck('find bar hidden again', doc.querySelector('#findBar').hidden === true);
 ck('focus back on the textarea', doc.activeElement === doc.querySelector('#noteSrc'));

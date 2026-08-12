@@ -1166,8 +1166,9 @@ $('#noteSrc').addEventListener('blur', (e) => {
    ⌘F/Ctrl+F is a browser feature, but the browser's own Find cannot see
    into a <textarea> at all -- while editing, the note's text lives in
    #noteSrc's value, not the DOM, so native Find silently finds nothing.
-   This searches that value directly and moves the textarea's own
-   selection to each hit. */
+   This searches that value directly. Typing updates the match count live;
+   Enter (or Prev/Next) is what actually jumps to and highlights a hit --
+   see jumpToMatch()'s own note for why those two can't be merged. */
 const F = { matches: [], i: -1 };
 
 function findMatches(term) {
@@ -1190,32 +1191,45 @@ function scrollTextareaTo(pos) {
   ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 2 + lineHeight);
 }
 
-function showMatch(i) {
+function updateCount() {
+  const n = F.matches.length;
+  $('#findCount').textContent = n ? `${F.i + 1}/${n}` : '0/0';
+  $('#findCount').classList.toggle('nomatch', !n && $('#findInput').value.length > 0);
+}
+
+// Actually jumps: focuses #noteSrc, selects the match, scrolls it into view.
+// Chrome (verified against a headless screenshot, not just assumed) paints a
+// textarea's selection *only* while it holds focus -- there is no dimmed
+// fallback for an unfocused one, so highlighting a hit and keeping typing
+// focus in #findInput are mutually exclusive. This is called from explicit
+// navigation only (Enter/Shift+Enter, the Prev/Next buttons), never from
+// #findInput's own 'input' handler -- calling it on every keystroke was the
+// previous bug: it kept yanking focus out of the find box mid-word.
+function jumpToMatch(i) {
   if (!F.matches.length) return;
   F.i = ((i % F.matches.length) + F.matches.length) % F.matches.length;
   const start = F.matches[F.i], term = $('#findInput').value;
   const ta = $('#noteSrc');
-  // Not ta.focus() -- this runs on every keystroke via runFind(), and
-  // focusing the textarea mid-word yanked input focus out of #findInput,
-  // so only the first letter of whatever was typed ever reached the find
-  // box. setSelectionRange works on an unfocused textarea just fine (the
-  // browser just renders the selection dimmed instead of solid); typing
-  // stays in #findInput until the user deliberately clicks or tabs away.
+  ta.focus();
   ta.setSelectionRange(start, start + term.length);
   scrollTextareaTo(start);
-  $('#findCount').textContent = `${F.i + 1}/${F.matches.length}`;
-  $('#findCount').classList.remove('nomatch');
+  updateCount();
+}
+
+// F.i === -1 means "matches exist but none has been jumped to yet" (fresh
+// off a keystroke). Next from there lands on the first match, Previous on
+// the last -- same as most find widgets when nothing is current yet.
+function step(delta) {
+  if (!F.matches.length) return;
+  jumpToMatch(F.i < 0 ? (delta > 0 ? 0 : -1) : F.i + delta);
 }
 
 function runFind() {
   const term = $('#findInput').value;
   findMatches(term);
-  const has = F.matches.length > 0;
-  $('#findPrev').disabled = $('#findNext').disabled = !has;
-  if (has) { showMatch(0); return; }
   F.i = -1;
-  $('#findCount').textContent = '0/0';
-  $('#findCount').classList.toggle('nomatch', term.length > 0);
+  $('#findPrev').disabled = $('#findNext').disabled = F.matches.length === 0;
+  updateCount();
 }
 
 function openFind() {
@@ -1236,11 +1250,11 @@ function closeFind(focusBack) {
 
 $('#findInput').addEventListener('input', runFind);
 $('#findInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); showMatch(F.i + (e.shiftKey ? -1 : 1)); }
+  if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
 });
-$('#findNext').onclick = () => showMatch(F.i + 1);
-$('#findPrev').onclick = () => showMatch(F.i - 1);
+$('#findNext').onclick = () => step(1);
+$('#findPrev').onclick = () => step(-1);
 $('#findClose').onclick = () => closeFind();
 
 /* ══ IMAGE LIGHTBOX ══════════════════════════════════════════ */
