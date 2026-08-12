@@ -416,6 +416,15 @@
         + (hidden ? ` · ${hidden} HIDDEN` : '');
     }
 
+    $('#graphview')?.classList.toggle('gv-statsmode', G.layout === 'stats');
+    if (G.layout === 'stats') {
+      stop();
+      G.sim = null;
+      G.bundles = null;
+      renderStats();
+      return;
+    }
+
     if (G.layout === 'tree') {
       G.sim = null;
       const { parent } = tidyTree(nodes, links);
@@ -432,6 +441,158 @@
       const again = nodes.find((d) => d.slug && d.slug === G.selected.slug);
       select(again || null, false);
     }
+  }
+
+  /* ── stats: a fourth "layout" that isn't a node-link drawing at all --
+     a vault-shape summary (from the graph data already in hand) plus a
+     Crucible study-progress summary (fetched on demand, the one thing this
+     view needs that the graph endpoint doesn't carry). Replaces the canvas
+     wholesale rather than drawing stat tiles onto it -- these are numbers to
+     read, not a spatial layout, and forcing them through the pan/zoom canvas
+     would buy nothing. */
+  let studyStatsCache = null;
+  async function studyStats() {
+    if (studyStatsCache) return studyStatsCache;
+    try { studyStatsCache = await window.tephraApi('/study'); }
+    catch { studyStatsCache = null; }
+    return studyStatsCache;
+  }
+
+  function statTile(value, label) {
+    const t = document.createElement('div');
+    t.className = 'gv-stat-tile';
+    t.innerHTML = '<b></b><span></span>';
+    t.querySelector('b').textContent = value;
+    t.querySelector('span').textContent = label;
+    return t;
+  }
+
+  function statBar(label, value, max, color) {
+    const row = document.createElement('div');
+    row.className = 'gv-stat-bar-row';
+    row.innerHTML = '<span class="gv-stat-bar-lbl"></span>'
+      + '<span class="gv-stat-bar-track"><span class="gv-stat-bar-fill"></span></span>'
+      + '<span class="gv-stat-bar-val"></span>';
+    row.querySelector('.gv-stat-bar-lbl').textContent = label;
+    row.querySelector('.gv-stat-bar-val').textContent = value;
+    const fill = row.querySelector('.gv-stat-bar-fill');
+    fill.style.width = `${max ? Math.max(4, (value / max) * 100) : 0}%`;
+    if (color) fill.style.background = `rgb(${color})`;
+    return row;
+  }
+
+  async function renderStats() {
+    const panel = $('#gvStatsPanel');
+    if (!panel) return;
+    panel.innerHTML = '';
+
+    // Vault shape ignores the Stubs/Leaves show-toggles -- those control
+    // what the canvas draws, not what the vault actually contains, and a
+    // stats view is exactly the place that should report the true totals.
+    const all = G.all.nodes || [];
+    const notes = all.filter((d) => d.kind !== 'stub');
+    const stubs = all.filter((d) => d.kind === 'stub');
+    const orphans = notes.filter((d) => !d.deg);
+    const byCat = new Map();
+    for (const d of notes) {
+      const c = d.category || 'Uncategorised';
+      byCat.set(c, (byCat.get(c) || 0) + 1);
+    }
+    const categories = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
+    const mostLinked = notes.filter((d) => d.deg).sort((a, b) => b.deg - a.deg).slice(0, 6);
+
+    const vault = document.createElement('section');
+    vault.className = 'gv-stat-section';
+    vault.innerHTML = '<h4>Vault</h4>';
+    const vaultTiles = document.createElement('div');
+    vaultTiles.className = 'gv-stat-tiles';
+    vaultTiles.append(
+      statTile(notes.length, 'Notes'),
+      statTile((G.all.links || []).length, 'Links'),
+      statTile(categories.length, 'Categories'),
+      statTile(stubs.length, 'Not written yet'),
+      statTile(orphans.length, 'Orphans'),
+    );
+    vault.appendChild(vaultTiles);
+
+    if (categories.length) {
+      const catHead = document.createElement('div');
+      catHead.className = 'gv-stat-subhead';
+      catHead.textContent = 'Categories';
+      vault.appendChild(catHead);
+      const catWrap = document.createElement('div');
+      catWrap.className = 'gv-stat-bars';
+      const maxCat = categories[0][1];
+      const cats = buildCategoryColors(notes);
+      for (const [cat, n] of categories) {
+        catWrap.appendChild(statBar(cat, n, maxCat, cats.get(cat) || '198,214,212'));
+      }
+      vault.appendChild(catWrap);
+    }
+
+    if (mostLinked.length) {
+      const listHead = document.createElement('div');
+      listHead.className = 'gv-stat-subhead';
+      listHead.textContent = 'Most linked';
+      vault.appendChild(listHead);
+      const list = document.createElement('div');
+      list.className = 'gv-p-list gv-stat-list';
+      for (const d of mostLinked) {
+        const row = document.createElement('button');
+        row.className = 'gv-p-row' + (d.kind === 'stub' ? ' stub' : '');
+        row.innerHTML = '<span class="gv-p-dot"></span><span class="gv-p-lbl"></span>'
+          + '<span class="gv-stat-list-n"></span>';
+        row.querySelector('.gv-p-lbl').textContent = d.label;
+        row.querySelector('.gv-stat-list-n').textContent = `${d.deg} link${d.deg === 1 ? '' : 's'}`;
+        row.onclick = () => { if (d.slug) openFromGraph(d.slug); };
+        list.appendChild(row);
+      }
+      vault.appendChild(list);
+    }
+    panel.appendChild(vault);
+
+    const cruc = document.createElement('section');
+    cruc.className = 'gv-stat-section';
+    cruc.innerHTML = '<h4>Crucible</h4>';
+    const study = await studyStats();
+    if (study) {
+      const t = study.totals || {}, p = study.progress || {};
+      const tiles = document.createElement('div');
+      tiles.className = 'gv-stat-tiles';
+      tiles.append(
+        statTile(t.topics ?? 0, 'Topics'),
+        statTile(t.questions ?? 0, 'Questions'),
+        statTile(t.needs_review ?? 0, 'Needs review'),
+        statTile(p.answered ?? 0, 'Answered'),
+        statTile(p.flagged ?? 0, 'Flagged'),
+      );
+      cruc.appendChild(tiles);
+
+      const answered = p.answered || 0, correct = p.correct || 0;
+      if (answered) {
+        const pct = Math.round((correct / answered) * 100);
+        const meter = document.createElement('div');
+        meter.className = 'gv-stat-meter';
+        meter.innerHTML = '<div class="gv-stat-meter-head"><span>Quiz accuracy</span><b></b></div>'
+          + '<span class="gv-stat-bar-track"><span class="gv-stat-bar-fill"></span></span>';
+        meter.querySelector('b').textContent = `${pct}% · ${correct}/${answered}`;
+        meter.querySelector('.gv-stat-bar-fill').style.width = `${pct}%`;
+        meter.style.marginTop = '18px';
+        cruc.appendChild(meter);
+      } else {
+        const hint = document.createElement('div');
+        hint.className = 'gv-hint';
+        hint.style.marginTop = '14px';
+        hint.textContent = 'No quiz answers yet.';
+        cruc.appendChild(hint);
+      }
+    } else {
+      const hint = document.createElement('div');
+      hint.className = 'gv-hint';
+      hint.textContent = 'Crucible study data unavailable.';
+      cruc.appendChild(hint);
+    }
+    panel.appendChild(cruc);
   }
 
   /* Frame the nodes, not the nominal world box. The layout only occupies part

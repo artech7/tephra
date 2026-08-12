@@ -135,6 +135,42 @@ await new Promise(r => setTimeout(r, 20));
 ck('leaves filter also reports hidden nodes',
    window.document.querySelector('#gvStats').textContent.includes('HIDDEN'));
 
+console.log('\n── stats layout: a vault-shape + Crucible summary, not a drawing ──');
+window.tephraApi = async (p) => {
+  if (p === '/graph') return JSON.parse(JSON.stringify(graph));
+  if (p === '/study') return {
+    totals: { topics: 7, questions: 20, needs_review: 2 },
+    progress: { answered: 10, correct: 8, flagged: 1 },
+  };
+  throw new Error('unexpected ' + p);
+};
+layout.value = 'stats'; layout.onchange({ target: layout });
+await new Promise(r => setTimeout(r, 20));
+ck('graphview marked in stats mode',
+   window.document.querySelector('#graphview').classList.contains('gv-statsmode'));
+const statsPanel = () => window.document.querySelector('#gvStatsPanel');
+ck('vault tile counts real notes, stubs excluded',
+   statsPanel().textContent.includes('Notes') &&
+   statsPanel().querySelector('.gv-stat-tile b').textContent === '4');
+ck('crucible totals came from /study, not /graph',
+   statsPanel().textContent.includes('7') && statsPanel().textContent.includes('Topics'));
+ck('quiz accuracy computed from progress (8/10)', statsPanel().textContent.includes('80%'));
+const mostLinkedRow = [...statsPanel().querySelectorAll('.gv-p-row')]
+  .find((r) => r.textContent.includes('FB Study Guide'));
+ck('most-linked list surfaces the highest-degree note', !!mostLinkedRow);
+
+layout.value = 'cluster'; layout.onchange({ target: layout });
+await new Promise(r => setTimeout(r, 20));
+ck('leaving stats clears the mode class',
+   !window.document.querySelector('#graphview').classList.contains('gv-statsmode'));
+
+opened = null;
+layout.value = 'stats'; layout.onchange({ target: layout });
+await new Promise(r => setTimeout(r, 20));
+[...statsPanel().querySelectorAll('.gv-p-row')]
+  .find((r) => r.textContent.includes('FB Study Guide')).onclick();
+ck('clicking a most-linked row opens the note', opened === 'fb-study-guide');
+
 console.log('\n── survives a missing 2d context (never assumes canvas) ──');
 ck('no crash with getContext() === null', true);
 
