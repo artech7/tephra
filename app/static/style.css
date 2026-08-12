@@ -207,7 +207,12 @@ body.resizing-sidebar{cursor:col-resize!important;user-select:none}
 /* The dot shifts opposite the row and by less -- foreground moving against
    background is what reads as parallax rather than just a nudge. */
 .node:hover .dot{transform:translateX(calc(var(--node-shift,0) * -3px))}
-.node[aria-current]{position:relative;background:rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;box-shadow:0 1px 0 var(--edge-hi) inset}
+/* Same small accent -> cruc-a -> cruc-b glow the ring gets on .sv-card and
+   #lens, scaled down for a sidebar row rather than a whole card -- tighter
+   blur radii so it stays a soft edge-light around the row, not a bloom
+   that reads as bleeding into its neighbors. */
+.node[aria-current]{position:relative;background:rgba(255,255,255,.11);color:var(--paper);border-color:var(--edge);font-weight:500;
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 0 10px -8px var(--accent),0 0 14px -9px var(--cruc-a),0 0 18px -10px var(--cruc-b)}
 /* Same Windows-11-Settings-style spotlight border as .sv-card and #lens --
    a radial-gradient clipped to just the border ring via a content-box/
    border-box mask XOR. Deliberately NOT mouse-driven like those two: the
@@ -703,9 +708,17 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
   --lmx:0;--lmy:0;
   transform:translateY(10px) scale(.94);
   transition:opacity .3s var(--ease),transform .42s var(--ease);transform-origin:top left}
+/* #lens's ID beats .pane's class regardless of source order, so this has
+   to repeat .pane's own box-shadow layers rather than just adding to them
+   -- otherwise turning .on on would silently drop the inset highlights and
+   the ambient drop shadow. The extra three layers are the same accent ->
+   cruc-a -> cruc-b glow .sv-card's holo ring gets, small and tight so it
+   reads as a soft edge-light, not a wash. */
 #lens.on{opacity:1;transform:translateY(0) scale(1) perspective(700px)
   rotateX(calc(var(--lmy) * -3deg)) rotateY(calc(var(--lmx) * 4deg))
-  translate(calc(var(--lmx) * 5px),calc(var(--lmy) * 4px))}
+  translate(calc(var(--lmx) * 5px),calc(var(--lmy) * 4px));
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 36px 76px -28px rgba(0,0,0,.85),
+    0 0 20px -13px var(--accent),0 0 28px -15px var(--cruc-a),0 0 36px -17px var(--cruc-b)}
 #lens::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
   background:radial-gradient(220px circle at calc(50% + var(--lmx) * 30%) calc(40% + var(--lmy) * 30%),rgba(255,255,255,.16),transparent 62%);
   opacity:0;transition:opacity .3s var(--ease)}
@@ -908,8 +921,15 @@ body.crucible #studyview{left:0;right:0;pointer-events:auto}
   backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   box-shadow:0 1px 0 var(--edge-hi) inset;transition:background .24s var(--ease),border-color .24s var(--ease),box-shadow .24s var(--ease),transform .3s ease-out;
   --mx:50%;--my:50%}
+/* Three tight, low-blur layers instead of one bigger one -- stacking the
+   same accent -> cruc-a -> cruc-b progression the ring itself uses is what
+   reads as "glowing the colors it's displaying" rather than just a generic
+   single-hue halo. Each layer's own negative spread keeps it hugging the
+   edge instead of blooming outward, so the whole thing stays a subtle warm
+   edge-light, not a wash. */
 .sv-card:hover{background:rgba(255,255,255,.10);border-color:rgba(var(--acc),.4);
-  box-shadow:0 1px 0 var(--edge-hi) inset,0 0 30px -14px var(--accent)}
+  box-shadow:0 1px 0 var(--edge-hi) inset,
+    0 0 20px -13px var(--accent),0 0 28px -15px var(--cruc-a),0 0 36px -17px var(--cruc-b)}
 /* Windows-11-Settings-style spotlight border, not a filled sheen -- two
    attempts at filling the whole card face (a conic rainbow, then a moving
    diagonal band) both read as a wash/streak across the content instead of
