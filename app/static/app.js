@@ -503,6 +503,7 @@ async function openNote(slug, push = true) {
   autoGrow($('#noteTitle'));
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
+  enhanceCodeBlocks();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
   $('#noteBody').hidden = false;
@@ -1129,6 +1130,7 @@ async function setEditing(on) {
     state.note = note;
     $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
     enhanceEmbeds();
+    enhanceCodeBlocks();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
@@ -1528,6 +1530,20 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   state.note = note;
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
   enhanceEmbeds();
+  enhanceCodeBlocks();
+}
+
+// The default cap on a rendered code block's height (see .body pre in
+// style.css for why this is set here as an inline height rather than as
+// CSS max-height: that property would also cap the resize drag itself,
+// and the point is a short default that a 1000-line paste still gets, not
+// a hard ceiling on how far the block can be pulled open afterward.
+const CODE_BLOCK_CAP = 200;
+
+function enhanceCodeBlocks() {
+  for (const pre of $('#noteBody').querySelectorAll('pre')) {
+    if (!pre.style.height && pre.scrollHeight > CODE_BLOCK_CAP) pre.style.height = CODE_BLOCK_CAP + 'px';
+  }
 }
 
 /* Handles are injected client-side rather than rendered server-side: they

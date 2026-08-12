@@ -78,8 +78,11 @@ const ov = rulesFor(preEl, 'overflow').pop();
 ck('scrolls both axes, not just horizontally', ov && ov.value === 'auto', ov?.value);
 ck('has a default min size (the resize drag floor too)',
    !!rulesFor(preEl, 'min-height').pop(), rulesFor(preEl, 'min-height').pop()?.value);
-ck('has a default cap so it does not grow unbounded on its own',
-   !!rulesFor(preEl, 'max-height').pop(), rulesFor(preEl, 'max-height').pop()?.value);
+// The default cap is applied client-side (enhanceCodeBlocks() in app.js) as
+// an inline height, deliberately not here: max-height would also be the
+// resize drag's own ceiling, capping how far a block can be pulled open.
+ck('does NOT set max-height -- that would cap the resize drag too',
+   !rulesFor(preEl, 'max-height').pop(), rulesFor(preEl, 'max-height').pop()?.value);
 doc.body.removeChild(bodyEl);
 
 console.log('\n── the body mark is gone, not blank ──');
