@@ -20,9 +20,9 @@
      glass mistake of several things tracking the cursor independently.
      Also writes --mx/--my (reusing the same cx/cy already computed here
      rather than adding a second mousemove listener that would just fight
-     this one over style.transform) for .sv-flash-face's own spotlight-
-     border pseudo-element in style.css -- the same Windows-11-style holo
-     border effect .sv-card and #lens use, driven by wireFoil there. */
+     this one over style.transform) for tiltEl's own spotlight-border
+     pseudo-element in style.css -- the same Windows-11-style holo border
+     effect .sv-card and #lens use, driven by wireFoil there. */
   function wireTilt(tiltEl, glowEl) {
     tiltEl.addEventListener('mousemove', (e) => {
       const b = tiltEl.getBoundingClientRect();
