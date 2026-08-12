@@ -950,31 +950,17 @@ input.sv-select{cursor:text}
    read as one object rotating instead of a content swap. */
 .sv-flash-tilt{position:relative;border-radius:20px;cursor:pointer;perspective:1200px;
   box-shadow:0 1px 0 var(--edge-hi) inset,0 10px 30px -14px rgba(0,0,0,.6);
-  transition:transform .3s ease-out,box-shadow .3s ease-out;
-  --mx:50%;--my:50%}
+  transition:transform .3s ease-out,box-shadow .3s ease-out}
 .sv-flash-tilt:hover{transition-duration:.15s;box-shadow:0 1px 0 var(--edge-hi) inset,0 22px 50px -18px rgba(0,0,0,.7)}
-/* Same Windows-11-Settings-style spotlight border as .sv-card and #lens --
-   a radial-gradient clipped to just the border ring via a content-box/
-   border-box mask XOR, positioned at --mx/--my (updated by wireTilt in
-   study.js, extended to also track this element's own mousemove for the
-   flip's tilt/glow rather than adding a second competing listener).
-   Deliberately on .sv-flash-tilt -- the static wrapper -- rather than on
-   each .sv-flash-face: a masked pseudo-element living *inside* a
-   backface-visibility:hidden face that's mid-rotateY is exactly the kind
-   of thing Chrome's compositor can get wrong, showing a stale layer of
-   the wrong face as a "ghost" during the flip. Putting it on an element
-   that never rotates sidesteps the whole interaction -- one continuous
-   ring around the card regardless of which face is showing, not two
-   separate ones that would have to hand off mid-turn anyway. */
-.sv-flash-tilt::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:2;pointer-events:none;
-  padding:1.5px;
-  background:radial-gradient(240px circle at var(--mx) var(--my),var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
-  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
-  -webkit-mask-composite:xor;
-          mask-composite:exclude;
-  opacity:0;
-  transition:opacity .35s var(--ease)}
-.sv-flash-tilt:hover::before{opacity:1}
+/* No spotlight-border holo effect here (unlike .sv-card/#lens) -- it was
+   tried twice, on each rotating .sv-flash-face and then on this static
+   wrapper, and both produced a real, reported bug: a masked pseudo-element
+   near this element's own perspective/3D-transform context rendered as a
+   solid translucent block instead of just its ring (the mask evidently not
+   applying the same way it does on .sv-card, which sits in a flat, non-3D
+   context) -- a second, non-flipping "card" sitting behind the real one.
+   Not worth a third attempt at a decorative effect that keeps breaking the
+   one thing a flashcard has to get right: looking like one card. */
 .sv-flash-flip{position:relative;width:100%;transform-style:preserve-3d;
   transition:transform .6s cubic-bezier(.4,.15,.2,1),height .4s var(--ease)}
 .sv-flash-flip.flipped{transform:rotateY(180deg)}

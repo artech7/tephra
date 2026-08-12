@@ -18,11 +18,10 @@
      scoped to this one element's own mousemove/mouseleave -- never a
      viewport-wide pointer listener, so it can't repeat the old dynamic-
      glass mistake of several things tracking the cursor independently.
-     Also writes --mx/--my (reusing the same cx/cy already computed here
-     rather than adding a second mousemove listener that would just fight
-     this one over style.transform) for tiltEl's own spotlight-border
-     pseudo-element in style.css -- the same Windows-11-style holo border
-     effect .sv-card and #lens use, driven by wireFoil there.
+     No --mx/--my spotlight-border pseudo-element here (unlike .sv-card):
+     tried it twice and both attempts rendered as a second, non-flipping
+     "card" in some browsers -- see the note in style.css by where it used
+     to live.
 
      isBusy, if given, is checked before touching tiltEl's own transform --
      the flip (a rotateY on the *child* .sv-flash-flip) and this tilt (a
@@ -30,10 +29,9 @@
      never meant to compose. Leaving the last hover-driven tilt applied
      while a flip is also mid-transition combines them into a lopsided
      compound rotation that, through perspective, renders as what looks
-     like two overlapping card-shaped planes crossing each other -- the
-     "ghost" double-card this guards against. --mx/--my and the glow are
-     unaffected either way since neither is a 3D transform, so the border
-     and specular highlight can keep tracking the pointer through a flip. */
+     like two overlapping card-shaped planes crossing each other. The glow
+     is unaffected either way since it's not a 3D transform, so the
+     specular highlight can keep tracking the pointer through a flip. */
   function wireTilt(tiltEl, glowEl, isBusy) {
     tiltEl.addEventListener('mousemove', (e) => {
       const b = tiltEl.getBoundingClientRect();
@@ -47,14 +45,10 @@
       }
       glowEl.style.background = `radial-gradient(circle at ${cx * 1.3 + b.width / 2}px `
         + `${cy * 1.3 + b.height / 2}px, rgba(255,255,255,.18), transparent 60%)`;
-      tiltEl.style.setProperty('--mx', ((cx + b.width / 2) / b.width * 100).toFixed(1) + '%');
-      tiltEl.style.setProperty('--my', ((cy + b.height / 2) / b.height * 100).toFixed(1) + '%');
     });
     tiltEl.addEventListener('mouseleave', () => {
       tiltEl.style.transform = '';
       glowEl.style.background = '';
-      tiltEl.style.setProperty('--mx', '50%');
-      tiltEl.style.setProperty('--my', '50%');
     });
   }
 
