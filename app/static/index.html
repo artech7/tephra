@@ -44,6 +44,7 @@
     <div class="segmented">
       <button aria-pressed="true" data-view="write">Write</button>
       <button aria-pressed="false" data-view="graph">Graph</button>
+      <button aria-pressed="false" data-view="stats">Stats</button>
       <button aria-pressed="false" data-view="links">Links<span class="tabbadge" id="linksBadge" hidden></span></button>
     </div>
     <button class="sv-import" id="svImport"
@@ -180,7 +181,6 @@
         <select id="gvLayout" title="Layout">
           <option value="cluster">Clustered</option>
           <option value="tree">Tidy tree</option>
-          <option value="stats">Stats</option>
         </select>
         <button class="gv-tool wide" id="gvStubs" data-on title="Show notes that don't exist yet">Stubs</button>
         <button class="gv-tool wide" id="gvLeaves" data-on title="Show notes with only one link">Leaves</button>
@@ -193,7 +193,6 @@
       </div>
       <canvas id="graph"></canvas>
       <aside id="gvPanel"><div class="gv-hint">Click a node to see what it connects to.</div></aside>
-      <div id="gvStatsPanel"></div>
       <div class="gv-legend">
         <div class="gv-cats" id="gvCatLegend"></div>
         <span class="gv-legend-hint">drag to pan · scroll to zoom · double-click to open</span>

@@ -20,9 +20,9 @@ ck('it has its own icon', !!doc.querySelector('#crucibleBtn i.cruc-mark'));
 ck('it has its own name', doc.querySelector('#crucibleBtn').textContent.trim() === 'Crucible');
 ck('styled as a sibling wordmark', doc.querySelector('#crucibleBtn').classList.contains('mark'));
 // The segmented control holds the canvas modes. Crucible is an overlay with
-// its own wordmark; Links is a canvas mode and belongs here.
-ck('segmented holds the canvas modes',
-   [...doc.querySelectorAll('.segmented button')].map(b => b.dataset.view).join('/') === 'write/graph/links',
+// its own wordmark; Links and Stats are canvas modes and belong here.
+ck('segmented holds the canvas modes, Stats between Graph and Links',
+   [...doc.querySelectorAll('.segmented button')].map(b => b.dataset.view).join('/') === 'write/graph/stats/links',
    [...doc.querySelectorAll('.segmented button')].map(b => b.dataset.view).join('/'));
 ck('no stray Study button left behind',
    ![...doc.querySelectorAll('.segmented button')].some(b => b.dataset.view === 'study'));
@@ -31,6 +31,8 @@ ck('no stray Study button left behind',
 const studyState = { open: false };
 window.tephraStudy = { open: async () => { studyState.open = true; }, close: () => { studyState.open = false; }, isOpen: () => studyState.open, refresh: async () => {} };
 window.tephraGraph = { open: async () => {}, close: () => {}, isOpen: () => false, select: () => {} };
+const statsState = { open: false };
+window.tephraStats = { open: async () => { statsState.open = true; }, close: () => { statsState.open = false; }, isOpen: () => statsState.open };
 window.__tephraGraphInternals = { createSim: () => ({ running: () => false, tick() {}, nodes: [] }), W: 1000, H: 700 };
 const notes = [{ slug: 'a', title: 'A', tags: [], updated: new Date().toISOString(), backlinks: 0 }];
 window.fetch = async (u, o = {}) => {
@@ -93,6 +95,18 @@ console.log('\n── the ⌥D shortcut still works ──');
 window.dispatchEvent(Object.assign(new window.Event('keydown'), { key: 'd', altKey: true, metaKey: false, ctrlKey: false, preventDefault(){} }));
 await new Promise(r => setTimeout(r, 20));
 ck('⌥D toggles Crucible', studyState.open === true);
+doc.querySelector('#tephraBtn').onclick();
+await new Promise(r => setTimeout(r, 20));
+
+console.log('\n── Stats is a tab like Graph and Links, not nested inside Graph ──');
+doc.querySelector('[data-view="stats"]').onclick();
+await new Promise(r => setTimeout(r, 20));
+ck('Stats opens', statsState.open === true);
+ck('Stats button shows pressed', pressed('[data-view="stats"]') === 'true');
+ck('leaves Graph', pressed('[data-view="graph"]') === 'false');
+doc.querySelector('[data-view="write"]').onclick();
+await new Promise(r => setTimeout(r, 20));
+ck('leaving Stats closes it', statsState.open === false);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

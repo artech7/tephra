@@ -368,9 +368,17 @@
     }
   }
 
+  // Just the fetch, shared by the canvas view's load() below and by Stats
+  // (now its own top-level view, not nested in the canvas) -- Stats never
+  // needs a simulation rebuilt or a node selected, so it uses this directly
+  // rather than paying for load()'s canvas side effects on every category move.
+  async function loadGraphData() {
+    G.all = await window.tephraApi('/graph');
+  }
+
   async function load() {
     G.userMoved = false;
-    G.all = await window.tephraApi('/graph');
+    await loadGraphData();
     rebuild();
     // keep the current note selected so opening the graph has a focal point
     const cur = G.raw.nodes.find((d) => d.slug === window.tephraCurrentSlug?.());
@@ -414,15 +422,6 @@
       const hidden = all.length - nodes.length;
       s.textContent = `${nodes.length} NOTES · ${links.length} LINKS`
         + (hidden ? ` · ${hidden} HIDDEN` : '');
-    }
-
-    $('#graphview')?.classList.toggle('gv-statsmode', G.layout === 'stats');
-    if (G.layout === 'stats') {
-      stop();
-      G.sim = null;
-      G.bundles = null;
-      renderStats();
-      return;
     }
 
     if (G.layout === 'tree') {
@@ -520,7 +519,8 @@
       handle.notes = handle.notes.filter((n) => n.slug !== slug);
       handle.selected.delete(slug);
       studyStatsCache = null;
-      await load(); // refreshes vault-wide category counts for when the user goes back
+      await loadGraphData(); // refreshes vault-wide category counts for when the user goes back
+      renderStats();
     } catch {
       window.tephraToast?.('Could not move that note.');
       renderStats();
@@ -537,7 +537,7 @@
         : `Cleared the category on ${n} note${plural}`);
       handle.selected.clear();
       studyStatsCache = null;
-      await load();
+      await loadGraphData();
       if (statsDetail === handle) loadCategoryDetail(handle);
     } catch {
       window.tephraToast?.('Could not move those notes.');
@@ -1235,4 +1235,38 @@
   }
 
   window.tephraGraph = { open, close, isOpen: () => G.open, select };
+
+  /* ── Stats: its own top-level view now, a tab beside Write/Graph/Links
+     rather than a mode buried in the Graph layout dropdown -- most of what
+     it shows (category breakdown, most-linked) has nothing to do with the
+     canvas, so it shouldn't require opening the graph to reach. Built and
+     mounted the same way links.js builds #linksview: static markup only
+     for #graphview, which predates this pattern. Stays in this file because
+     it shares loadGraphData(), buildCategoryColors(), and openFromGraph()
+     with the canvas view rather than duplicating them. */
+  const statsView = document.createElement('div');
+  statsView.id = 'statsview';
+  statsView.innerHTML = '<div class="stv-head"><h3>Stats</h3></div><div id="gvStatsPanel"></div>';
+
+  function mountStats() {
+    if (statsView.parentElement) return;
+    (document.querySelector('#sideTephra') || document.body).appendChild(statsView);
+  }
+
+  const ST = { open: false };
+
+  async function statsOpen() {
+    mountStats();
+    ST.open = true;
+    statsView.classList.add('on');
+    statsDetail = null; // always land on the overview, not wherever it was left
+    await loadGraphData();
+    await renderStats();
+  }
+  function statsClose() {
+    ST.open = false;
+    statsView.classList.remove('on');
+  }
+
+  window.tephraStats = { open: statsOpen, close: statsClose, isOpen: () => ST.open };
 })();

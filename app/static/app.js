@@ -1941,6 +1941,8 @@ function setView(v) {
   gv.classList.toggle('on', v === 'graph');
   if (v === 'graph') window.tephraGraph.open();
   else window.tephraGraph?.close();
+  if (v === 'stats') window.tephraStats?.open();
+  else window.tephraStats?.close();
   if (v === 'links') window.tephraLinks?.open();
   else window.tephraLinks?.close();
 }
