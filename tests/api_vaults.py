@@ -14,6 +14,7 @@ B = f"{ROOT}/vault-b"
 from fastapi.testclient import TestClient
 from app.main import app
 from app import importers as I
+from app import vault as V
 
 ok = fail = 0
 def ck(l, c, x=""):
@@ -246,6 +247,9 @@ with TestClient(app) as c:
     f = c.get("/api/study/formats").json()
     ck("advertises what it accepts", set(f["accepted"]) == set(I.ACCEPTED))
     ck("every advertised format has an example", all(x["example"] for x in f["formats"]))
+    ck("media kinds match vault.MEDIA_KINDS, not a hand-copied list",
+       f["media"]["kinds"] == {k: sorted(exts) for k, exts in V.MEDIA_KINDS.items()}, f["media"]["kinds"])
+    ck("max upload size is reported in MB", f["media"]["max_mb"] > 0, f["media"]["max_mb"])
     for fmt in f["formats"]:
         if fmt["id"] == "markdown": continue
         try:

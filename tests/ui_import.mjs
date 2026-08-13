@@ -46,7 +46,7 @@ window.tephraApi = async (path, opts = {}) => {
   if (path === '/study/formats') {
     return { accepted: ['.json', '.py'], formats: [
       { id: 'json', label: 'JSON', extensions: ['.json'], summary: 'Portable.', example: '{"topics":[]}' },
-    ] };
+    ], media: { kinds: { image: ['.png', '.jpg'], video: ['.mp4'], audio: ['.mp3'] }, max_mb: 200 } };
   }
   if (path === '/vault/create') {
     if (failCreate) throw new Error('{"detail":"a vault already exists at that path"}');
@@ -124,6 +124,14 @@ document.querySelector('#svFormatsBtn').click();
 await tick(20);
 ck('drawer opens on click', document.querySelector('#svFormats').classList.contains('on'));
 ck('fetched the format list', calls.some((c) => c.path === '/study/formats'));
+const fmtSections = () => [...document.querySelectorAll('#svFormatsBody .th-l span')].map((n) => n.textContent);
+ck('shows all three sections', JSON.stringify(fmtSections())
+   === JSON.stringify(['Media attachments', 'Study guide import', 'Markdown syntax']), fmtSections());
+const fmtHeadings = () => [...document.querySelectorAll('#svFormatsBody .sv-fmt-h')].map((n) => n.textContent);
+ck('media limits block is present', fmtHeadings().some((h) => h.includes('image button')), fmtHeadings());
+ck('the mocked JSON import format still renders', fmtHeadings().some((h) => h.startsWith('JSON —')), fmtHeadings());
+ck('markdown syntax reference is included, e.g. wikilinks', fmtHeadings().includes('Wikilinks'), fmtHeadings());
+ck('...and the new Sources section syntax', fmtHeadings().includes('Sources section'), fmtHeadings());
 document.querySelector('#svFormatsClose').click();
 
 console.log('\n── clicking the header button opens the CONFIRM MODAL, not a file dialog ──');

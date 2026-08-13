@@ -975,7 +975,18 @@ def vault_create(payload: VaultIn, _admin: None = Depends(require_admin)):
 
 @app.get("/api/study/formats")
 def study_formats():
-    return {"accepted": importers.ACCEPTED, "formats": importers.FORMATS}
+    """Backs the "Formatting & Uploads" drawer -- study-guide import formats
+    plus the media-attachment limits, read straight from the constants that
+    actually enforce them (vault.MEDIA_KINDS, MAX_UPLOAD) so this can't drift
+    from what /api/media actually accepts."""
+    return {
+        "accepted": importers.ACCEPTED,
+        "formats": importers.FORMATS,
+        "media": {
+            "kinds": {k: sorted(exts) for k, exts in vault.MEDIA_KINDS.items()},
+            "max_mb": MAX_UPLOAD // (1024 * 1024),
+        },
+    }
 
 
 @app.get("/api/vault/info")

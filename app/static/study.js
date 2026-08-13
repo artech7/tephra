@@ -200,6 +200,35 @@
     });
   }
 
+  /* Reference for every non-obvious markdown syntax Tephra renders specially
+     -- kept here as static content, unlike the import `formats` list below,
+     because nothing else in the app consumes these as data; they only ever
+     exist to be read. See render.py's own module docstring and study.py's
+     quiz grammar, which this transcribes rather than duplicates the logic
+     of. Ordered roughly by how often each comes up. */
+  const MARKDOWN_SYNTAX = [
+    { h: 'Wikilinks', ex: '[[Note Title]]\n[[Note Title|shown text]]',
+      s: 'Links to another note by title. Renders orange if the note doesn’t exist yet -- click it to create the note.' },
+    { h: 'Embeds', ex: '![[diagram.png]]\n![[diagram.png|400]]\n![[diagram.png|A caption|400]]',
+      s: 'Attach an image, video, audio, or any other file by name -- type resolved by extension, anything else becomes a downloadable chip. Add a size (px or %) and/or a caption after a `|`. Two embeds on adjacent lines, no blank line between, lay out side by side instead of stacked.' },
+    { h: 'Resizable inline images', ex: '![a photo|400](https://example.com/photo.jpg)',
+      s: 'An ordinary markdown image, sized the same way as an embed -- so a pasted-in (non-attachment) image can still be corner-dragged to resize.' },
+    { h: 'Bookmark cards', ex: 'https://example.com/some/article',
+      s: 'A bare URL alone on its own line becomes a clickable bookmark card. No syntax needed -- pasting a link is the most common thing anyone does in a notes app.' },
+    { h: 'Callouts', ex: '> [!WARNING] Read this first\n> Body text. More `>` lines belong to the same callout.',
+      s: 'A blockquote whose first line is `[!TYPE]`, optionally with a custom title after it. GitHub’s and Obsidian’s syntax (they agree), recognised the same way here. NOTE/TIP/WARNING/DANGER and a wide synonym list (info, hint, danger, question, ...) all map onto four visual styles.' },
+    { h: 'Tables', ex: '| Left | Right |\n| --- | --- |\n| a | b |',
+      s: 'Standard GitHub-flavoured markdown tables.' },
+    { h: 'Code blocks', ex: '```python\ndef hello():\n    return "hi"\n```',
+      s: 'Fenced code, with an optional language after the opening ` ``` `. Renders in a scrollable, resizable box.' },
+    { h: 'Quiz section', ex: '## Quiz\n\nQ: Which protocol resolves names to addresses?\n- [x] DNS\n- ARP\nWhy: DNS maps hostnames to IP addresses.',
+      s: 'A `## Quiz` heading turns the rest of the note into flashcard/quiz data instead of prose -- also editable as a form in the Quiz panel below the note. Mark correct options with `[x]`; more than one marked option makes it a multiple-answer question. Always the last section in a note.' },
+    { h: 'Sources section', ex: '## Sources\n- [RFC 3720](https://www.rfc-editor.org/rfc/rfc3720)\n- https://example.com/whitepaper.pdf',
+      s: 'A `## Sources` heading collects a bullet list of citations into its own panel instead of the note body. `- [Title](url)`, or a bare/embedded URL, stays clickable; anything else shows as plain text. `-`, `*` and `+` all work as the bullet marker. Put it before `## Quiz` if a note has both -- Quiz still claims everything after itself.' },
+    { h: 'Frontmatter', ex: '---\ntitle: RAID levels\ncategory: Storage\nstudy: true\n---',
+      s: 'An optional metadata block at the very top of a note. Title and tags are normally set from the UI; `category` and `study: true` are what put a note into Crucible. Only worth hand-editing when pasting a note in from outside the app.' },
+  ];
+
   /* A right-edge slide-in drawer, same mechanic as the Appearance and Vault
      Health drawers (#theme / #health in app.js) -- reachable from the header
      button no matter what's showing in the body below (empty state, browse
@@ -210,26 +239,50 @@
   const formatsDrawer = el('aside');
   formatsDrawer.id = 'svFormats';
   formatsDrawer.innerHTML = `
-    <div class="th-head"><h4>What can I upload?</h4><button class="mini" id="svFormatsClose">×</button></div>
+    <div class="th-head"><h4>Formatting &amp; Uploads</h4><button class="mini" id="svFormatsClose">×</button></div>
     <div class="th-body" id="svFormatsBody"><div class="sv-formats-load">Loading…</div></div>`;
   document.body.appendChild(formatsDrawer);
+
+  function fmtBlock(h, s, ex) {
+    const blk = el('div', 'sv-fmt');
+    blk.appendChild(el('div', 'sv-fmt-h', h));
+    blk.appendChild(el('div', 'sv-fmt-s', s));
+    const pre = el('pre');
+    pre.textContent = ex;
+    blk.appendChild(pre);
+    return blk;
+  }
+  function sectionLabel(text) {
+    const l = el('div', 'th-l');
+    l.appendChild(el('span', null, text));
+    return l;
+  }
+
   let formatsLoaded = false;
   async function openFormats() {
     formatsDrawer.classList.add('on');
     if (formatsLoaded) return;
     const body = $('#svFormatsBody');
     try {
-      const { formats } = await api('/study/formats');
+      const { formats, media } = await api('/study/formats');
       formatsLoaded = true;
       body.innerHTML = '';
+
+      body.appendChild(sectionLabel('Media attachments'));
+      const kindList = Object.entries(media.kinds)
+        .map(([kind, exts]) => `${kind}: ${exts.join(' ')}`).join('  ·  ');
+      body.appendChild(fmtBlock('Drag a file into a note, or the image button',
+        `Images, video and audio render inline; anything else becomes a downloadable chip. `
+        + `Up to ${media.max_mb} MB per file.`, kindList));
+
+      body.appendChild(sectionLabel('Study guide import'));
       for (const f of formats) {
-        const blk = el('div', 'sv-fmt');
-        blk.appendChild(el('div', 'sv-fmt-h', `${f.label} — ${f.extensions.join(' ')}`));
-        blk.appendChild(el('div', 'sv-fmt-s', f.summary));
-        const pre = el('pre');
-        pre.textContent = f.example;
-        blk.appendChild(pre);
-        body.appendChild(blk);
+        body.appendChild(fmtBlock(`${f.label} — ${f.extensions.join(' ')}`, f.summary, f.example));
+      }
+
+      body.appendChild(sectionLabel('Markdown syntax'));
+      for (const m of MARKDOWN_SYNTAX) {
+        body.appendChild(fmtBlock(m.h, m.s, m.ex));
       }
     } catch { body.textContent = 'Could not load the format list.'; }
   }
