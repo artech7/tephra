@@ -2104,6 +2104,32 @@ $('#newNote').onclick = async () => {
   });
 })();
 
+/* ══ CONTEXT PANEL HIDE/SHOW ═════════════════════════════════
+   Backlinks/media/local-graph, toggled in and out rather than resized --
+   the handle straddles the editor/context border (see .ctx-toggle in
+   style.css) so it stays reachable at the same spot collapsed or not. */
+(() => {
+  const STORE_KEY = 'tephra:contextHidden';
+  const WIDTH = '320px';
+  const btn = $('#ctxToggle');
+  const panel = $('#contextPanel');
+  function apply(hidden) {
+    panel.classList.toggle('collapsed', hidden);
+    document.documentElement.style.setProperty('--context-w', hidden ? '0px' : WIDTH);
+    btn.title = hidden ? 'Show backlinks, media & graph' : 'Hide backlinks, media & graph';
+  }
+  apply(localStorage.getItem(STORE_KEY) === '1');
+  btn.onclick = () => {
+    const hidden = !panel.classList.contains('collapsed');
+    apply(hidden);
+    localStorage.setItem(STORE_KEY, hidden ? '1' : '0');
+    // The mini graph's canvas keeps whatever it last painted while hidden
+    // (display:none doesn't erase it) -- redraw once shown again so it
+    // isn't stuck sized for whatever the viewport was before it was hidden.
+    if (!hidden) drawMini();
+  };
+})();
+
 /* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
 $('#themeBtn').onclick = () => {
   const on = $('#theme').classList.toggle('on');
