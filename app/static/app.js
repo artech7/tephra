@@ -2113,6 +2113,7 @@ $('#newNote').onclick = async () => {
   const WIDTH = '320px';
   const btn = $('#ctxToggle');
   const panel = $('#contextPanel');
+  const row = document.querySelector('.row');
   function apply(hidden) {
     panel.classList.toggle('collapsed', hidden);
     document.documentElement.style.setProperty('--context-w', hidden ? '0px' : WIDTH);
@@ -2126,7 +2127,20 @@ $('#newNote').onclick = async () => {
     // The mini graph's canvas keeps whatever it last painted while hidden
     // (display:none doesn't erase it) -- redraw once shown again so it
     // isn't stuck sized for whatever the viewport was before it was hidden.
-    if (!hidden) drawMini();
+    // Waiting for .row's own grid-template-columns transition to actually
+    // finish, not firing this the instant the button is clicked, matters:
+    // the panel is still animating from 0 toward 320px at that point, so an
+    // immediate redraw sizes the canvas to whatever sliver of that it had
+    // reached in that first instant -- not the final width -- and nothing
+    // else ever repaints it afterward.
+    if (!hidden) {
+      const onEnd = (e) => {
+        if (e.target !== row || e.propertyName !== 'grid-template-columns') return;
+        row.removeEventListener('transitionend', onEnd);
+        drawMini();
+      };
+      row.addEventListener('transitionend', onEnd);
+    }
   };
 })();
 

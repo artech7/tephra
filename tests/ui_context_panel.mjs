@@ -71,6 +71,21 @@ console.log('\n── clicking it hides the panel and remembers that ──');
   ck('grid track restored', doc.documentElement.style.getPropertyValue('--context-w') === '320px');
   ck('tooltip back to offering to hide it', btn.title.toLowerCase().includes('hide'));
   ck('persisted the un-hide too', window.localStorage.getItem('tephra:contextHidden') === '0');
+
+  console.log('\n── the mini graph redraws once the panel\'s own width transition actually finishes ──');
+  // jsdom never runs real CSS transitions, so this stands in for the browser
+  // completing .row's grid-template-columns animation -- what matters here is
+  // that the deferred redraw path (app.js's transitionend listener) doesn't
+  // throw, since that's exactly the kind of bug a fully-mocked #mini/#graph
+  // canvas (see boot()) would otherwise hide completely.
+  let threw = null;
+  const row = doc.querySelector('.row');
+  try {
+    const ev = new window.Event('transitionend', { bubbles: true });
+    ev.propertyName = 'grid-template-columns';   // Event has no such field; TransitionEvent isn't in jsdom
+    row.dispatchEvent(ev);
+  } catch (e) { threw = e; }
+  ck('deferred redraw on transition end does not throw', threw === null, threw);
 }
 
 console.log('\n── reopening the app with it hidden keeps it hidden ──');

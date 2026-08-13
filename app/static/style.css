@@ -610,12 +610,29 @@ body[data-wall="aurora"] .newnote:hover{
    now-zero-width parent. */
 .context.collapsed{overflow:visible}
 .context.collapsed .ctx-scroll{display:none}
+/* Same ambient Windows-11-Settings-style holo ring + accent/cruc-a/cruc-b
+   glow as .node[aria-current] -- the drift-animated version, not the
+   mouse-tracked one on .sv-card/#lens: this handle is meant to read as
+   "alive" and findable at a glance, not lit only while the cursor happens
+   to be right on it. */
 .ctx-toggle{position:absolute;top:14px;left:-13px;width:26px;height:26px;border-radius:50%;
   background:rgba(0,0,0,.4);border:1px solid var(--edge);color:var(--muted);cursor:pointer;
   display:flex;align-items:center;justify-content:center;z-index:4;
-  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:.2s var(--ease)}
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  box-shadow:0 0 10px -8px var(--accent),0 0 14px -9px var(--cruc-a),0 0 18px -10px var(--cruc-b);
+  transition:.2s var(--ease)}
 .ctx-toggle:hover{color:#fff;border-color:rgba(var(--acc),.45);background:rgba(var(--acc),.2)}
-.ctx-toggle svg{width:12px;height:12px;transition:transform .3s var(--ease)}
+.ctx-toggle::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:0;pointer-events:none;
+  padding:1.5px;
+  background-image:radial-gradient(circle,var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  background-size:220% 220%;
+  background-position:20% 30%;
+  animation:node-holo-drift 6s ease-in-out infinite alternate;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude}
+@media (prefers-reduced-motion: reduce){.ctx-toggle::before{animation:none;background-position:50% 50%}}
+.ctx-toggle svg{position:relative;z-index:1;width:12px;height:12px;transition:transform .3s var(--ease)}
 .context.collapsed .ctx-toggle svg{transform:rotate(180deg)}
 .orbit{height:186px;border-radius:16px;position:relative;overflow:hidden;cursor:pointer}
 .orbit canvas{width:100%;height:100%;display:block}
