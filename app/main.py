@@ -4,15 +4,17 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import auth
 from . import dedupe
 from . import guide_import
 from . import importers
@@ -166,6 +168,111 @@ def resolver():
     return lambda title: tmap.get(title.strip().lower())
 
 
+# ── admin lock ───────────────────────────────────────────────────────────
+# Off by default: with no admin password ever set, require_admin() is a
+# no-op and the app behaves exactly as it always has (every existing
+# deployment, every test, the disposable dev vault). Setting a password is
+# what turns the lock on, so nothing already running is affected by this
+# existing at all.
+
+ADMIN_COOKIE = "tephra_admin"
+
+# A login endpoint is the one place this app now takes a secret over the
+# network, so it gets a light in-process throttle -- a handful of guesses
+# per minute per source IP, reset on success. Plain dict, no persistence:
+# this is a nuisance brake against casual guessing, not a security boundary
+# on its own (the real boundary is PBKDF2 + the password itself).
+_login_attempts: dict[str, list[float]] = {}
+_LOGIN_WINDOW = 60
+_LOGIN_MAX = 8
+
+
+def _login_throttled(ip: str) -> bool:
+    now = time.time()
+    hits = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW]
+    _login_attempts[ip] = hits
+    return len(hits) >= _LOGIN_MAX
+
+
+def _record_login_attempt(ip: str) -> None:
+    _login_attempts.setdefault(ip, []).append(time.time())
+
+
+def require_admin(request: Request) -> None:
+    admin = cfg.get_admin()
+    if not admin:
+        return
+    token = request.cookies.get(ADMIN_COOKIE)
+    if not token or not auth.verify_session_token(token, admin["secret"], admin["hash"]):
+        raise HTTPException(401, "locked -- unlock with the admin password to edit")
+
+
+class AdminLoginIn(BaseModel):
+    password: str
+
+
+class AdminPasswordIn(BaseModel):
+    password: str
+    current_password: str | None = None
+
+
+@app.get("/api/admin/status")
+def admin_status(request: Request):
+    admin = cfg.get_admin()
+    token = request.cookies.get(ADMIN_COOKIE)
+    unlocked = bool(admin) and bool(token) \
+        and auth.verify_session_token(token, admin["secret"], admin["hash"])
+    return {"configured": bool(admin), "unlocked": unlocked}
+
+
+@app.post("/api/admin/login")
+def admin_login(payload: AdminLoginIn, request: Request, response: Response):
+    admin = cfg.get_admin()
+    if not admin:
+        raise HTTPException(400, "no admin password has been set yet")
+    ip = request.client.host if request.client else "unknown"
+    if _login_throttled(ip):
+        raise HTTPException(429, "too many attempts -- wait a minute and try again")
+    if not auth.verify_password(payload.password, admin["salt"], admin["hash"]):
+        _record_login_attempt(ip)
+        raise HTTPException(401, "wrong password")
+    token = auth.make_session_token(admin["secret"], admin["hash"])
+    response.set_cookie(ADMIN_COOKIE, token, max_age=auth.SESSION_MAX_AGE,
+                        httponly=True, samesite="lax")
+    return {"ok": True}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(response: Response):
+    response.delete_cookie(ADMIN_COOKIE)
+    return {"ok": True}
+
+
+@app.post("/api/admin/password")
+def admin_set_password(payload: AdminPasswordIn, request: Request, response: Response):
+    """Sets the password for the first time with no current_password needed;
+    changing it afterward needs either an unlocked session or the current
+    password, so an attacker who is not already in cannot just set a new one
+    over the old admin's head."""
+    if len(payload.password) < 8:
+        raise HTTPException(400, "password must be at least 8 characters")
+    admin = cfg.get_admin()
+    if admin:
+        token = request.cookies.get(ADMIN_COOKIE)
+        already_in = bool(token) and auth.verify_session_token(token, admin["secret"], admin["hash"])
+        if not already_in:
+            if not payload.current_password or not auth.verify_password(
+                    payload.current_password, admin["salt"], admin["hash"]):
+                raise HTTPException(401, "current password required to change it")
+    salt, digest = auth.hash_password(payload.password)
+    cfg.set_admin_password(salt, digest)
+    admin = cfg.get_admin()
+    token = auth.make_session_token(admin["secret"], admin["hash"])
+    response.set_cookie(ADMIN_COOKIE, token, max_age=auth.SESSION_MAX_AGE,
+                        httponly=True, samesite="lax")
+    return {"ok": True}
+
+
 class NoteIn(BaseModel):
     title: str | None = None
     body: str | None = None
@@ -295,7 +402,7 @@ def get_note(slug: str):
 
 
 @app.post("/api/notes/category/bulk")
-def notes_bulk_category(payload: BulkCategoryIn):
+def notes_bulk_category(payload: BulkCategoryIn, _admin: None = Depends(require_admin)):
     """Reassign several notes' category in one pass -- the classifier only
     needs re-fitting once at the end, not once per note. An empty `category`
     clears every selected note back to Uncategorised."""
@@ -327,7 +434,7 @@ def notes_bulk_category(payload: BulkCategoryIn):
 
 
 @app.post("/api/notes")
-def create_note(payload: NoteIn):
+def create_note(payload: NoteIn, _admin: None = Depends(require_admin)):
     title = (payload.title or "Untitled").strip() or "Untitled"
     note = vault.Note(slug=vault.unique_slug(title), title=title,
                       body=payload.body or "", tags=payload.tags or [])
@@ -348,7 +455,7 @@ def _apply_tags(note: vault.Note, tags: list[str]) -> None:
 
 
 @app.put("/api/notes/{slug}")
-def save_note(slug: str, payload: NoteIn):
+def save_note(slug: str, payload: NoteIn, _admin: None = Depends(require_admin)):
     """The autosave endpoint. Called on a debounce while typing, so it has to
     be cheap and it has to be safe to call with a partial payload."""
     note = vault.read(slug)
@@ -391,7 +498,7 @@ class QuizIn(BaseModel):
 
 
 @app.put("/api/notes/{slug}/quiz")
-def save_quiz(slug: str, payload: QuizIn):
+def save_quiz(slug: str, payload: QuizIn, _admin: None = Depends(require_admin)):
     """The quiz editor's save path -- parallel to save_note's free-text one,
     for whoever would rather fill in a form than write `Q:`/`- [x]`/`Why:`
     by hand. Either way the only thing on disk is the same markdown: this
@@ -417,7 +524,7 @@ def save_quiz(slug: str, payload: QuizIn):
 
 
 @app.delete("/api/notes/{slug}")
-def delete_note(slug: str):
+def delete_note(slug: str, _admin: None = Depends(require_admin)):
     if not vault.delete(slug):
         raise HTTPException(404, "note not found")
     idx.drop_note(db(), slug)
@@ -425,7 +532,7 @@ def delete_note(slug: str):
 
 
 @app.post("/api/notes/{slug}/favorite")
-def toggle_favorite(slug: str):
+def toggle_favorite(slug: str, _admin: None = Depends(require_admin)):
     note = vault.read(slug)
     if not note:
         raise HTTPException(404, "note not found")
@@ -438,7 +545,7 @@ def toggle_favorite(slug: str):
 
 
 @app.post("/api/notes/{slug}/resolve")
-def resolve_stub(slug: str, payload: NoteIn):
+def resolve_stub(slug: str, payload: NoteIn, _admin: None = Depends(require_admin)):
     """Clicking an amber link: create the missing note it points at."""
     title = (payload.title or "").strip()
     if not title:
@@ -456,7 +563,7 @@ def resolve_stub(slug: str, payload: NoteIn):
 # ── media ──────────────────────────────────────────────────────────────────
 
 @app.post("/api/media")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), _admin: None = Depends(require_admin)):
     data = await file.read()
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, f"file over {MAX_UPLOAD // 1024 // 1024} MB limit")
@@ -475,7 +582,7 @@ def media():
 
 
 @app.delete("/api/media/{name}")
-def delete_media(name: str):
+def delete_media(name: str, _admin: None = Depends(require_admin)):
     p = (vault.MEDIA / name).resolve()
     if not str(p).startswith(str(vault.MEDIA.resolve())) or not p.is_file():
         raise HTTPException(404, "no such file")
@@ -519,13 +626,13 @@ class DismissIn(BaseModel):
 
 
 @app.post("/api/suggestions/dismiss")
-def dismiss_suggestion(payload: DismissIn):
+def dismiss_suggestion(payload: DismissIn, _admin: None = Depends(require_admin)):
     idx.dismiss_term(payload.term, payload.note)
     return {"ok": True, "term": payload.term}
 
 
 @app.post("/api/suggestions/restore")
-def restore_suggestion(payload: DismissIn):
+def restore_suggestion(payload: DismissIn, _admin: None = Depends(require_admin)):
     idx.restore_term(payload.term)
     return {"ok": True, "term": payload.term}
 
@@ -537,7 +644,7 @@ def dismissed_suggestions():
 
 
 @app.post("/api/suggestions/apply")
-def apply_suggestion(payload: SuggestIn):
+def apply_suggestion(payload: SuggestIn, _admin: None = Depends(require_admin)):
     # idx.apply_suggestion() already rebuilds once up front and then
     # incrementally reindexes every note it touches, so the index is fully
     # consistent by the time it returns -- a second full rebuild here was
@@ -577,7 +684,7 @@ def last_repair():
 
 
 @app.post("/api/repair")
-def repair(dry_run: bool = False):
+def repair(dry_run: bool = False, _admin: None = Depends(require_admin)):
     """Fix nested links, links inside quiz blocks, and empty link husks.
 
     `dry_run=true` reports what would change and writes nothing. It previously
@@ -591,7 +698,7 @@ def repair(dry_run: bool = False):
 
 
 @app.post("/api/study/import/reconcile")
-def reconcile_study_indexes(dry_run: bool = False):
+def reconcile_study_indexes(dry_run: bool = False, _admin: None = Depends(require_admin)):
     """Drop dead [[links]] from importer-owned category index notes -- the
     "Part of [[Guide]]" line and topic bullet list an import writes.
     Neither is pruned by the import itself when a topic or a whole guide's
@@ -606,7 +713,7 @@ def reconcile_study_indexes(dry_run: bool = False):
 
 
 @app.post("/api/reindex")
-def reindex():
+def reindex(_admin: None = Depends(require_admin)):
     return {"notes": idx.rebuild(db())}
 
 
@@ -737,7 +844,7 @@ class ForgetIn(BaseModel):
 
 
 @app.post("/api/vault/forget")
-def vault_forget(payload: ForgetIn):
+def vault_forget(payload: ForgetIn, _admin: None = Depends(require_admin)):
     """Drop a vault from the recents list. The folder on disk is never
     touched -- this only forgets it until it is opened again.
 
@@ -784,7 +891,7 @@ class RenameIn(BaseModel):
 
 
 @app.post("/api/vault/rename")
-def vault_rename(payload: RenameIn):
+def vault_rename(payload: RenameIn, _admin: None = Depends(require_admin)):
     """Rename the folder the current vault lives in.
 
     Renaming it in Finder works too — a vault is only ever a folder — but the
@@ -855,12 +962,12 @@ def vault_rename(payload: RenameIn):
 
 
 @app.post("/api/vault/open")
-def vault_open(payload: VaultIn):
+def vault_open(payload: VaultIn, _admin: None = Depends(require_admin)):
     return _open_vault(payload.path, create=False)
 
 
 @app.post("/api/vault/create")
-def vault_create(payload: VaultIn):
+def vault_create(payload: VaultIn, _admin: None = Depends(require_admin)):
     return _open_vault(payload.path, create=True)
 
 
@@ -886,7 +993,7 @@ def vault_info():
 
 @app.post("/api/study/import")
 async def study_import(file: UploadFile = File(...), dry_run: bool = False,
-                        title: str | None = Form(None)):
+                        title: str | None = Form(None), _admin: None = Depends(require_admin)):
     """Import a standalone study guide into *this* vault.
 
     Takes the uploaded guide file, parses it as data, writes the notes, and
@@ -922,7 +1029,7 @@ class StudyImportPathIn(BaseModel):
 
 
 @app.post("/api/study/import/path")
-def study_import_path(payload: StudyImportPathIn):
+def study_import_path(payload: StudyImportPathIn, _admin: None = Depends(require_admin)):
     """Import a study guide straight off disk, images and all.
 
     Only meaningful when the server and the browser share a filesystem --
@@ -996,7 +1103,7 @@ def _run_import_job(job_id: str, source: str, dry_run: bool, filename: str,
 
 @app.post("/api/study/import/upload")
 async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool = False,
-                               title: str | None = Form(None)):
+                               title: str | None = Form(None), _admin: None = Depends(require_admin)):
     """Import a guide plus its images from files the browser itself read --
     a folder or a plain multi-file pick, or files dragged in -- and never
     asks the server to resolve a path at all. This is the one that works no
@@ -1095,7 +1202,7 @@ def study_item(slug: str):
 
 
 @app.post("/api/study/{slug}/enable")
-def study_enable(slug: str, payload: StudyIn):
+def study_enable(slug: str, payload: StudyIn, _admin: None = Depends(require_admin)):
     """The 'turn into study guide item' action.
 
     Classifies immediately so the note lands in a category without a second
@@ -1132,7 +1239,7 @@ def study_enable(slug: str, payload: StudyIn):
 
 
 @app.post("/api/study/{slug}/disable")
-def study_disable(slug: str):
+def study_disable(slug: str, _admin: None = Depends(require_admin)):
     note = vault.read(slug)
     if not note:
         raise HTTPException(404, "note not found")
@@ -1144,7 +1251,7 @@ def study_disable(slug: str):
 
 
 @app.post("/api/study/{slug}/category")
-def study_set_category(slug: str, payload: StudyIn):
+def study_set_category(slug: str, payload: StudyIn, _admin: None = Depends(require_admin)):
     """Manual override. Marked `manual` so it is never re-guessed, and it
     joins the training set — correcting one item shifts every similar one.
 
@@ -1182,7 +1289,7 @@ def study_set_category(slug: str, payload: StudyIn):
 
 
 @app.post("/api/study/{slug}/revert")
-def study_revert(slug: str, payload: StudyIn):
+def study_revert(slug: str, payload: StudyIn, _admin: None = Depends(require_admin)):
     """Move a note back to where it was.
 
     Restores the *source* it had then, not just the label. That matters: a
@@ -1235,7 +1342,7 @@ def study_suggest_category(slug: str):
 
 
 @app.post("/api/study/reclassify")
-def study_reclassify():
+def study_reclassify(_admin: None = Depends(require_admin)):
     """Re-run every auto-labelled item against the current training set.
     Manual and imported labels are left alone."""
     items = st.all_items()
@@ -1307,7 +1414,7 @@ def study_prefs(payload: PrefsIn):
 
 
 @app.post("/api/study/progress/reset")
-def study_reset():
+def study_reset(_admin: None = Depends(require_admin)):
     st.save_progress({"answers": {}, "flagged": []})
     return {"ok": True}
 

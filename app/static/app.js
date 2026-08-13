@@ -12,6 +12,17 @@ const api = async (path, opts = {}) => {
     headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
     ...opts,
   });
+  // A locked write lands here from every call site at once -- the editor's
+  // own guards (setEditing, #noteTitle readOnly) keep this from firing on
+  // the common paths, but anything not explicitly guarded (palette
+  // create-note, a stray script) still gets a clear reason and a way to fix
+  // it, instead of a silent rejection nobody sees. /admin/login's own 401
+  // (wrong password) is not "locked" in this sense -- its own form reports
+  // that -- so it's excluded here.
+  if (res.status === 401 && !path.startsWith('/admin/')) {
+    toast('Locked — enter the admin password to edit', 4000);
+    window.tephraOpenAdmin?.(true);
+  }
   if (!res.ok) throw new Error((await res.text()) || res.status);
   return res.status === 204 ? null : res.json();
 };
@@ -762,7 +773,7 @@ function renderDeleteButton() {
   host.innerHTML = '';
   let armed = false, timer = null;
   const b = document.createElement('button');
-  b.className = 'chipbtn danger';
+  b.className = 'chipbtn danger admin-only';
   b.textContent = 'Delete';
   b.title = 'Move this note to the vault trash';
   const disarm = () => {
@@ -1113,6 +1124,14 @@ addEventListener('beforeunload', (e) => { if (state.dirty) { flush(); e.preventD
 /* ══ EDIT MODE ═══════════════════════════════════════════════ */
 async function setEditing(on) {
   if (on === state.editing) return;
+  // The one choke point every entry into edit mode passes through
+  // (dblclick, drag-drop attach, the command palette's create-note, graph
+  // panel's "edit"), so locking it here covers all of them at once rather
+  // than guarding each call site.
+  if (on && ADMIN.configured && !ADMIN.unlocked) {
+    toast('Locked — click 🔒 to unlock and edit');
+    return;
+  }
   state.editing = on;
   $('#noteSrc').hidden = !on;
   $('#noteBody').hidden = on;
@@ -1400,6 +1419,7 @@ const editor = $('#editor');
 }));
 editor.addEventListener('drop', async (e) => {
   e.preventDefault();
+  if (ADMIN.configured && !ADMIN.unlocked) { toast('Locked — click 🔒 to unlock and edit'); return; }
   const files = [...(e.dataTransfer?.files || [])];
   if (!files.length) return;
   await setEditing(true);
@@ -2080,14 +2100,118 @@ $('#newNote').onclick = async () => {
 /* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
 $('#themeBtn').onclick = () => {
   const on = $('#theme').classList.toggle('on');
-  if (on) { $('#health').classList.remove('on'); vaultsEl().classList.remove('on'); }
+  if (on) { $('#health').classList.remove('on'); vaultsEl().classList.remove('on'); $('#admin').classList.remove('on'); }
 };
 $('#themeClose').onclick = () => $('#theme').classList.remove('on');
 $('#healthBtn').onclick = () => {
   const on = $('#health').classList.toggle('on');
-  if (on) { $('#theme').classList.remove('on'); vaultsEl().classList.remove('on'); }
+  if (on) { $('#theme').classList.remove('on'); vaultsEl().classList.remove('on'); $('#admin').classList.remove('on'); }
 };
 $('#healthClose').onclick = () => $('#health').classList.remove('on');
+
+/* ══ ADMIN LOCK ═══════════════════════════════════════════════
+   Off until a password is set -- ADMIN.configured stays false and every
+   mutating request keeps working exactly as it always has (require_admin
+   in main.py is a no-op with nothing configured). Once set, notes are
+   read-only in any browser that hasn't entered the password; this object
+   only tracks and reflects that, the server enforces it for real. */
+const ADMIN = { configured: false, unlocked: true };
+
+function applyLockUI() {
+  const locked = ADMIN.configured && !ADMIN.unlocked;
+  R.classList.toggle('locked', locked);
+  const btn = $('#lockBtn');
+  btn.dataset.state = !ADMIN.configured ? 'open' : ADMIN.unlocked ? 'unlocked' : 'locked';
+  btn.title = !ADMIN.configured ? 'Admin — set a password to lock editing'
+    : ADMIN.unlocked ? 'Unlocked — click to lock editing'
+    : 'Locked — click to unlock and edit';
+  $('#lockShackle').setAttribute('d', locked ? 'M8 11V9a4 4 0 018 0v2' : 'M8 11V7a4 4 0 018 0v4');
+  $('#noteTitle').readOnly = locked;
+  if (locked && state.editing) setEditing(false);
+}
+
+function showAdminPane() {
+  $('#adminSetup').hidden = ADMIN.configured;
+  $('#adminLocked').hidden = !ADMIN.configured || ADMIN.unlocked;
+  $('#adminUnlocked').hidden = !ADMIN.configured || !ADMIN.unlocked;
+  for (const id of ['adminNewPw', 'adminNewPw2', 'adminUnlockPw', 'adminChgPw']) $('#' + id).value = '';
+  for (const id of ['adminSetupMsg', 'adminUnlockMsg', 'adminChangeMsg']) $('#' + id).textContent = '';
+}
+
+// Called by api() the moment any request comes back 401 -- the one place a
+// locked write can be discovered from, no matter which button triggered it.
+window.tephraOpenAdmin = (focus = false) => {
+  $('#theme').classList.remove('on');
+  $('#health').classList.remove('on');
+  vaultsEl().classList.remove('on');
+  $('#admin').classList.add('on');
+  showAdminPane();
+  if (focus) (ADMIN.configured ? $('#adminUnlockPw') : $('#adminNewPw')).focus();
+};
+
+$('#lockBtn').onclick = () => {
+  if ($('#admin').classList.contains('on')) { $('#admin').classList.remove('on'); return; }
+  window.tephraOpenAdmin();
+};
+$('#adminClose').onclick = () => $('#admin').classList.remove('on');
+
+$('#adminSetupBtn').onclick = async () => {
+  const pw = $('#adminNewPw').value, pw2 = $('#adminNewPw2').value;
+  const msg = $('#adminSetupMsg');
+  if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; return; }
+  if (pw !== pw2) { msg.textContent = 'Passwords do not match.'; return; }
+  try {
+    await api('/admin/password', { method: 'POST', body: JSON.stringify({ password: pw }) });
+    ADMIN.configured = true; ADMIN.unlocked = true;
+    applyLockUI();
+    toast('Admin password set — notes are locked for everyone else');
+    $('#admin').classList.remove('on');
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    msg.textContent = detail;
+  }
+};
+
+$('#adminUnlockBtn').onclick = async () => {
+  const msg = $('#adminUnlockMsg');
+  try {
+    await api('/admin/login', { method: 'POST', body: JSON.stringify({ password: $('#adminUnlockPw').value }) });
+    ADMIN.unlocked = true;
+    applyLockUI();
+    toast('Unlocked — you can edit');
+    $('#admin').classList.remove('on');
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    msg.textContent = detail;
+  }
+};
+$('#adminUnlockPw').onkeydown = (e) => { if (e.key === 'Enter') $('#adminUnlockBtn').click(); };
+
+$('#adminLockNowBtn').onclick = async () => {
+  await api('/admin/logout', { method: 'POST' });
+  ADMIN.unlocked = false;
+  applyLockUI();
+  showAdminPane();
+  toast('Locked');
+};
+
+$('#adminChangeBtn').onclick = async () => {
+  const msg = $('#adminChangeMsg');
+  const pw = $('#adminChgPw').value;
+  if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; return; }
+  try {
+    await api('/admin/password', { method: 'POST', body: JSON.stringify({ password: pw }) });
+    $('#adminChgPw').value = '';
+    msg.textContent = '';
+    toast('Admin password changed');
+  } catch (e) {
+    let detail = String((e && e.message) || e);
+    try { detail = JSON.parse(detail).detail || detail; } catch {}
+    msg.textContent = detail;
+  }
+};
 document.querySelectorAll('.wallopt[data-wall]').forEach((o) => (o.onclick = () => {
   const patch = { wall: o.dataset.wall };
   if (T.auto && o.dataset.acc) patch.acc = o.dataset.acc;
@@ -2267,6 +2391,7 @@ $('#vaultBtn').onclick = () => {
   vaultsEl().classList.toggle('on');
   $('#theme').classList.remove('on');
   $('#health').classList.remove('on');
+  $('#admin').classList.remove('on');
   if (vaultsEl().classList.contains('on')) showVaultHome();
 };
 $('#vaultClose').onclick = () => vaultsEl().classList.remove('on');
@@ -2667,6 +2792,12 @@ addEventListener('hashchange', () => {
 });
 
 (async function boot() {
+  try {
+    const s = await api('/admin/status');
+    ADMIN.configured = s.configured;
+    ADMIN.unlocked = s.unlocked;
+  } catch {}
+  applyLockUI();
   try { T = { ...DEFAULTS, ...(await api('/theme')) }; } catch {}
   state.sort = SORTS[T.note_sort] ? T.note_sort : 'updated';
   state.tag = T.note_tag || '';

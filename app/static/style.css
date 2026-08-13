@@ -648,6 +648,31 @@ body[data-wall="aurora"] .newnote:hover{
 #svFormats.on{transform:translateX(0)}
 #svFormats .th-body{display:flex;flex-direction:column;gap:14px}
 
+/* ══ ADMIN DRAWER ═════════════════════════════════════════════
+   Same right-edge slide-in as the other three -- set/unlock/change the
+   admin password that gates every note-mutating request (see main.py's
+   require_admin). */
+#admin{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:320px;border-radius:var(--radius);
+  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
+  border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 46px 100px -34px rgba(0,0,0,.85);
+  transform:translateX(calc(100% + var(--inset) + 14px));
+  transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
+#admin.on{transform:translateX(0)}
+
+/* ── lock icon in the topbar: three states -- open (no password ever set,
+   neutral), locked (password set, this browser not unlocked, warm accent),
+   unlocked (this browser has a valid session, cool accent) ── */
+#lockBtn[data-state="locked"]{color:#FFC9C9;border-color:rgba(255,120,120,.4)}
+#lockBtn[data-state="locked"]:hover{background:rgba(255,120,120,.14)}
+#lockBtn[data-state="unlocked"]{color:#fff;background:rgba(var(--acc),.22);border-color:rgba(var(--acc),.5)}
+
+/* ── read-only enforcement: every control that mutates vault content gets
+   this class (added in app.js/graph.js/links.js/study.js where each is
+   built), and this one rule dims and disables all of them at once the
+   moment html.locked is set -- new controls picked up automatically,
+   nothing per-render to wire up. ── */
+html.locked .admin-only{opacity:.4;pointer-events:none;filter:saturate(.6)}
+
 .th-head{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
 .th-head h4{font-size:15px;font-weight:600;letter-spacing:-.02em}
 .th-body{overflow-y:auto;padding:4px 18px 20px}

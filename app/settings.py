@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -96,3 +97,21 @@ def forget_vault(path: str | Path) -> dict:
 def default_vault() -> Path:
     docs = Path.home() / "Documents"
     return (docs if docs.is_dir() else Path.home()) / APP_NAME
+
+
+def get_admin() -> dict | None:
+    """{"salt", "hash", "secret"} once an admin password has been set, else
+    None -- absence means the app stays fully open, matching the no-auth
+    behaviour every existing deployment already has."""
+    return load().get("admin")
+
+
+def set_admin_password(salt_hex: str, hash_hex: str) -> dict:
+    """The session-signing secret is generated once and kept stable across
+    password changes -- the password hash is folded into every session
+    token's signature (see auth.py), so rotating the password still
+    invalidates old sessions without a second secret to roll."""
+    c = load()
+    secret = (c.get("admin") or {}).get("secret") or secrets.token_hex(32)
+    c["admin"] = {"salt": salt_hex, "hash": hash_hex, "secret": secret}
+    return save(c)
