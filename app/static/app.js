@@ -2134,7 +2134,7 @@ function showAdminPane() {
   $('#adminSetup').hidden = ADMIN.configured;
   $('#adminLocked').hidden = !ADMIN.configured || ADMIN.unlocked;
   $('#adminUnlocked').hidden = !ADMIN.configured || !ADMIN.unlocked;
-  for (const id of ['adminNewPw', 'adminNewPw2', 'adminUnlockPw', 'adminChgPw']) $('#' + id).value = '';
+  for (const id of ['adminNewPw', 'adminNewPw2', 'adminUnlockPw', 'adminChgCurPw', 'adminChgPw']) $('#' + id).value = '';
   for (const id of ['adminSetupMsg', 'adminUnlockMsg', 'adminChangeMsg']) $('#' + id).textContent = '';
 }
 
@@ -2199,10 +2199,13 @@ $('#adminLockNowBtn').onclick = async () => {
 
 $('#adminChangeBtn').onclick = async () => {
   const msg = $('#adminChangeMsg');
+  const curPw = $('#adminChgCurPw').value;
   const pw = $('#adminChgPw').value;
+  if (!curPw) { msg.textContent = 'Enter your current password.'; return; }
   if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; return; }
   try {
-    await api('/admin/password', { method: 'POST', body: JSON.stringify({ password: pw }) });
+    await api('/admin/password', { method: 'POST', body: JSON.stringify({ password: pw, current_password: curPw }) });
+    $('#adminChgCurPw').value = '';
     $('#adminChgPw').value = '';
     msg.textContent = '';
     toast('Admin password changed');

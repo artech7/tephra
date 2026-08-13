@@ -249,21 +249,19 @@ def admin_logout(response: Response):
 
 
 @app.post("/api/admin/password")
-def admin_set_password(payload: AdminPasswordIn, request: Request, response: Response):
-    """Sets the password for the first time with no current_password needed;
-    changing it afterward needs either an unlocked session or the current
-    password, so an attacker who is not already in cannot just set a new one
-    over the old admin's head."""
+def admin_set_password(payload: AdminPasswordIn, response: Response):
+    """Sets the password for the first time with no current_password needed --
+    there's nothing yet to prove knowledge of. Changing it afterward always
+    needs current_password, even from an already-unlocked session: a browser
+    left unlocked and unattended must not be enough on its own to lock the
+    real admin out with a new password."""
     if len(payload.password) < 8:
         raise HTTPException(400, "password must be at least 8 characters")
     admin = cfg.get_admin()
     if admin:
-        token = request.cookies.get(ADMIN_COOKIE)
-        already_in = bool(token) and auth.verify_session_token(token, admin["secret"], admin["hash"])
-        if not already_in:
-            if not payload.current_password or not auth.verify_password(
-                    payload.current_password, admin["salt"], admin["hash"]):
-                raise HTTPException(401, "current password required to change it")
+        if not payload.current_password or not auth.verify_password(
+                payload.current_password, admin["salt"], admin["hash"]):
+            raise HTTPException(401, "current password required to change it")
     salt, digest = auth.hash_password(payload.password)
     cfg.set_admin_password(salt, digest)
     admin = cfg.get_admin()

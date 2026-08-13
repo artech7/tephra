@@ -37,8 +37,10 @@ window.fetch = async (u, o = {}) => {
   }
   if (p.includes('/api/admin/logout') && method === 'POST') { sessionValid = false; return jres({ ok: true }); }
   if (p.includes('/api/admin/password') && method === 'POST') {
-    const { password } = JSON.parse(o.body);
+    const { password, current_password } = JSON.parse(o.body);
     if (password.length < 8) return jres({ detail: 'password must be at least 8 characters' }, 400);
+    if (backend.configured && current_password !== backend.password)
+      return jres({ detail: 'current password required to change it' }, 401);
     backend.configured = true; backend.password = password; sessionValid = true;
     return jres({ ok: true });
   }
@@ -125,11 +127,22 @@ ck('html loses .locked', !doc.documentElement.classList.contains('locked'));
 ck('note title editable again', $('#noteTitle').readOnly === false);
 ck('drawer closes on success', $('#admin').classList.contains('on') === false);
 
-console.log('\n── changing the password while unlocked needs no current_password ──');
+console.log('\n── changing the password always needs current_password, even while unlocked ──');
 $('#lockBtn').onclick();
 $('#adminChgPw').value = 'new wonderwall';
 await $('#adminChangeBtn').onclick();
-ck('rotation accepted', backend.password === 'new wonderwall');
+ck('caught client-side with no current password entered, before any request',
+   $('#adminChangeMsg').textContent.includes('current password'));
+ck('backend never called', backend.password === 'wonderwall');
+
+$('#adminChgCurPw').value = 'wrong';
+await $('#adminChangeBtn').onclick();
+ck('server refuses a wrong current password', backend.password === 'wonderwall');
+ck('reports the server error inline', $('#adminChangeMsg').textContent.includes('current password'));
+
+$('#adminChgCurPw').value = 'wonderwall';
+await $('#adminChangeBtn').onclick();
+ck('rotation accepted with the right current password', backend.password === 'new wonderwall');
 ck('still unlocked in this browser after rotating', sessionValid === true);
 $('#adminClose').onclick();
 

@@ -59,14 +59,20 @@ with TestClient(app) as c:
     ck("writes work again once unlocked", r.status_code == 200, r.text[:120])
     ck("note actually landed on disk", os.path.isfile(f"{ROOT}/notes/after-unlock.md"))
 
-    print("\n── changing the password while unlocked needs no current_password,\n"
+    print("\n── changing the password always needs current_password, even while unlocked,\n"
           "   and invalidates every session signed under the old one ──")
     stray = TestClient(app)
     stray.cookies.set("tephra_admin", token_v1)
     ck("a second browser holding the original session is still valid pre-rotation",
        stray.get("/api/admin/status").json()["unlocked"] is True)
     r = c.post("/api/admin/password", json={"password": "second correct horse"})
-    ck("rotation accepted from an already-unlocked session", r.status_code == 200, r.text[:120])
+    ck("refused with no current_password, even from an unlocked session", r.status_code == 401, r.status_code)
+    r = c.post("/api/admin/password",
+               json={"password": "second correct horse", "current_password": "wrong"})
+    ck("refused with a wrong current_password too", r.status_code == 401, r.status_code)
+    r = c.post("/api/admin/password",
+               json={"password": "second correct horse", "current_password": "correct horse battery"})
+    ck("accepted with the right current_password", r.status_code == 200, r.text[:120])
     token_v2 = c.cookies.get("tephra_admin")
     ck("rotation issues a fresh cookie", token_v2 and token_v2 != token_v1)
     ck("this session (the one that rotated it) stays unlocked",
