@@ -147,6 +147,20 @@ ck('applies the typed name as the category',
 ck('a human-typed name is ground truth, not an auto guess',
    studyState.items.find((i) => i.slug === 'icmp').source === 'manual');
 
+console.log('\n── "Clear category" is a real option, not the literal string "Uncategorised" ──');
+const sel2 = doc.querySelector('.sv-cat-edit select');
+const opts2 = [...sel2.options].map((o) => o.value);
+ck('offers a real "Clear category" option', opts2.includes(''), opts2.join(','));
+ck('never offers the literal string "Uncategorised" as a settable value',
+   ![...sel2.options].some((o) => o.textContent === 'Uncategorised'), opts2.join(','));
+sel2.value = '';
+sel2.onchange();
+await new Promise((r) => setTimeout(r, 30));
+ck('cleared icmp’s category', studyState.items.find((i) => i.slug === 'icmp').category === '',
+   studyState.items.find((i) => i.slug === 'icmp').category);
+ck('topic header falls back to the display label',
+   doc.querySelector('.sv-c-cat')?.textContent === 'Uncategorised', doc.querySelector('.sv-c-cat')?.textContent);
+
 console.log('\n── quiz items are rolled up by default ──');
 icmpCard.onclick(); await new Promise((r) => setTimeout(r, 30));
 let qToggle = doc.querySelector('.sv-qpeek-toggle');

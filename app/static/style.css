@@ -1172,7 +1172,10 @@ input.sv-select{cursor:text}
 .gv-stat-subhead{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--faint);margin:18px 0 8px}
 .gv-stat-bars{display:flex;flex-direction:column;gap:9px}
-.gv-stat-bar-row{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:10px;font-size:12px}
+.gv-stat-bar-row{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:10px;font-size:12px;
+  width:100%;font:inherit;color:inherit;background:none;border:1px solid transparent;border-radius:8px;
+  padding:3px 6px;margin:0 -6px;cursor:pointer;text-align:left;transition:.18s var(--ease)}
+.gv-stat-bar-row:hover{background:rgba(255,255,255,.08);border-color:var(--edge)}
 .gv-stat-bar-lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .gv-stat-bar-track{height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
 .gv-stat-bar-fill{display:block;height:100%;border-radius:4px;background:var(--accent);min-width:4px}
@@ -1185,6 +1188,26 @@ input.sv-select{cursor:text}
 .gv-stat-meter-head b{font-family:var(--mono);font-size:11px;font-weight:600}
 .gv-stat-meter .gv-stat-bar-track{height:10px;border-radius:5px}
 .gv-stat-meter .gv-stat-bar-fill{border-radius:5px}
+
+/* ── stats: category detail view (drill-down from a category bar) ── */
+.gv-stat-detail-head{margin-bottom:2px}
+.gv-cat-bulk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0;padding:11px 13px;
+  border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--edge)}
+.gv-cat-bulk label{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.05em;color:var(--faint)}
+.gv-cat-bulk input[type=checkbox]{accent-color:rgb(var(--accent));cursor:pointer}
+.gv-cat-list{display:flex;flex-direction:column;gap:1px}
+.gv-cat-row{display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:8px;border:1px solid transparent;
+  transition:.18s var(--ease)}
+.gv-cat-row:hover{background:rgba(255,255,255,.06);border-color:var(--edge)}
+.gv-cat-row input[type=checkbox]{accent-color:rgb(var(--accent));cursor:pointer;flex:none}
+.gv-cat-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:inherit;font-size:12.5px;text-align:left;color:#D3E4E1;background:none;border:0;cursor:pointer;padding:0}
+.gv-cat-title:hover{color:#fff;text-decoration:underline}
+.gv-cat-chip{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--accent);border:1px solid rgba(var(--acc),.4);border-radius:5px;padding:2px 6px;flex:none}
+.gv-cat-updated{font-family:var(--mono);font-size:9.5px;color:var(--faint);flex:none;width:74px;text-align:right}
+.gv-cat-row .sv-select{flex:none;max-width:160px}
 
 /* ── Crucible: its own mode button, beside the wordmark ── */
 .modebtn{

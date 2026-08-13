@@ -467,8 +467,9 @@
     return t;
   }
 
-  function statBar(label, value, max, color) {
-    const row = document.createElement('div');
+  function statBar(label, value, max, color, onClick) {
+    const row = document.createElement(onClick ? 'button' : 'div');
+    if (onClick) row.type = 'button';
     row.className = 'gv-stat-bar-row';
     row.innerHTML = '<span class="gv-stat-bar-lbl"></span>'
       + '<span class="gv-stat-bar-track"><span class="gv-stat-bar-fill"></span></span>'
@@ -478,7 +479,278 @@
     const fill = row.querySelector('.gv-stat-bar-fill');
     fill.style.width = `${max ? Math.max(4, (value / max) * 100) : 0}%`;
     if (color) fill.style.background = `rgb(${color})`;
+    if (onClick) row.onclick = onClick;
     return row;
+  }
+
+  // Clicking a category bar drills into a note list right here on the Stats
+  // page rather than bouncing over to Crucible -- most vault notes are never
+  // enabled for Crucible, so that's where the "Uncategorised" pile actually
+  // lives. `statsDetail` holds that drill-down state; renderStats() branches
+  // on it instead of the two summary sections whenever it's set.
+  let statsDetail = null;
+
+  function openCategoryDetail(label) {
+    const raw = label === 'Uncategorised' ? '' : label;
+    statsDetail = { label, raw, loading: true, error: false, notes: null, selected: new Set() };
+    renderStats();
+    loadCategoryDetail(statsDetail);
+  }
+
+  async function loadCategoryDetail(handle) {
+    try {
+      const res = await window.tephraApi(`/notes/by-category?category=${encodeURIComponent(handle.raw)}`);
+      if (statsDetail !== handle) return; // user navigated away before this resolved
+      handle.notes = res.notes || [];
+      handle.loading = false;
+    } catch {
+      if (statsDetail !== handle) return;
+      handle.error = true;
+      handle.loading = false;
+    }
+    renderStats();
+  }
+
+  async function moveOneNote(slug, category, handle) {
+    try {
+      await window.tephraApi(`/study/${slug}/category`, {
+        method: 'POST', body: JSON.stringify({ category }),
+      });
+      window.tephraToast?.(category ? `Moved to ${category}` : 'Cleared its category');
+      handle.notes = handle.notes.filter((n) => n.slug !== slug);
+      handle.selected.delete(slug);
+      studyStatsCache = null;
+      await load(); // refreshes vault-wide category counts for when the user goes back
+    } catch {
+      window.tephraToast?.('Could not move that note.');
+      renderStats();
+    }
+  }
+
+  async function moveSelectedNotes(slugs, category, handle) {
+    try {
+      await window.tephraApi('/notes/category/bulk', {
+        method: 'POST', body: JSON.stringify({ slugs, category }),
+      });
+      const n = slugs.length, plural = n === 1 ? '' : 's';
+      window.tephraToast?.(category ? `Moved ${n} note${plural} to ${category}`
+        : `Cleared the category on ${n} note${plural}`);
+      handle.selected.clear();
+      studyStatsCache = null;
+      await load();
+      if (statsDetail === handle) loadCategoryDetail(handle);
+    } catch {
+      window.tephraToast?.('Could not move those notes.');
+      renderStats();
+    }
+  }
+
+  // `current` is '' for a note with no category. "Uncategorised" itself is
+  // filtered out of the real options -- it's the *display* fallback for that
+  // same empty state (see byCat above), not a value a note can actually be
+  // set to, so picking it would silently write the literal string
+  // "Uncategorised" into the frontmatter instead of clearing the field.
+  // "Clear category" is the real, unambiguous way to get back to empty.
+  function categorySelect(current, categoryNames) {
+    const sel = document.createElement('select');
+    sel.className = 'sv-select';
+    const clearOpt = document.createElement('option');
+    clearOpt.value = '';
+    clearOpt.textContent = 'Clear category';
+    if (!current) clearOpt.selected = true;
+    sel.appendChild(clearOpt);
+    for (const c of categoryNames) {
+      if (c === 'Uncategorised') continue;
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      if (c === current) o.selected = true;
+      sel.appendChild(o);
+    }
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__';
+    newOpt.textContent = '+ New category…';
+    sel.appendChild(newOpt);
+    return sel;
+  }
+
+  // Swaps a category <select> for a text input when "+ New category…" is
+  // picked, same interaction Crucible's own category picker uses -- an
+  // inline input rather than a native prompt(), committed on Enter/blur.
+  function wireNewCategoryOption(sel, onCommit) {
+    sel.onchange = () => {
+      if (sel.value !== '__new__') { onCommit(sel.value); return; }
+      const input = document.createElement('input');
+      input.className = 'sv-select';
+      input.placeholder = 'New category name';
+      sel.replaceWith(input);
+      input.focus();
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        const name = input.value.trim();
+        if (!name) { input.replaceWith(sel); return; }
+        onCommit(name);
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { done = true; input.replaceWith(sel); }
+      });
+      input.addEventListener('blur', commit);
+    };
+  }
+
+  function renderCategoryRow(note, handle, categoryNames) {
+    const row = document.createElement('div');
+    row.className = 'gv-cat-row';
+
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = handle.selected.has(note.slug);
+    box.onchange = () => {
+      if (box.checked) handle.selected.add(note.slug); else handle.selected.delete(note.slug);
+      renderStats();
+    };
+    row.appendChild(box);
+
+    const title = document.createElement('button');
+    title.type = 'button';
+    title.className = 'gv-cat-title';
+    title.textContent = note.title;
+    title.title = 'Open in the editor';
+    title.onclick = () => openFromGraph(note.slug);
+    row.appendChild(title);
+
+    if (note.study) {
+      const chip = document.createElement('span');
+      chip.className = 'gv-cat-chip';
+      chip.textContent = 'Crucible';
+      row.appendChild(chip);
+    }
+
+    const updated = document.createElement('span');
+    updated.className = 'gv-cat-updated';
+    updated.textContent = note.updated ? note.updated.slice(0, 10) : '';
+    row.appendChild(updated);
+
+    const sel = categorySelect(note.category || '', categoryNames);
+    wireNewCategoryOption(sel, (name) => moveOneNote(note.slug, name, handle));
+    row.appendChild(sel);
+    return row;
+  }
+
+  function renderStatsDetail(panel, categoryNames) {
+    const handle = statsDetail;
+    const head = document.createElement('div');
+    head.className = 'gv-stat-detail-head';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'sv-back';
+    back.textContent = '← All categories';
+    back.onclick = () => { statsDetail = null; renderStats(); };
+    head.appendChild(back);
+    panel.appendChild(head);
+
+    const section = document.createElement('section');
+    section.className = 'gv-stat-section';
+    const h4 = document.createElement('h4');
+    h4.textContent = handle.label;
+    section.appendChild(h4);
+
+    if (handle.loading) {
+      section.appendChild(Object.assign(document.createElement('div'),
+        { className: 'gv-hint', textContent: 'Loading notes…' }));
+      panel.appendChild(section);
+      return;
+    }
+    if (handle.error) {
+      section.appendChild(Object.assign(document.createElement('div'),
+        { className: 'gv-hint', textContent: 'Could not load this category.' }));
+      panel.appendChild(section);
+      return;
+    }
+    if (!handle.notes.length) {
+      section.appendChild(Object.assign(document.createElement('div'),
+        { className: 'gv-hint', textContent: 'No notes left in this category.' }));
+      panel.appendChild(section);
+      return;
+    }
+
+    const bulk = document.createElement('div');
+    bulk.className = 'gv-cat-bulk';
+
+    const allLbl = document.createElement('label');
+    const allBox = document.createElement('input');
+    allBox.type = 'checkbox';
+    const countLbl = document.createElement('span');
+    allLbl.append(allBox, countLbl);
+    bulk.appendChild(allLbl);
+
+    const bulkSel = document.createElement('select');
+    bulkSel.className = 'sv-select';
+    // The placeholder's value is a sentinel distinct from "Clear category"'s
+    // ('') on purpose -- it's disabled/unreachable, but if it shared the
+    // empty value there'd be no way to tell "nothing chosen yet" apart from
+    // an explicit clear once the select reports value === ''.
+    const placeholder = document.createElement('option');
+    placeholder.value = '__unset__'; placeholder.textContent = 'Move to…';
+    placeholder.disabled = true; placeholder.selected = true;
+    bulkSel.appendChild(placeholder);
+    const clearOpt = document.createElement('option');
+    clearOpt.value = '__clear__'; clearOpt.textContent = 'Clear category';
+    bulkSel.appendChild(clearOpt);
+    for (const c of categoryNames.filter((c) => c !== handle.label && c !== 'Uncategorised')) {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      bulkSel.appendChild(o);
+    }
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__'; newOpt.textContent = '+ New category…';
+    bulkSel.appendChild(newOpt);
+    bulk.appendChild(bulkSel);
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.className = 'sv-btn primary';
+    applyBtn.textContent = 'Move selected';
+    bulk.appendChild(applyBtn);
+
+    let bulkTarget = '';
+    let bulkChosen = false;
+    const refreshBulk = () => {
+      const n = handle.selected.size;
+      countLbl.textContent = n ? `${n} selected` : 'Select notes to move together';
+      applyBtn.disabled = !n || !bulkChosen;
+      allBox.checked = n > 0 && n === handle.notes.length;
+      allBox.indeterminate = n > 0 && n < handle.notes.length;
+    };
+    allBox.onchange = () => {
+      if (allBox.checked) handle.notes.forEach((n) => handle.selected.add(n.slug));
+      else handle.selected.clear();
+      renderStats();
+    };
+    // onCommit fires for a direct pick, "Clear category", and a typed
+    // "+ New category…" name alike -- this is the one place bulkTarget
+    // needs setting.
+    wireNewCategoryOption(bulkSel, (val) => {
+      bulkTarget = val === '__clear__' ? '' : val;
+      bulkChosen = true;
+      refreshBulk();
+    });
+    applyBtn.onclick = () => {
+      if (!bulkChosen || !handle.selected.size) return;
+      moveSelectedNotes([...handle.selected], bulkTarget, handle);
+    };
+    section.appendChild(bulk);
+    refreshBulk();
+
+    const list = document.createElement('div');
+    list.className = 'gv-cat-list';
+    for (const note of handle.notes) {
+      list.appendChild(renderCategoryRow(note, handle, categoryNames));
+    }
+    section.appendChild(list);
+    panel.appendChild(section);
   }
 
   async function renderStats() {
@@ -499,6 +771,13 @@
       byCat.set(c, (byCat.get(c) || 0) + 1);
     }
     const categories = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
+    const categoryNames = [...byCat.keys()].sort((a, b) => a.localeCompare(b));
+
+    if (statsDetail) {
+      renderStatsDetail(panel, categoryNames);
+      return;
+    }
+
     const mostLinked = notes.filter((d) => d.deg).sort((a, b) => b.deg - a.deg).slice(0, 6);
 
     const vault = document.createElement('section');
@@ -525,7 +804,8 @@
       const maxCat = categories[0][1];
       const cats = buildCategoryColors(notes);
       for (const [cat, n] of categories) {
-        catWrap.appendChild(statBar(cat, n, maxCat, cats.get(cat) || '198,214,212'));
+        catWrap.appendChild(statBar(cat, n, maxCat, cats.get(cat) || '198,214,212',
+          () => openCategoryDetail(cat)));
       }
       vault.appendChild(catWrap);
     }

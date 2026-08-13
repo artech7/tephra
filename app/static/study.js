@@ -759,6 +759,10 @@
     wrap.appendChild(label);
 
     const sel = el('select', 'sv-select');
+    const clearOpt = el('option', null, 'Clear category');
+    clearOpt.value = '';
+    if (!item.category) clearOpt.selected = true;
+    sel.appendChild(clearOpt);
     for (const c of S.data.known_categories) {
       const o = el('option', null, c);
       o.value = c;
@@ -773,7 +777,8 @@
       await api(`/study/${item.slug}/category`, {
         method: 'POST', body: JSON.stringify({ category }),
       });
-      toast(`Moved to ${category} — the classifier learns from this`);
+      toast(category ? `Moved to ${category} — the classifier learns from this`
+        : 'Cleared its category');
       S.data = await api('/study');
       S.item = await api('/study/item/' + item.slug);
       renderCats(); renderStats(); render();

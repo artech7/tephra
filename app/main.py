@@ -172,6 +172,11 @@ class NoteIn(BaseModel):
     tags: list[str] | None = None
 
 
+class BulkCategoryIn(BaseModel):
+    slugs: list[str]
+    category: str
+
+
 class StudyIn(BaseModel):
     category: str | None = None
     question: str | None = None
@@ -201,6 +206,33 @@ def _note_dict(note: vault.Note) -> dict:
     d["favorite"] = FAVORITE_TAG in d["tags"]
     d["tags"] = [t for t in d["tags"] if t != FAVORITE_TAG]
     return d
+
+
+@app.get("/api/notes/by-category")
+def notes_by_category(category: str = ""):
+    """Every vault note carrying `category`, not just Crucible-enabled ones --
+    this backs the Stats page's category bars, and those bars count the whole
+    vault. An empty `category` means the "Uncategorised" bucket: notes with no
+    category field at all, the same fallback used everywhere else this label
+    is shown.
+
+    Registered ahead of GET /api/notes/{slug} -- FastAPI matches routes in
+    registration order, and "by-category" would otherwise be swallowed as a
+    slug and 404.
+    """
+    want = category.strip()
+    out = []
+    for n in vault.all_notes():
+        cat = (n.meta.get("category") or "").strip()
+        if cat != want:
+            continue
+        out.append({
+            "slug": n.slug, "title": n.title, "tags": n.tags, "updated": n.updated,
+            "category": cat, "category_source": (n.meta.get("category_source") or "").strip(),
+            "study": "study" in n.tags,
+        })
+    out.sort(key=lambda d: d["title"].lower())
+    return {"category": want, "notes": out}
 
 
 @app.get("/api/notes")
@@ -260,6 +292,38 @@ def get_note(slug: str):
         "words": len(note.body.split()),
         "quiz": item["quiz"],
     }
+
+
+@app.post("/api/notes/category/bulk")
+def notes_bulk_category(payload: BulkCategoryIn):
+    """Reassign several notes' category in one pass -- the classifier only
+    needs re-fitting once at the end, not once per note. An empty `category`
+    clears every selected note back to Uncategorised."""
+    new = (payload.category or "").strip()
+    updated = []
+    for slug in payload.slugs:
+        note = vault.read(slug)
+        if not note:
+            continue
+        was = (note.meta.get("category") or "").strip()
+        was_source = (note.meta.get("category_source") or "auto").strip()
+        if new == was:
+            continue
+        st.push_history(note, was, was_source)
+        if new:
+            note.meta["category"] = new
+            note.meta["category_source"] = "manual"
+        else:
+            note.meta.pop("category", None)
+            note.meta.pop("category_source", None)
+        note.meta.pop("category_confidence", None)
+        vault.write(note)
+        idx.reindex_note(db(), note)
+        updated.append(slug)
+    if updated:
+        items = st.all_items()
+        st.ensure_fitted(items, force=True)
+    return {"updated": updated, "category": new}
 
 
 @app.post("/api/notes")
@@ -1082,8 +1146,13 @@ def study_disable(slug: str):
 @app.post("/api/study/{slug}/category")
 def study_set_category(slug: str, payload: StudyIn):
     """Manual override. Marked `manual` so it is never re-guessed, and it
-    joins the training set — correcting one item shifts every similar one."""
-    if not payload.category:
+    joins the training set — correcting one item shifts every similar one.
+
+    An empty string clears the category back to Uncategorised rather than
+    being rejected -- distinguished from a missing field (still a 400) so a
+    client can't clear one by accident just by omitting the key.
+    """
+    if payload.category is None:
         raise HTTPException(400, "category required")
     note = vault.read(slug)
     if not note:
@@ -1096,8 +1165,12 @@ def study_set_category(slug: str, payload: StudyIn):
                 "history": st.parse_history(note.meta.get(st.HISTORY_KEY))}
 
     st.push_history(note, was, was_source)
-    note.meta["category"] = new
-    note.meta["category_source"] = "manual"
+    if new:
+        note.meta["category"] = new
+        note.meta["category_source"] = "manual"
+    else:
+        note.meta.pop("category", None)
+        note.meta.pop("category_source", None)
     note.meta.pop("category_confidence", None)
     vault.write(note)
     idx.reindex_note(db(), note)
