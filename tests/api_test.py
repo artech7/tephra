@@ -652,19 +652,29 @@ with TestClient(app) as c:
         "Some prose about the topic.\n\n"
         "## Sources\n"
         "- [Wikipedia](https://en.wikipedia.org/wiki/Example)\n"
+        "- https://bare.example.com/paper\n"
+        "- Baker et al. -- https://mixed.example.com/paper.\n"
         "- Baker et al., a plain-text citation with no link\n\n"
         "## Quiz\n\n"
         "Q: A question?\n- [x] Right\n- Wrong\nWhy: because.\n"
     )}).json()
     sslug = snote["slug"]
     fetched = c.get(f"/api/notes/{sslug}").json()
-    check("two sources parsed", len(fetched["sources"]) == 2, fetched["sources"])
+    check("four sources parsed", len(fetched["sources"]) == 4, fetched["sources"])
     check("linked bullet becomes {text, url}",
        fetched["sources"][0] == {"text": "Wikipedia", "url": "https://en.wikipedia.org/wiki/Example"},
        fetched["sources"][0])
-    check("plain bullet becomes {text, url: null}",
-       fetched["sources"][1] == {"text": "Baker et al., a plain-text citation with no link", "url": None},
+    check("a bare-URL bullet is still clickable",
+       fetched["sources"][1] == {"text": "https://bare.example.com/paper",
+                                 "url": "https://bare.example.com/paper"},
        fetched["sources"][1])
+    check("a URL embedded in a longer bullet is still clickable, trailing period trimmed off the href",
+       fetched["sources"][2] == {"text": "Baker et al. -- https://mixed.example.com/paper.",
+                                 "url": "https://mixed.example.com/paper"},
+       fetched["sources"][2])
+    check("plain bullet with no url at all becomes {text, url: null}",
+       fetched["sources"][3] == {"text": "Baker et al., a plain-text citation with no link", "url": None},
+       fetched["sources"][3])
     check("the quiz section after it still parses on its own",
        len(fetched["quiz"]) == 1 and fetched["quiz"][0]["question"] == "A question?", fetched["quiz"])
     check("displayed html has the prose but neither the Sources heading nor the quiz text",

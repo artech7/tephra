@@ -114,6 +114,11 @@ SOURCES_SPLIT_RE = re.compile(r"^##\s+Sources\s*$", re.M | re.I)
 _NEXT_HEADING_RE = re.compile(r"^##\s+\S", re.M)
 SOURCE_LINE_RE = re.compile(r"^-\s*(.+?)\s*$")
 SOURCE_LINK_RE = re.compile(r"^\[(?P<text>[^\]]*)\]\((?P<url>[^()\s]+)\)$")
+# A bullet that is nothing but a pasted link -- the fastest way to jot down a
+# source -- has no brackets to make it a SOURCE_LINK_RE match, but it should
+# still be clickable, the same way a bare URL on its own line becomes a
+# bookmark card in ordinary prose (see render.py's URL_LINE_RE).
+SOURCE_BARE_URL_RE = re.compile(r"https?://\S+")
 
 
 def split_sources_block(body: str) -> tuple[str, str]:
@@ -129,9 +134,12 @@ def split_sources_block(body: str) -> tuple[str, str]:
 
 def parse_sources(section: str) -> list[dict]:
     """Parse `## Sources` bullet lines into {text, url}. A `- [Title](url)`
-    line becomes a clickable source; any other bullet is shown as plain text
-    -- so pasting bare citations works with no markdown to learn. The heading
-    line itself never matches the bullet pattern, so it's skipped for free."""
+    line becomes a clickable source with its own label; a bullet that's just
+    a bare URL (or has one embedded, e.g. `- Baker et al. -- https://...`) is
+    still clickable, with the whole bullet text as the visible label. Only a
+    bullet with no URL at all falls back to plain, unclickable text -- so
+    pasting bare citations works with no markdown to learn. The heading line
+    itself never matches the bullet pattern, so it's skipped for free."""
     out: list[dict] = []
     for line in section.splitlines():
         m = SOURCE_LINE_RE.match(line.strip())
@@ -144,8 +152,12 @@ def parse_sources(section: str) -> list[dict]:
         if lm:
             out.append({"text": lm.group("text").strip() or lm.group("url"),
                        "url": lm.group("url")})
-        else:
-            out.append({"text": item, "url": None})
+            continue
+        um = SOURCE_BARE_URL_RE.search(item)
+        if um:
+            out.append({"text": item, "url": um.group(0).rstrip(").,;:!?")})
+            continue
+        out.append({"text": item, "url": None})
     return out
 
 
