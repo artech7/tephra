@@ -166,7 +166,18 @@ and codebase layout.
 
 ## Before you expose this
 
-Tephra has **no authentication** — it's built for a trusted network or
-loopback use. If you need it reachable from outside your LAN, put it behind
-a reverse proxy that handles auth and TLS (Caddy with `basic_auth`,
-Authelia, a Tailscale tailnet). Don't port-forward it directly.
+By default Tephra has **no authentication** — it's built for a trusted
+network or loopback use. You can set an admin password from the Admin
+drawer (lock icon in the topbar) to gate note edits behind it; reading,
+quiz-taking, and theme stay open regardless. Leave it unset and behavior is
+unchanged.
+
+There's no "forgot password" recovery flow — losing it means clearing it
+server-side: `docker compose exec tephra python3 tools/reset_admin_password.py --clear`
+(or run it directly outside Docker; see the script's docstring). That fully
+reopens editing until a new password is set.
+
+This is still a single shared password, not real multi-user auth. If you
+need it reachable from outside a trusted network, put it behind a reverse
+proxy that handles auth and TLS (Caddy with `basic_auth`, Authelia, a
+Tailscale tailnet). Don't port-forward it directly.
