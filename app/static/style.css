@@ -440,6 +440,16 @@ body[data-wall="aurora"] .newnote:hover{
 .quizedit-note{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:12px;line-height:1.5}
 .quizedit-note code{font-family:var(--mono);background:rgba(0,0,0,.3);padding:1px 4px;border-radius:4px}
 
+/* Sources reuses the .quizedit shell above for its collapsible chrome --
+   only the list itself needs its own rules. */
+.sources-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.sources-item{font-size:13.5px;line-height:1.5;color:var(--muted);padding-left:16px;position:relative}
+.sources-item::before{content:'';position:absolute;left:0;top:.65em;width:5px;height:5px;border-radius:50%;
+  background:var(--faint)}
+.sources-link{color:var(--paper);text-decoration:none;border-bottom:1px solid rgba(var(--acc),.35);
+  transition:border-color .2s var(--ease),color .2s var(--ease)}
+.sources-link:hover{color:#fff;border-color:rgba(var(--acc),.7)}
+
 /* the signature: liquid wikilink -- a Gel pill, same glossy-cap recipe as
    .newnote, instead of the old flat tinted-text-with-a-hairline this
    replaced (it read as "text with a faint outline," not a control). Real

@@ -380,6 +380,7 @@ def get_note(slug: str):
     resolve = resolver()
     _, targets, used = rndr.render(note.body, resolve)
     prose, _ = st.split_quiz(note.body)
+    prose, sources_sec = idx.split_sources_block(prose)
     body_html, _, _ = rndr.render(prose, resolve)
     item = st.load_item(note)
     flagged = set(st.load_progress()["flagged"])
@@ -396,6 +397,7 @@ def get_note(slug: str):
         "backlinks": idx.backlinks(db(), slug),
         "words": len(note.body.split()),
         "quiz": item["quiz"],
+        "sources": idx.parse_sources(sources_sec),
     }
 
 
@@ -470,7 +472,8 @@ def save_note(slug: str, payload: NoteIn, _admin: None = Depends(require_admin))
             vault.write(renamed)
             idx.rebuild(db())          # a retitle can repoint links vault-wide
             return {**_note_dict(renamed), "renamed_to": renamed.slug,
-                    "quiz": st.load_item(renamed)["quiz"]}
+                    "quiz": st.load_item(renamed)["quiz"],
+                    "sources": idx.load_sources(renamed.body)}
 
     if payload.body is not None:
         note.body = payload.body
@@ -478,10 +481,11 @@ def save_note(slug: str, payload: NoteIn, _admin: None = Depends(require_admin))
         _apply_tags(note, payload.tags)
     vault.write(note)
     idx.reindex_note(db(), note)
-    # A hand-edited `## Quiz` section (source mode is still there for anyone
-    # who prefers it) needs to reach the structured quiz editor too, or the
-    # two views of the same markdown would drift apart.
-    return {**_note_dict(note), "quiz": st.load_item(note)["quiz"]}
+    # A hand-edited `## Quiz` or `## Sources` section (source mode is still
+    # there for anyone who prefers it) needs to reach their own panels too,
+    # or those views of the same markdown would drift apart.
+    return {**_note_dict(note), "quiz": st.load_item(note)["quiz"],
+            "sources": idx.load_sources(note.body)}
 
 
 class QuizItemIn(BaseModel):

@@ -533,6 +533,7 @@ async function openNote(slug, push = true) {
   renderFlagChip(note);
   renderDeleteButton();
   window.tephraQuizEdit?.render(note.quiz, slug);
+  window.tephraSourcesPanel?.render(note.sources);
   document.querySelectorAll('#noteList .node').forEach((el) =>
     el.toggleAttribute('aria-current', el.dataset.slug === slug));
   drawMini();
@@ -1156,6 +1157,7 @@ async function setEditing(on) {
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
     renderBacklinks(note.backlinks);
     window.tephraQuizEdit?.render(note.quiz, state.slug);
+    window.tephraSourcesPanel?.render(note.sources);
       loadList();
     drawMini();
   }

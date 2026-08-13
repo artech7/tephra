@@ -647,6 +647,43 @@ with TestClient(app) as c:
        hand["quiz"][0]["question"] == "Hand-written?" and hand["quiz"][0]["answers"] == [0],
        hand["quiz"][0])
 
+    print("\n── sources section: parsed out of prose, alongside a quiz block ──")
+    snote = c.post("/api/notes", json={"title": "Sources Note", "body": (
+        "Some prose about the topic.\n\n"
+        "## Sources\n"
+        "- [Wikipedia](https://en.wikipedia.org/wiki/Example)\n"
+        "- Baker et al., a plain-text citation with no link\n\n"
+        "## Quiz\n\n"
+        "Q: A question?\n- [x] Right\n- Wrong\nWhy: because.\n"
+    )}).json()
+    sslug = snote["slug"]
+    fetched = c.get(f"/api/notes/{sslug}").json()
+    check("two sources parsed", len(fetched["sources"]) == 2, fetched["sources"])
+    check("linked bullet becomes {text, url}",
+       fetched["sources"][0] == {"text": "Wikipedia", "url": "https://en.wikipedia.org/wiki/Example"},
+       fetched["sources"][0])
+    check("plain bullet becomes {text, url: null}",
+       fetched["sources"][1] == {"text": "Baker et al., a plain-text citation with no link", "url": None},
+       fetched["sources"][1])
+    check("the quiz section after it still parses on its own",
+       len(fetched["quiz"]) == 1 and fetched["quiz"][0]["question"] == "A question?", fetched["quiz"])
+    check("displayed html has the prose but neither the Sources heading nor the quiz text",
+       "Some prose about the topic" in fetched["html"]
+       and "Sources" not in fetched["html"] and "Wikipedia" not in fetched["html"]
+       and "A question?" not in fetched["html"], fetched["html"])
+
+    print("\n── sources: no ## Sources heading at all is just an empty list ──")
+    plain = c.post("/api/notes", json={"title": "No Sources Here",
+                                        "body": "Nothing but prose.\n"}).json()
+    check("empty sources list, not an error",
+       c.get(f"/api/notes/{plain['slug']}").json()["sources"] == [])
+
+    print("\n── sources: hand-edited markdown round-trips through save_note too ──")
+    resaved = c.put(f"/api/notes/{plain['slug']}", json={
+        "body": "Prose.\n\n## Sources\n- [Only](https://only.example)\n"}).json()
+    check("save_note's own response reports the new sources",
+       resaved["sources"] == [{"text": "Only", "url": "https://only.example"}], resaved["sources"])
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

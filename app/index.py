@@ -104,6 +104,55 @@ def split_quiz_block(body: str) -> tuple[str, str]:
     return (body, "") if not m else (body[:m.start()], body[m.start():])
 
 
+# A `## Sources` section, like the quiz block, is data for its own panel, not
+# prose to be rendered inline where it sits. Unlike the quiz block -- which
+# always owns the rest of the file -- this one stops at the *next* `##`
+# heading (or end of body), so a `## Sources` list can sit anywhere and still
+# leave a `## Quiz` section after it alone. That does mean a note with both
+# needs `## Sources` written first: Quiz still claims everything after itself.
+SOURCES_SPLIT_RE = re.compile(r"^##\s+Sources\s*$", re.M | re.I)
+_NEXT_HEADING_RE = re.compile(r"^##\s+\S", re.M)
+SOURCE_LINE_RE = re.compile(r"^-\s*(.+?)\s*$")
+SOURCE_LINK_RE = re.compile(r"^\[(?P<text>[^\]]*)\]\((?P<url>[^()\s]+)\)$")
+
+
+def split_sources_block(body: str) -> tuple[str, str]:
+    """Return (rest, sources_section), sources_section including its own
+    heading line."""
+    m = SOURCES_SPLIT_RE.search(body)
+    if not m:
+        return body, ""
+    nxt = _NEXT_HEADING_RE.search(body, m.end())
+    end = nxt.start() if nxt else len(body)
+    return body[:m.start()] + body[end:], body[m.start():end].strip()
+
+
+def parse_sources(section: str) -> list[dict]:
+    """Parse `## Sources` bullet lines into {text, url}. A `- [Title](url)`
+    line becomes a clickable source; any other bullet is shown as plain text
+    -- so pasting bare citations works with no markdown to learn. The heading
+    line itself never matches the bullet pattern, so it's skipped for free."""
+    out: list[dict] = []
+    for line in section.splitlines():
+        m = SOURCE_LINE_RE.match(line.strip())
+        if not m:
+            continue
+        item = m.group(1).strip()
+        if not item:
+            continue
+        lm = SOURCE_LINK_RE.match(item)
+        if lm:
+            out.append({"text": lm.group("text").strip() or lm.group("url"),
+                       "url": lm.group("url")})
+        else:
+            out.append({"text": item, "url": None})
+    return out
+
+
+def load_sources(body: str) -> list[dict]:
+    return parse_sources(split_sources_block(body)[1])
+
+
 def rewrite_outside_protected(text: str, pattern: re.Pattern, repl) -> str:
     """Apply a substitution only in the gaps between protected spans."""
     parts, last = [], 0

@@ -146,6 +146,19 @@
           <textarea class="src" id="noteSrc" spellcheck="false" hidden placeholder="Write in markdown. [[Double brackets]] link a note, ![[file.png]] embeds one."></textarea>
           <div class="hint" id="editHint">DOUBLE-CLICK THE TEXT TO EDIT · ⌘E TOGGLES SOURCE · DRAG FILES IN TO ATTACH</div>
 
+          <section class="quizedit" id="sourcesEdit" hidden>
+            <button class="quizedit-head" id="sourcesToggle" type="button"
+                aria-expanded="false" aria-controls="sourcesBody">
+              <span class="quizedit-caret">▸</span>
+              <span class="quizedit-title">Sources</span>
+              <span class="quizedit-count" id="sourcesCount"></span>
+            </button>
+            <div class="quizedit-body" id="sourcesBody" hidden>
+              <ul class="sources-list" id="sourcesList"></ul>
+              <div class="quizedit-note">Parsed from the note's own <code>## Sources</code> list — edit it in ⌘E source mode. Put it before <code>## Quiz</code> if the note has both, since Quiz still claims everything after itself.</div>
+            </div>
+          </section>
+
           <section class="quizedit" id="quizEdit">
             <button class="quizedit-head" id="quizEditToggle" type="button"
                 aria-expanded="false" aria-controls="quizEditBody">
@@ -515,5 +528,6 @@
 <script src="/static/app.js"></script>
 <script src="/static/study.js"></script>
 <script src="/static/quiz-editor.js"></script>
+<script src="/static/sources-panel.js"></script>
 </body>
 </html>
