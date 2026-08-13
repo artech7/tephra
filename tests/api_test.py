@@ -651,9 +651,9 @@ with TestClient(app) as c:
     snote = c.post("/api/notes", json={"title": "Sources Note", "body": (
         "Some prose about the topic.\n\n"
         "## Sources\n"
-        "- [Wikipedia](https://en.wikipedia.org/wiki/Example)\n"
+        "* [Wikipedia](https://en.wikipedia.org/wiki/Example)\n"
         "- https://bare.example.com/paper\n"
-        "- Baker et al. -- https://mixed.example.com/paper.\n"
+        "* Baker et al. -- https://mixed.example.com/paper.\n"
         "- Baker et al., a plain-text citation with no link\n\n"
         "## Quiz\n\n"
         "Q: A question?\n- [x] Right\n- Wrong\nWhy: because.\n"
@@ -661,14 +661,14 @@ with TestClient(app) as c:
     sslug = snote["slug"]
     fetched = c.get(f"/api/notes/{sslug}").json()
     check("four sources parsed", len(fetched["sources"]) == 4, fetched["sources"])
-    check("linked bullet becomes {text, url}",
+    check("a `*` bulleted link becomes {text, url}, same as `-`",
        fetched["sources"][0] == {"text": "Wikipedia", "url": "https://en.wikipedia.org/wiki/Example"},
        fetched["sources"][0])
     check("a bare-URL bullet is still clickable",
        fetched["sources"][1] == {"text": "https://bare.example.com/paper",
                                  "url": "https://bare.example.com/paper"},
        fetched["sources"][1])
-    check("a URL embedded in a longer bullet is still clickable, trailing period trimmed off the href",
+    check("a `*` bullet with an embedded URL is still clickable, trailing period trimmed off the href",
        fetched["sources"][2] == {"text": "Baker et al. -- https://mixed.example.com/paper.",
                                  "url": "https://mixed.example.com/paper"},
        fetched["sources"][2])

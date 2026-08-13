@@ -112,7 +112,7 @@ def split_quiz_block(body: str) -> tuple[str, str]:
 # needs `## Sources` written first: Quiz still claims everything after itself.
 SOURCES_SPLIT_RE = re.compile(r"^##\s+Sources\s*$", re.M | re.I)
 _NEXT_HEADING_RE = re.compile(r"^##\s+\S", re.M)
-SOURCE_LINE_RE = re.compile(r"^-\s*(.+?)\s*$")
+SOURCE_LINE_RE = re.compile(r"^[-*+]\s*(.+?)\s*$")
 SOURCE_LINK_RE = re.compile(r"^\[(?P<text>[^\]]*)\]\((?P<url>[^()\s]+)\)$")
 # A bullet that is nothing but a pasted link -- the fastest way to jot down a
 # source -- has no brackets to make it a SOURCE_LINK_RE match, but it should
