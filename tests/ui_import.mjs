@@ -122,17 +122,30 @@ console.log('\n── the format reference is reachable before any import ──
 ck('reference button exists in the header', !!document.querySelector('#svFormatsBtn'));
 document.querySelector('#svFormatsBtn').click();
 await tick(20);
-ck('drawer opens on click', document.querySelector('#svFormats').classList.contains('on'));
+ck('whole-screen view opens on click', document.querySelector('#svFormats').classList.contains('on'));
 ck('fetched the format list', calls.some((c) => c.path === '/study/formats'));
-const fmtSections = () => [...document.querySelectorAll('#svFormatsBody .th-l span')].map((n) => n.textContent);
-ck('shows all three sections', JSON.stringify(fmtSections())
-   === JSON.stringify(['Media attachments', 'Study guide import', 'Markdown syntax']), fmtSections());
+
+const fmtTabs = () => [...document.querySelectorAll('#svFormats .lv-tabs button')];
 const fmtHeadings = () => [...document.querySelectorAll('#svFormatsBody .sv-fmt-h')].map((n) => n.textContent);
+ck('sectioned into three tabs by topic', fmtTabs().map((b) => b.textContent).join('|')
+   === 'Media attachments|Study guide import|Markdown syntax', fmtTabs().map((b) => b.textContent));
+ck('lands on Media attachments by default',
+   fmtTabs().find((b) => b.dataset.tab === 'media').getAttribute('aria-pressed') === 'true');
 ck('media limits block is present', fmtHeadings().some((h) => h.includes('image button')), fmtHeadings());
-ck('the mocked JSON import format still renders', fmtHeadings().some((h) => h.startsWith('JSON —')), fmtHeadings());
+ck('the other two tabs are not rendered until picked',
+   !fmtHeadings().some((h) => h.startsWith('JSON —')) && !fmtHeadings().includes('Wikilinks'), fmtHeadings());
+
+fmtTabs().find((b) => b.dataset.tab === 'import').click();
+ck('switches to the import tab', fmtTabs().find((b) => b.dataset.tab === 'import').getAttribute('aria-pressed') === 'true');
+ck('the mocked JSON import format renders there', fmtHeadings().some((h) => h.startsWith('JSON —')), fmtHeadings());
+ck('media content is gone now that a different tab is active', !fmtHeadings().some((h) => h.includes('image button')));
+
+fmtTabs().find((b) => b.dataset.tab === 'syntax').click();
 ck('markdown syntax reference is included, e.g. wikilinks', fmtHeadings().includes('Wikilinks'), fmtHeadings());
 ck('...and the new Sources section syntax', fmtHeadings().includes('Sources section'), fmtHeadings());
+
 document.querySelector('#svFormatsClose').click();
+ck('closes on the close button', document.querySelector('#svFormats').classList.contains('on') === false);
 
 console.log('\n── clicking the header button opens the CONFIRM MODAL, not a file dialog ──');
 let folderDialogClicks = 0, fileDialogClicks = 0;

@@ -645,18 +645,25 @@ body[data-wall="aurora"] .newnote:hover{
   transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
 #health.on{transform:translateX(0)}
 
-/* ══ IMPORT FORMAT REFERENCE DRAWER ══════════════════════════
-   Same right-edge slide-in as Appearance and Vault Health -- reachable from
-   Crucible's header at any time (see study.js), not just while the vault is
-   still empty, so it sits above #studyview (z-index 5) the same way the
-   other two drawers already do. */
-#svFormats{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:420px;border-radius:var(--radius);
-  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
-  border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 46px 100px -34px rgba(0,0,0,.85);
-  transform:translateX(calc(100% + var(--inset) + 14px));
-  transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
-#svFormats.on{transform:translateX(0)}
-#svFormats .th-body{display:flex;flex-direction:column;gap:14px}
+/* ══ FORMATTING & UPLOADS ═════════════════════════════════════
+   A whole-screen overlay, same pattern as #statsview/#linksview (position:
+   absolute + opacity/pointer-events toggle on .on, mounted into #sideTephra
+   -- see study.js) rather than a narrow right-edge drawer: this reference
+   has too much in it (uploads, import formats, every markdown extension) to
+   read well as one long scroll in a 420px strip. Reachable from Crucible's
+   header at any time, not just while the vault is empty. */
+#svFormats{
+  position:absolute;inset:0;z-index:4;opacity:0;pointer-events:none;
+  transition:opacity .3s var(--ease);overflow:hidden;
+  display:grid;grid-template-rows:auto 1fr;
+  background:linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),
+             rgba(255,255,255,var(--frost));
+  backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+}
+#svFormats.on{opacity:1;pointer-events:auto}
+.fmt-grid{max-width:1120px;margin:0 auto;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-content:start}
 
 /* ══ ADMIN DRAWER ═════════════════════════════════════════════
    Same right-edge slide-in as the other three -- set/unlock/change the

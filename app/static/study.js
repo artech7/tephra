@@ -229,19 +229,49 @@
       s: 'An optional metadata block at the very top of a note. Title and tags are normally set from the UI; `category` and `study: true` are what put a note into Crucible. Only worth hand-editing when pasting a note in from outside the app.' },
   ];
 
-  /* A right-edge slide-in drawer, same mechanic as the Appearance and Vault
-     Health drawers (#theme / #health in app.js) -- reachable from the header
-     button no matter what's showing in the body below (empty state, browse
-     grid, a flashcard, a quiz), unlike the old copy that only existed inside
-     the empty-state screen and vanished the moment the vault had one item in
-     it. Lives on <body>, not inside `view`, so Crucible's own mode switches
-     never tear it down. */
-  const formatsDrawer = el('aside');
-  formatsDrawer.id = 'svFormats';
-  formatsDrawer.innerHTML = `
-    <div class="th-head"><h4>Formatting &amp; Uploads</h4><button class="mini" id="svFormatsClose">×</button></div>
-    <div class="th-body" id="svFormatsBody"><div class="sv-formats-load">Loading…</div></div>`;
-  document.body.appendChild(formatsDrawer);
+  /* A whole-screen overlay, same pattern as #statsview/#linksview (built
+     here, mounted into #sideTephra, position:absolute + opacity toggle on
+     .on -- see style.css) rather than a narrow right-edge drawer: with
+     uploads, every import format, and the full markdown-syntax reference
+     all in one place, a 420px scrolling strip stopped being able to show
+     any of it well. Reachable from the header at any time, not just while
+     the vault is empty -- unlike the old copy that only existed inside the
+     empty-state screen. Sectioned into tabs by topic, same mechanic as
+     Links' "To review" / "Dismissed" tabs, so each topic gets the screen
+     to itself instead of one long scroll through all three at once. */
+  const FMT_TABS = [
+    { id: 'media', label: 'Media attachments' },
+    { id: 'import', label: 'Study guide import' },
+    { id: 'syntax', label: 'Markdown syntax' },
+  ];
+  const F = { tab: 'media', formats: null, media: null };
+
+  const formatsView = el('div');
+  formatsView.id = 'svFormats';
+  formatsView.innerHTML = `
+    <div class="lv-head">
+      <div>
+        <h3>Formatting &amp; Uploads</h3>
+        <p>WHAT TEPHRA ACCEPTS, AND EVERY MARKDOWN EXTENSION IT RENDERS</p>
+      </div>
+      <div class="lv-tabs">
+        ${FMT_TABS.map((t, i) => `<button data-tab="${t.id}" aria-pressed="${i === 0}">${t.label}</button>`).join('')}
+      </div>
+      <button class="mini" id="svFormatsClose" title="Close">×</button>
+    </div>
+    <div class="lv-body"><div class="fmt-grid" id="svFormatsBody"><div class="sv-formats-load">Loading…</div></div></div>`;
+
+  function mountFormats() {
+    if (formatsView.parentElement) return;
+    (document.querySelector('#sideTephra') || document.body).appendChild(formatsView);
+    formatsView.querySelectorAll('.lv-tabs button').forEach((b) => (b.onclick = () => {
+      F.tab = b.dataset.tab;
+      formatsView.querySelectorAll('.lv-tabs button').forEach((x) =>
+        x.setAttribute('aria-pressed', x.dataset.tab === F.tab));
+      renderFormatsTab();
+    }));
+    $('#svFormatsClose').onclick = closeFormats;
+  }
 
   function fmtBlock(h, s, ex) {
     const blk = el('div', 'sv-fmt');
@@ -252,42 +282,51 @@
     blk.appendChild(pre);
     return blk;
   }
-  function sectionLabel(text) {
-    const l = el('div', 'th-l');
-    l.appendChild(el('span', null, text));
-    return l;
+
+  function renderFormatsTab() {
+    const body = $('#svFormatsBody');
+    body.innerHTML = '';
+    if (F.tab === 'media') {
+      const kindList = Object.entries(F.media.kinds)
+        .map(([kind, exts]) => `${kind}: ${exts.join(' ')}`).join('  ·  ');
+      body.appendChild(fmtBlock('Drag a file into a note, or the image button',
+        `Images, video and audio render inline; anything else becomes a downloadable chip. `
+        + `Up to ${F.media.max_mb} MB per file.`, kindList));
+    } else if (F.tab === 'import') {
+      for (const f of F.formats) {
+        body.appendChild(fmtBlock(`${f.label} — ${f.extensions.join(' ')}`, f.summary, f.example));
+      }
+    } else {
+      for (const m of MARKDOWN_SYNTAX) {
+        body.appendChild(fmtBlock(m.h, m.s, m.ex));
+      }
+    }
   }
 
   let formatsLoaded = false;
+  function closeFormats() { formatsView.classList.remove('on'); }
   async function openFormats() {
-    formatsDrawer.classList.add('on');
+    mountFormats();
+    // A whole-screen overlay, same as Graph/Stats/Links -- land on a clean
+    // Write underneath first so this can never end up stacked on top of one
+    // of those instead of replacing it (they don't know about this view,
+    // since it isn't part of the segmented control's own group).
+    window.tephraSetView?.('write');
+    formatsView.classList.add('on');
     if (formatsLoaded) return;
     const body = $('#svFormatsBody');
     try {
       const { formats, media } = await api('/study/formats');
+      F.formats = formats; F.media = media;
       formatsLoaded = true;
-      body.innerHTML = '';
-
-      body.appendChild(sectionLabel('Media attachments'));
-      const kindList = Object.entries(media.kinds)
-        .map(([kind, exts]) => `${kind}: ${exts.join(' ')}`).join('  ·  ');
-      body.appendChild(fmtBlock('Drag a file into a note, or the image button',
-        `Images, video and audio render inline; anything else becomes a downloadable chip. `
-        + `Up to ${media.max_mb} MB per file.`, kindList));
-
-      body.appendChild(sectionLabel('Study guide import'));
-      for (const f of formats) {
-        body.appendChild(fmtBlock(`${f.label} — ${f.extensions.join(' ')}`, f.summary, f.example));
-      }
-
-      body.appendChild(sectionLabel('Markdown syntax'));
-      for (const m of MARKDOWN_SYNTAX) {
-        body.appendChild(fmtBlock(m.h, m.s, m.ex));
-      }
+      renderFormatsTab();
     } catch { body.textContent = 'Could not load the format list.'; }
   }
   $('#svFormatsBtn').onclick = openFormats;
-  $('#svFormatsClose').onclick = () => formatsDrawer.classList.remove('on');
+  // setView() (app.js) closes this on every switch, the same way it closes
+  // Crucible -- so picking Write/Graph/Stats/Links or Crucible while this is
+  // open replaces it rather than leaving it stacked on top, unnoticed.
+  window.tephraFormats = { open: openFormats, close: closeFormats, isOpen: () => formatsView.classList.contains('on') };
 
   /* ── import confirmation modal ──
      The bug this exists to fix: picking or dropping a guide used to import

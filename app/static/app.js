@@ -1956,6 +1956,11 @@ function setStudy(on) {
 }
 
 function setView(v) {
+  // A whole-screen overlay like Formatting & Uploads isn't part of this
+  // group -- it's reachable from its own header button at any time -- but it
+  // still has to give way the moment any of these is picked, or it would sit
+  // on top of whatever was just chosen, unnoticed.
+  window.tephraFormats?.close();
   if (v === 'study') return setStudy(!window.tephraStudy?.isOpen());
   setStudy(false);
   document.querySelectorAll('.segmented button').forEach((b) =>
