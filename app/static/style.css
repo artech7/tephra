@@ -662,8 +662,14 @@ body[data-wall="aurora"] .newnote:hover{
   -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
 }
 #svFormats.on{opacity:1;pointer-events:auto}
-.fmt-grid{max-width:1120px;margin:0 auto;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-content:start}
+/* Columns, not a grid: a grid's row-major flow forces every card sharing a
+   row to match its tallest neighbour -- the JSON card's long example towered
+   over Python next to it, leaving a wall of empty space in that row before
+   CSV/Markdown could even start. Columns fill independently, each flowing
+   top-to-bottom on its own, so a short card just sits above whatever's
+   below it in the same column instead of waiting on a tall neighbour. */
+.fmt-grid{max-width:1120px;margin:0 auto;column-width:340px;column-gap:14px}
+.fmt-grid .sv-fmt{break-inside:avoid;-webkit-column-break-inside:avoid;margin-bottom:14px}
 
 /* ══ ADMIN DRAWER ═════════════════════════════════════════════
    Same right-edge slide-in as the other three -- set/unlock/change the
