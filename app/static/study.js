@@ -225,6 +225,8 @@
       s: 'A `## Quiz` heading turns the rest of the note into flashcard/quiz data instead of prose -- also editable as a form in the Quiz panel below the note. Mark correct options with `[x]`; more than one marked option makes it a multiple-answer question. Always the last section in a note.' },
     { h: 'Sources section', ex: '## Sources\n- [RFC 3720](https://www.rfc-editor.org/rfc/rfc3720)\n- https://example.com/whitepaper.pdf',
       s: 'A `## Sources` heading collects a bullet list of citations into its own panel instead of the note body. `- [Title](url)`, or a bare/embedded URL, stays clickable; anything else shows as plain text. `-`, `*` and `+` all work as the bullet marker. Put it before `## Quiz` if a note has both -- Quiz still claims everything after itself.' },
+    { h: 'Citations', ex: 'Caffeine improves alertness[^1].\n\n## Sources\n- [Caffeine and cognition](https://example.com/caffeine-study)',
+      s: 'A `[^N]` marker cites the Nth entry (1-indexed) of the note’s own `## Sources` list above. Hover it to preview that source, click it to jump to the matching entry in the Sources panel. A number past the end of the list renders flagged rather than failing silently.' },
     { h: 'Frontmatter', ex: '---\ntitle: RAID levels\ncategory: Storage\nstudy: true\n---',
       s: 'An optional metadata block at the very top of a note. Title and tags are normally set from the UI; `category` and `study: true` are what put a note into Crucible. Only worth hand-editing when pasting a note in from outside the app.' },
   ];
