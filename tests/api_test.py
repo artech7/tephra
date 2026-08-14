@@ -171,13 +171,30 @@ with TestClient(app) as c:
     print("\n── mermaid: a ```mermaid fence renders as a diagram container, not a code block ──")
     h = rendered("```mermaid\ngraph TD\n    A[Start] --> B{Decision}\n```")
     check('renders as <pre class="mermaid">, not <pre><code class="language-mermaid">',
-          '<pre class="mermaid">' in h and "language-mermaid" not in h, h)
+          '<pre class="mermaid" data-mermaid-index="0">' in h and "language-mermaid" not in h, h)
     check("the raw diagram source is preserved (escaped) inside it",
           "graph TD" in h and "A[Start]" in h and "B{Decision}" in h, h)
 
     h = rendered("```python\ndef hello():\n    return \"hi\"\n```")
     check('an ordinary fence is unaffected -- still <pre><code class="language-python">',
           '<pre><code class="language-python">' in h, h)
+
+    print("\n── mermaid: a `|size` on the fence tag persists a manual resize, same as embeds ──")
+    h = rendered("```mermaid|500\ngraph TD\n    A --> B\n```")
+    check("a pixel size becomes an inline width style and the .sized flag",
+          'class="mermaid sized"' in h and 'style="width:500px"' in h, h)
+
+    h = rendered("```mermaid|50%\ngraph TD\n    A --> B\n```")
+    check("a percent size is carried through as-is, not turned into px",
+          'style="width:50%"' in h, h)
+
+    h = rendered("```mermaid|not-a-size\ngraph TD\n    A --> B\n```")
+    check("garbage after the `|` is ignored rather than breaking the render",
+          'class="mermaid"' in h and "sized" not in h and "style=" not in h, h)
+
+    h = rendered("```mermaid|500\ngraph TD\n    A --> B\n```\n\n```mermaid\ngraph TD\n    C --> D\n```")
+    check("each diagram on a note gets its own sequential data-mermaid-index",
+          'data-mermaid-index="0"' in h and 'data-mermaid-index="1"' in h, h)
 
     print("\n── mermaid: fence content is protected from the wikilink/citation/bookmark substitutions ──")
     h = rendered("```mermaid\ngraph TD\n    A --> B[[Subroutine]]\n```")

@@ -1541,6 +1541,23 @@ function setInlineImgWidth(body, index, widthPx) {
   });
 }
 
+/* A ```mermaid diagram gets the same drag-to-resize treatment, persisted
+   the same way: a size on the fence's own info string. Mirrors
+   app/render.py's _fence_rule (lang, "|", size) so the Nth ```mermaid
+   fence here is the Nth one there. Only the opening fence line is
+   rewritten -- the diagram source and closing fence are replaced back in
+   verbatim, never re-parsed -- so this can't corrupt the diagram itself. */
+const MERMAID_FENCE_RE_G = /^```mermaid(?:\|[^\n]*)?\n([\s\S]*?\n```)[ \t]*$/gm;
+
+function setMermaidWidth(body, index, widthPx) {
+  let i = -1;
+  return body.replace(MERMAID_FENCE_RE_G, (whole, rest) => {
+    i++;
+    if (i !== index) return whole;
+    return '```mermaid|' + widthPx + '\n' + rest;
+  });
+}
+
 /* Reordering works on the same "rows are adjacent lines" structure
    app/render.py's own grouping is built on: parse the body into groups of
    embeds (each group = one row, or a lone standalone embed) with the
@@ -1657,12 +1674,28 @@ if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', secu
 
 async function enhanceMermaid() {
   const nodes = [...$('#noteBody').querySelectorAll('pre.mermaid:not([data-processed])')];
-  if (!nodes.length || !window.mermaid) return;
-  // A malformed diagram doesn't land here -- mermaid.run() renders an
-  // inline error diagram per-element by default. This only catches
-  // unexpected/config-level failures.
-  try { await mermaid.run({ nodes }); }
-  catch (err) { console.error('Mermaid render failed', err); }
+  if (nodes.length && window.mermaid) {
+    // A malformed diagram doesn't land here -- mermaid.run() renders an
+    // inline error diagram per-element by default. This only catches
+    // unexpected/config-level failures.
+    try { await mermaid.run({ nodes }); }
+    catch (err) { console.error('Mermaid render failed', err); }
+  }
+  // Handles go on *every* .mermaid block, not just the ones just processed
+  // above -- a re-render (e.g. leaving edit mode) rebuilds #noteBody from
+  // scratch, so even an already-rendered diagram needs them reattached.
+  // Added after mermaid.run(), never before: mermaid replaces the whole
+  // element's content with its SVG, which would silently wipe out any
+  // handle appended ahead of that.
+  for (const fig of $('#noteBody').querySelectorAll('pre.mermaid')) {
+    if (fig.querySelector('.embed-handle')) continue;
+    for (const corner of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('span');
+      h.className = `embed-handle ${corner}`;
+      h.addEventListener('mousedown', (e) => startResize(e, fig, corner, 'mermaid'));
+      fig.appendChild(h);
+    }
+  }
 }
 
 /* Handles are injected client-side rather than rendered server-side: they
@@ -1880,12 +1913,11 @@ async function onResizeUp() {
   // style just set, which is a needless thing to depend on when the value is
   // already in hand.
   const w = lastW ?? Math.round(startW);
-  const dataKey = kind === 'img' ? 'imgIndex' : 'embedIndex';
+  const dataKey = { img: 'imgIndex', embed: 'embedIndex', mermaid: 'mermaidIndex' }[kind];
   const idx = Number(fig.dataset[dataKey]);
   if (Number.isNaN(idx)) return;
-  const newBody = kind === 'img'
-    ? setInlineImgWidth(state.note.body, idx, w)
-    : setEmbedWidth(state.note.body, idx, w);
+  const setWidth = { img: setInlineImgWidth, embed: setEmbedWidth, mermaid: setMermaidWidth }[kind];
+  const newBody = setWidth(state.note.body, idx, w);
   if (newBody === state.note.body) return;
   state.note.body = newBody;
   $('#noteSrc').value = newBody;

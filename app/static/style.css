@@ -399,12 +399,17 @@ body[data-wall="aurora"] .newnote:hover{
    inside its own tiny scroll box instead of the card growing and the page
    (.doc) scrolling normally -- exactly "top shows, bottom is cut off"
    with no visible scrollbar to explain why. */
-.body pre.mermaid{margin:26px 0;padding:20px;border-radius:18px;
+.body pre.mermaid{position:relative;margin:26px 0;padding:20px;border-radius:18px;
   background:rgba(255,255,255,.04);border:1px solid var(--edge);
   box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8);
   overflow-x:auto;overflow-y:visible;display:flex;justify-content:center;
   align-items:flex-start;resize:none;min-height:0}
 .body pre.mermaid svg{max-width:100%;height:auto}
+/* Same corner-drag resize handles .embed/.inline-img use (app.js's
+   enhanceMermaid appends them after mermaid.run(), startResize(..,
+   'mermaid') persists via ```mermaid|N -- see app.js), hidden until
+   hover/drag the same way theirs are. */
+.body pre.mermaid:hover .embed-handle,.body pre.mermaid.resizing .embed-handle{opacity:1}
 .body a:not(.wl):not(.bookmark):not(.filechip){color:#9FE8FF;text-decoration:underline;text-underline-offset:3px}
 
 /* markdown source editing */

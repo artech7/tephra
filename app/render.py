@@ -172,14 +172,31 @@ md.renderer.rules["image"] = _inline_image_rule
 # mermaid.run(), which replaces their content with the rendered SVG client-
 # side. Every other language falls through to markdown-it's own default
 # fence renderer unchanged (captured before this overwrites the rule).
+#
+# A manual resize (drag handles, app.js's startResize with kind='mermaid')
+# persists as ```mermaid|500 -- the same `|size` convention embeds and
+# inline images already use (![[img|400]], ![alt|400](url)), reusing
+# _SIZE_RE so a hand-typed `|50%` works too, not just a dragged pixel
+# value. data-mermaid-index gives the frontend a stable target for that
+# rewrite, the same role data-img-index plays for inline images.
 _default_fence = md.renderer.rules.get("fence")
 
 
 def _fence_rule(tokens, idx, options, env):
     token = tokens[idx]
-    lang = (token.info or "").strip().split()[0] if token.info else ""
+    info = (token.info or "").strip()
+    lang_field, _, size_field = info.partition("|")
+    lang = lang_field.strip().split()[0] if lang_field.strip() else ""
     if lang.lower() == "mermaid":
-        return f'<pre class="mermaid">{html.escape(token.content)}</pre>\n'
+        i = env.get("_mmd_i", 0)
+        env["_mmd_i"] = i + 1
+        size = size_field.strip()
+        size = size if _SIZE_RE.match(size) else None
+        css_width = size if size and size.endswith("%") else f"{size}px" if size else None
+        style = f' style="width:{html.escape(css_width, quote=True)}"' if css_width else ""
+        sized = " sized" if css_width else ""
+        return (f'<pre class="mermaid{sized}" data-mermaid-index="{i}"{style}>'
+                f'{html.escape(token.content)}</pre>\n')
     return _default_fence(tokens, idx, options, env)
 
 
