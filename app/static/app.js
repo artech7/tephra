@@ -516,6 +516,7 @@ async function openNote(slug, push = true) {
   enhanceEmbeds();
   enhanceInlineImages();
   enhanceCodeBlocks();
+  enhanceMermaid();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
   $('#noteBody').hidden = false;
@@ -1152,6 +1153,7 @@ async function setEditing(on) {
     $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
     enhanceEmbeds();
     enhanceCodeBlocks();
+    enhanceMermaid();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
@@ -1627,6 +1629,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   enhanceEmbeds();
   enhanceInlineImages();
   enhanceCodeBlocks();
+  enhanceMermaid();
 }
 
 // The default cap on a rendered code block's height (see .body pre in
@@ -1637,9 +1640,29 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
 const CODE_BLOCK_CAP = 200;
 
 function enhanceCodeBlocks() {
-  for (const pre of $('#noteBody').querySelectorAll('pre')) {
+  // :not(.mermaid) -- a ```mermaid fence renders as <pre class="mermaid">
+  // holding raw diagram source until enhanceMermaid() below replaces it
+  // with an SVG; capping its height here would either clip that source
+  // mid-render or (once it's an SVG) crop the diagram for no reason.
+  for (const pre of $('#noteBody').querySelectorAll('pre:not(.mermaid)')) {
     if (!pre.style.height && pre.scrollHeight > CODE_BLOCK_CAP) pre.style.height = CODE_BLOCK_CAP + 'px';
   }
+}
+
+// vendor/mermaid.min.js, loaded before this file -- startOnLoad:false since
+// note HTML arrives asynchronously well after page load, so rendering is
+// driven per note-render by enhanceMermaid() below instead of mermaid's own
+// automatic whole-document scan.
+if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+
+async function enhanceMermaid() {
+  const nodes = [...$('#noteBody').querySelectorAll('pre.mermaid:not([data-processed])')];
+  if (!nodes.length || !window.mermaid) return;
+  // A malformed diagram doesn't land here -- mermaid.run() renders an
+  // inline error diagram per-element by default. This only catches
+  // unexpected/config-level failures.
+  try { await mermaid.run({ nodes }); }
+  catch (err) { console.error('Mermaid render failed', err); }
 }
 
 /* Handles are injected client-side rather than rendered server-side: they

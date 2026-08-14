@@ -168,6 +168,30 @@ with TestClient(app) as c:
     h = rendered("> Just a normal quote, no [!TYPE] marker.")
     check("an ordinary blockquote is untouched", "<blockquote>" in h and "callout" not in h, h)
 
+    print("\n── mermaid: a ```mermaid fence renders as a diagram container, not a code block ──")
+    h = rendered("```mermaid\ngraph TD\n    A[Start] --> B{Decision}\n```")
+    check('renders as <pre class="mermaid">, not <pre><code class="language-mermaid">',
+          '<pre class="mermaid">' in h and "language-mermaid" not in h, h)
+    check("the raw diagram source is preserved (escaped) inside it",
+          "graph TD" in h and "A[Start]" in h and "B{Decision}" in h, h)
+
+    h = rendered("```python\ndef hello():\n    return \"hi\"\n```")
+    check('an ordinary fence is unaffected -- still <pre><code class="language-python">',
+          '<pre><code class="language-python">' in h, h)
+
+    print("\n── mermaid: fence content is protected from the wikilink/citation/bookmark substitutions ──")
+    h = rendered("```mermaid\ngraph TD\n    A --> B[[Subroutine]]\n```")
+    check("a Mermaid [[Subroutine]] node shape survives literally, not rewritten into a wikilink",
+          "B[[Subroutine]]" in h and 'class="wl' not in h, h)
+
+    h = rendered("```text\nFootnote-looking text: item[^1] appears here.\n```")
+    check("a [^N]-looking token inside a fence stays literal text, not a citation link",
+          "item[^1]" in h and 'class="cite-link' not in h, h)
+
+    h = rendered("```text\nSee also:\nhttps://example.com/whitepaper\n```")
+    check("a bare URL alone on its own line inside a fence stays code, not a bookmark card",
+          'class="bookmark' not in h and "https://example.com/whitepaper" in h, h)
+
     print("\n── search ──")
     s = c.get("/api/search", params={"q": "inverter"}).json()
     check("fts finds note", any(x["slug"] == new["slug"] for x in s), [x["slug"] for x in s])

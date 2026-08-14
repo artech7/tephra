@@ -144,6 +144,7 @@ fmtTabs().find((b) => b.dataset.tab === 'syntax').click();
 ck('markdown syntax reference is included, e.g. wikilinks', fmtHeadings().includes('Wikilinks'), fmtHeadings());
 ck('...and the new Sources section syntax', fmtHeadings().includes('Sources section'), fmtHeadings());
 ck('...and citation markers, right after it', fmtHeadings().includes('Citations'), fmtHeadings());
+ck('...and Mermaid diagrams, right after Code blocks', fmtHeadings().includes('Mermaid diagrams'), fmtHeadings());
 ck('...and what the sidebar note dot colors mean', fmtHeadings().includes('Note list dot colors'), fmtHeadings());
 
 document.querySelector('#svFormatsClose').click();

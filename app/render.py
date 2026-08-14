@@ -13,6 +13,10 @@ a folder of documents:
     [^1]                     a citation, referencing the Nth entry (1-indexed)
                              of this note's own `## Sources` list -- flagged
                              if there's no such entry
+    ```mermaid               a fenced code block tagged "mermaid" renders as
+    graph TD                 a diagram instead of code
+    A --> B
+    ```
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
@@ -54,6 +58,30 @@ md.enable("table")
 md.enable("strikethrough")
 
 URL_LINE_RE = re.compile(r"^\s*(https?://\S+)\s*$", re.M)
+
+# A ```fenced``` block, so WIKI_RE/CITE_RE/URL_LINE_RE below can skip over
+# one instead of reaching inside it. Mermaid's own flowchart syntax uses
+# `id[[Subroutine]]` for a subroutine-shaped node -- indistinguishable from
+# a [[wikilink]] to WIKI_RE unless fence content is protected from it, so
+# without this a Mermaid diagram using that node shape would get silently
+# corrupted into a link mid-diagram. Simplified vs. full CommonMark fence
+# rules (no tilde fences, no indented fences, no 4+ backtick fences) -- good
+# enough to protect the ``` mermaid convention this file actually emits;
+# md.render() below still does the real, spec-accurate fence parsing.
+_FENCE_RE = re.compile(r"^```.*?\n.*?^```[ \t]*$", re.M | re.S)
+
+
+def _skip_fences(text: str, pattern: re.Pattern, repl) -> str:
+    """pattern.sub(repl, text), but only in the gaps between ```fenced```
+    blocks -- see _FENCE_RE."""
+    parts, last = [], 0
+    for m in _FENCE_RE.finditer(text):
+        parts.append(pattern.sub(repl, text[last:m.start()]))
+        parts.append(m.group(0))
+        last = m.end()
+    parts.append(pattern.sub(repl, text[last:]))
+    return "".join(parts)
+
 
 # GitHub/Obsidian callout syntax: a blockquote whose first line is a bare
 # `[!TYPE]` marker, optionally followed by a custom title on that same line.
@@ -137,6 +165,25 @@ def _inline_image_rule(tokens, idx, options, env):
 
 
 md.renderer.rules["image"] = _inline_image_rule
+
+
+# ```mermaid fences render as <pre class="mermaid"> holding the raw diagram
+# source; the frontend's enhanceMermaid() finds those and hands them to
+# mermaid.run(), which replaces their content with the rendered SVG client-
+# side. Every other language falls through to markdown-it's own default
+# fence renderer unchanged (captured before this overwrites the rule).
+_default_fence = md.renderer.rules.get("fence")
+
+
+def _fence_rule(tokens, idx, options, env):
+    token = tokens[idx]
+    lang = (token.info or "").strip().split()[0] if token.info else ""
+    if lang.lower() == "mermaid":
+        return f'<pre class="mermaid">{html.escape(token.content)}</pre>\n'
+    return _default_fence(tokens, idx, options, env)
+
+
+md.renderer.rules["fence"] = _fence_rule
 
 
 def _split_embed_extra(raw: str | None) -> tuple[str | None, str | None]:
@@ -381,11 +428,13 @@ def render(body: str, resolve, sources=()) -> tuple[str, list[str], list[str]]:
     text, embed_used = _embed_runs(body, stash)
     used.extend(embed_used)
 
-    # inline, so it must survive markdown; stash these too
-    text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), text)
-    text = CITE_RE.sub(lambda m: stash(on_cite(m)), text)
-    text = URL_LINE_RE.sub(lambda m: "\n\n" + stash(_bookmark_html(m.group(1))) + "\n\n",
-                           text)
+    # inline, so it must survive markdown; stash these too. Skipping fences
+    # so a literal [[...]]/[^N]/bare URL inside a code sample (a Mermaid
+    # [[Subroutine]] node, most concretely) isn't corrupted -- see _FENCE_RE.
+    text = _skip_fences(text, WIKI_RE, lambda m: stash(on_wiki(m)))
+    text = _skip_fences(text, CITE_RE, lambda m: stash(on_cite(m)))
+    text = _skip_fences(text, URL_LINE_RE,
+                         lambda m: "\n\n" + stash(_bookmark_html(m.group(1))) + "\n\n")
 
     out = _unwrap_placeholder_p(_EXTERNAL_LINK_RE.sub(_open_externally, md.render(text)))
 

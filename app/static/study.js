@@ -221,6 +221,8 @@
       s: 'Standard GitHub-flavoured markdown tables.' },
     { h: 'Code blocks', ex: '```python\ndef hello():\n    return "hi"\n```',
       s: 'Fenced code, with an optional language after the opening ` ``` `. Renders in a scrollable, resizable box.' },
+    { h: 'Mermaid diagrams', ex: '```mermaid\ngraph TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[Do it]\n  B -->|No| D[Skip it]\n```',
+      s: 'A fenced code block tagged `mermaid` renders as a diagram instead of code -- flowcharts, sequence diagrams, class diagrams, Gantt charts, and everything else Mermaid supports. Same fence syntax as any other language, just with `mermaid` as the tag.' },
     { h: 'Quiz section', ex: '## Quiz\n\nQ: Which protocol resolves names to addresses?\n- [x] DNS\n- ARP\nWhy: DNS maps hostnames to IP addresses.',
       s: 'A `## Quiz` heading turns the rest of the note into flashcard/quiz data instead of prose -- also editable as a form in the Quiz panel below the note. Mark correct options with `[x]`; more than one marked option makes it a multiple-answer question. Always the last section in a note.' },
     { h: 'Sources section', ex: '## Sources\n- [RFC 3720](https://www.rfc-editor.org/rfc/rfc3720)\n- https://example.com/whitepaper.pdf',
