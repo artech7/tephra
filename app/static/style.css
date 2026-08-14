@@ -446,7 +446,7 @@ body[data-wall="aurora"] .newnote:hover{
    only the list itself needs its own rules. */
 .sources-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
 .sources-item{font-size:13.5px;line-height:1.5;color:var(--muted);padding-left:16px;position:relative;
-  transition:background 1.2s var(--ease);border-radius:var(--r-sm)}
+  transition:background 1.2s var(--ease),box-shadow 1.2s var(--ease);border-radius:var(--r-sm)}
 .sources-item::before{content:'';position:absolute;left:0;top:.65em;width:5px;height:5px;border-radius:50%;
   background:var(--faint)}
 .sources-link{color:var(--paper);text-decoration:none;border-bottom:1px solid rgba(var(--acc),.35);
@@ -519,7 +519,31 @@ body[data-wall="aurora"] .newnote:hover{
   padding:10px 12px;font-size:12.5px;line-height:1.45;color:var(--muted)}
 .cite-popup-text{color:var(--paper);margin-bottom:4px}
 .cite-popup-url{font-family:var(--mono);font-size:10.5px;color:var(--faint);word-break:break-all}
-.sources-item.cite-highlight{background:rgba(var(--acc),.16)}
+/* Clicking a citation flashes its Sources entry with the same Gel-pill
+   glossy cap as .wl plus the drift-animated holo ring .node[aria-current]/
+   .ctx-toggle use -- not mouse-tracked, since this fires from a click that
+   may have landed nowhere near the entry itself (the panel can still be
+   opening/scrolling into place when the class lands). z-index:-1 on the
+   ring, same as .wl::before, so it sits behind the row's own text instead
+   of needing to lift the text onto its own stacking layer. A quicker cycle
+   than the 6s ambient ones -- this ring is only ever on screen for the
+   ~1.4s citations.js keeps the class applied, so a slower drift would
+   barely have moved before it's gone. */
+.sources-item.cite-highlight{
+  background:radial-gradient(120% 180% at 50% -40%,rgba(255,255,255,.30),transparent 55%),
+    linear-gradient(180deg,rgba(var(--acc),.24),rgba(var(--acc),.08));
+  box-shadow:0 1px 0 rgba(255,255,255,.22) inset,
+    0 0 10px -8px var(--accent),0 0 14px -9px var(--cruc-a),0 0 18px -10px var(--cruc-b)}
+.sources-item.cite-highlight::after{content:'';position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none;
+  padding:1.5px;
+  background-image:radial-gradient(circle,var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  background-size:220% 220%;
+  background-position:20% 30%;
+  animation:node-holo-drift 1.3s ease-in-out infinite alternate;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+          mask-composite:exclude}
+@media (prefers-reduced-motion: reduce){.sources-item.cite-highlight::after{animation:none;background-position:50% 50%}}
 
 /* media embeds */
 .embed{position:relative;margin:26px 0;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8)}
