@@ -851,7 +851,6 @@
       }
       vault.appendChild(list);
     }
-    panel.appendChild(vault);
 
     const cruc = document.createElement('section');
     cruc.className = 'gv-stat-section';
@@ -906,7 +905,11 @@
       hint.textContent = 'Crucible study data unavailable.';
       cruc.appendChild(hint);
     }
-    panel.appendChild(cruc);
+
+    const grid = document.createElement('div');
+    grid.className = 'gv-stats-grid';
+    grid.append(vault, cruc);
+    panel.appendChild(grid);
   }
 
   /* Frame the nodes, not the nominal world box. The layout only occupies part

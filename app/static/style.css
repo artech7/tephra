@@ -1384,8 +1384,24 @@ input.sv-select{cursor:text}
 #statsview.on{opacity:1;pointer-events:auto}
 .stv-head{display:flex;align-items:center;gap:20px;padding:18px 26px;border-bottom:1px solid var(--edge)}
 .stv-head h3{font-size:20px;font-weight:600;letter-spacing:-.03em}
+/* Widening the panel alone (a prior pass raised max-width 760->1100) still
+   read as one long centered column, because every list inside it --
+   category bars, quiz-accuracy bars, most-linked -- was a strict single-
+   column stack regardless of how much width the panel actually had. Two
+   changes together, not one: the overview's two sections go side by side
+   (.gv-stats-grid below, not #gvStatsPanel itself -- the category drill-
+   down view renders into this same panel with an unrelated two-child
+   shape, a back button + one list, that a panel-level grid would have
+   split into two lopsided columns), and every list inside a section
+   (.gv-stat-bars, .gv-stat-list below) is a repeat(auto-fill) grid so it
+   wraps into as many columns as actually fit, rather than a fixed count
+   that's wrong at some width. */
 #gvStatsPanel{display:flex;flex-direction:column;gap:26px;
-  overflow-y:auto;padding:22px 26px 60px;max-width:1100px;margin:0 auto}
+  overflow-y:auto;padding:22px 26px 60px;max-width:1600px;width:100%;margin:0 auto}
+.gv-stats-grid{display:flex;flex-direction:column;gap:26px}
+@media(min-width:900px){
+  .gv-stats-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;align-items:start}
+}
 .gv-stat-section h4{font-size:13px;font-weight:600;letter-spacing:-.01em;margin-bottom:14px}
 .gv-stat-tiles{display:flex;flex-wrap:wrap;gap:1px;
   background:var(--edge);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
@@ -1395,7 +1411,7 @@ input.sv-select{cursor:text}
 .gv-stat-tile span{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--faint)}
 .gv-stat-subhead{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--faint);margin:18px 0 8px}
-.gv-stat-bars{display:flex;flex-direction:column;gap:9px}
+.gv-stat-bars{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 22px;align-items:center}
 .gv-stat-bar-row{display:grid;grid-template-columns:120px 1fr 34px;align-items:center;gap:10px;font-size:12px;
   width:100%;font:inherit;color:inherit;background:none;border:1px solid transparent;border-radius:8px;
   padding:3px 6px;margin:0 -6px;cursor:pointer;text-align:left;transition:.18s var(--ease)}
@@ -1409,6 +1425,7 @@ input.sv-select{cursor:text}
 .gv-stat-bar-track{height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
 .gv-stat-bar-fill{display:block;height:100%;border-radius:4px;background:var(--accent);min-width:4px}
 .gv-stat-bar-val{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-align:right}
+.gv-p-list.gv-stat-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:1px 16px}
 .gv-stat-list .gv-p-row{cursor:pointer}
 .gv-stat-list-n{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);flex:none}
 
