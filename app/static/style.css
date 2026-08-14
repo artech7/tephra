@@ -434,6 +434,11 @@ body[data-wall="aurora"] .newnote:hover{
 .ndg-label{font-family:var(--display);font-size:12.5px;fill:var(--paper)}
 .ndg-link-line{stroke:rgba(var(--acc),.55);stroke-width:2}
 .ndg-link-label{font-family:var(--mono);font-size:10px;fill:var(--faint)}
+/* A `grid` device's ports (netdiagram.js's portsOf -- whatever its own
+   link lines reference, never separately declared) as small cells across
+   its face, like a switch panel silkscreen. */
+.ndg-port-cell{fill:rgba(255,255,255,.09);stroke:var(--edge);stroke-width:1}
+.ndg-port-label{font-family:var(--mono);font-size:8px;fill:var(--faint);pointer-events:none}
 .ndg-device{cursor:pointer}
 .ndg-device.ndg-selected .ndg-box,.ndg-link.ndg-selected .ndg-link-line{stroke:var(--accent);stroke-width:2.5}
 /* Same hover-reveal handles already use on .embed/.mermaid -- this card's
@@ -998,6 +1003,8 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
 .ndg-field input{background:rgba(255,255,255,.06);border:1px solid var(--edge);border-radius:8px;
   padding:8px 10px;color:var(--paper);font:inherit;font-size:13px}
 .ndg-field input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.ndg-checkrow{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.ndg-checkrow input{accent-color:rgb(var(--accent));cursor:pointer}
 .ndg-btn{align-self:flex-start;background:rgba(255,255,255,.08);border:1px solid var(--edge);
   color:var(--muted);border-radius:8px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;transition:.2s var(--ease)}
 .ndg-btn:hover{color:#fff;background:rgba(255,255,255,.14)}

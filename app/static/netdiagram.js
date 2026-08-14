@@ -9,7 +9,7 @@
    server-side needs to understand this syntax's structure.
 
    Grammar:
-     device <id> "<label>" [at <x>,<y>]
+     device <id> "<label>" [at <x>,<y>] [grid]
      link <id.PORT[-N]> -> <id.PORT[-N]> ["<label>"] [#<tag>]
 
    A dotted id (c1.fiom0) nests under the device named by everything
@@ -23,6 +23,14 @@
    STATEMENT touching it, not one per individual port. Malformed lines
    collect as errors rather than aborting the parse, same "a typo can't
    take down the whole thing" philosophy as ## Quiz.
+
+   `grid` on a device (e.g. a switch chassis) draws its ports as a row of
+   labeled cells across its face instead of the plain box above -- but
+   there is no separate port-declaration syntax for it: the ports shown
+   are exactly whatever its own link lines already reference (still with
+   the same ETH1-4 range shorthand, still bundled into one ×N line), just
+   rendered against the specific port cell(s) they touch instead of a
+   generic edge anchor. A port never mentioned in a link never appears.
    ══════════════════════════════════════════════════════════════ */
 (function () {
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -30,7 +38,7 @@
 
   /* ── parsing ──────────────────────────────────────────────── */
 
-  const DEVICE_RE = /^device\s+(\S+)\s+"([^"]*)"(?:\s+at\s+(-?\d+)\s*,\s*(-?\d+))?\s*$/;
+  const DEVICE_RE = /^device\s+(\S+)\s+"([^"]*)"(?:\s+at\s+(-?\d+)\s*,\s*(-?\d+))?(?:\s+(grid))?\s*$/;
   const LINK_RE = /^link\s+(\S+)\s+->\s+(\S+)(?:\s+"([^"]*)")?(?:\s+#(\S+))?\s*$/;
 
   // "ETH1-4" -> ["ETH1","ETH2","ETH3","ETH4"]; "ETH1" -> ["ETH1"];
@@ -72,7 +80,7 @@
       if (!line.startsWith('device ')) { errors.push({ line: i + 1, message: 'Unrecognized line', raw }); return; }
       const m = DEVICE_RE.exec(line);
       if (!m) { errors.push({ line: i + 1, message: 'Malformed device line', raw }); return; }
-      const [, id, label, xs, ys] = m;
+      const [, id, label, xs, ys, gridFlag] = m;
       if (devices.has(id)) { errors.push({ line: i + 1, message: `Duplicate device "${id}"`, raw }); return; }
       const dot = id.lastIndexOf('.');
       const parentId = dot === -1 ? null : id.slice(0, dot);
@@ -85,6 +93,7 @@
         x: xs != null ? Number(xs) : null,
         y: ys != null ? Number(ys) : null,
         hasPos: xs != null,
+        grid: Boolean(gridFlag),
       });
     });
 
@@ -124,6 +133,7 @@
     for (const d of model.devices.values()) {
       let line = `device ${d.id} "${d.label}"`;
       if (d.hasPos) line += ` at ${Math.round(d.x)},${Math.round(d.y)}`;
+      if (d.grid) line += ' grid';
       lines.push(line);
     }
     if (model.devices.size && model.links.length) lines.push('');
@@ -152,6 +162,33 @@
     return counts;
   }
 
+  // A `grid` device's ports are never separately declared -- they're
+  // exactly whatever its own link lines already reference, deduped and
+  // laid out as a wrapping grid of cells. naturalCompare sorts ETH2 before
+  // ETH10 (a plain string sort wouldn't); a port with no trailing digits
+  // just falls back to plain string order.
+  function naturalCompare(a, b) {
+    const ma = /^(.*?)(\d+)$/.exec(a), mb = /^(.*?)(\d+)$/.exec(b);
+    if (ma && mb && ma[1] === mb[1]) return Number(ma[2]) - Number(mb[2]);
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+
+  function portsOf(model, deviceId) {
+    const set = new Set();
+    for (const l of model.links) {
+      if (l.fromDevice === deviceId) l.fromPorts.forEach((p) => set.add(p));
+      if (l.toDevice === deviceId) l.toPorts.forEach((p) => set.add(p));
+    }
+    return [...set].sort(naturalCompare);
+  }
+
+  const CELL_W = 42, CELL_H = 30, MAX_COLS = 8;
+
+  function gridDims(count) {
+    const cols = Math.max(1, Math.min(count, MAX_COLS));
+    return { cols, rows: Math.max(1, Math.ceil(count / cols)) };
+  }
+
   const PAD = 14, GAP = 16, HEADER = 34;
 
   function layoutNetDiagram(model) {
@@ -167,10 +204,15 @@
     const anchorCounts = countAnchors(model);
 
     function baseSize(d) {
-      const w = Math.max(110, Math.ceil((d.label || d.id).length * 7.2) + 32);
+      const labelW = Math.max(110, Math.ceil((d.label || d.id).length * 7.2) + 32);
+      if (d.grid) {
+        const ports = portsOf(model, d.id);
+        const { cols, rows } = gridDims(ports.length || 1);
+        return { w: Math.max(labelW, cols * CELL_W + PAD * 2), h: HEADER + rows * CELL_H + PAD };
+      }
       const ac = anchorCounts.get(d.id) || 0;
       const h = Math.max(50, ac * 22 + 16);
-      return { w, h };
+      return { w: labelW, h };
     }
 
     const sizeCache = new Map();
@@ -203,7 +245,22 @@
 
     function place(id, originX, originY) {
       const size = sizeOf(id);
-      positions.set(id, { x: originX, y: originY, w: size.w, h: size.h });
+      const entry = { x: originX, y: originY, w: size.w, h: size.h };
+      const d = devices.get(id);
+      if (d.grid) {
+        const ports = portsOf(model, id);
+        const { cols } = gridDims(ports.length || 1);
+        const cells = new Map();
+        ports.forEach((p, i) => {
+          const col = i % cols, row = Math.floor(i / cols);
+          cells.set(p, {
+            x: originX + PAD + col * CELL_W + CELL_W / 2,
+            y: originY + HEADER + row * CELL_H + CELL_H / 2,
+          });
+        });
+        entry.portCells = cells;
+      }
+      positions.set(id, entry);
       for (const kid of childrenOf.get(id) || []) {
         const off = relOffset(kid);
         place(kid, originX + off.x, originY + off.y);
@@ -232,6 +289,7 @@
       const p = positions.get(id);
       return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
     }
+    const anchors = new Map();
     const bySide = new Map();
     function bucket(id) {
       if (!bySide.has(id)) bySide.set(id, { left: [], right: [], top: [], bottom: [] });
@@ -239,16 +297,28 @@
     }
     const touches = [];
     for (const l of model.links) {
-      touches.push({ link: l, deviceId: l.fromDevice, otherId: l.toDevice, end: 'from' });
-      touches.push({ link: l, deviceId: l.toDevice, otherId: l.fromDevice, end: 'to' });
+      touches.push({ link: l, deviceId: l.fromDevice, otherId: l.toDevice, end: 'from', ports: l.fromPorts });
+      touches.push({ link: l, deviceId: l.toDevice, otherId: l.fromDevice, end: 'to', ports: l.toPorts });
     }
     for (const t of touches) {
+      // A grid device: anchor at the centroid of the specific port cell(s)
+      // this link end actually touches (still one point for a bundled
+      // range -- the middle of the cells it spans), not a generic
+      // edge-spaced point that ignores which ports are actually wired.
+      const cells = positions.get(t.deviceId)?.portCells;
+      if (cells) {
+        let sx = 0, sy = 0, n = 0;
+        for (const port of t.ports) {
+          const c = cells.get(port);
+          if (c) { sx += c.x; sy += c.y; n++; }
+        }
+        if (n) { anchors.set(`${t.link.idx}:${t.end}`, { x: sx / n, y: sy / n }); continue; }
+      }
       const a = center(t.deviceId), b = center(t.otherId);
       const dx = b.x - a.x, dy = b.y - a.y;
       const side = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top');
       bucket(t.deviceId)[side].push(t);
     }
-    const anchors = new Map();
     for (const [id, sides] of bySide) {
       const p = positions.get(id);
       for (const side of ['left', 'right', 'top', 'bottom']) {
@@ -354,6 +424,24 @@
       text.textContent = d.label;
       g.appendChild(rect);
       g.appendChild(text);
+      // A `grid` device's ports, laid out by layoutNetDiagram/portsOf --
+      // cell centers there are absolute (same coordinate space as
+      // positions), so they're re-based to the box's own origin here since
+      // this whole <g> is already translated to that origin.
+      if (p.portCells) {
+        for (const [portName, cell] of p.portCells) {
+          const cx = cell.x - p.x, cy = cell.y - p.y;
+          const cellRect = svgEl('rect', {
+            x: cx - CELL_W / 2 + 3, y: cy - CELL_H / 2 + 3,
+            width: CELL_W - 6, height: CELL_H - 6, rx: 4,
+            class: 'ndg-port-cell',
+          });
+          const cellLabel = svgEl('text', { x: cx, y: cy + 3, class: 'ndg-port-label', 'text-anchor': 'middle' });
+          cellLabel.textContent = portName;
+          g.appendChild(cellRect);
+          g.appendChild(cellLabel);
+        }
+      }
       devicesLayer.appendChild(g);
       deviceEls.set(d.id, { g, rect, text });
       if (opts.onDeviceDown) {
@@ -474,6 +562,20 @@
     input.addEventListener('change', () => onChange(input.value.trim()));
     row.appendChild(span);
     row.appendChild(input);
+    return row;
+  }
+
+  function checkboxRow(labelText, checked, onChange) {
+    const row = document.createElement('label');
+    row.className = 'ndg-checkrow';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = Boolean(checked);
+    input.addEventListener('change', () => onChange(input.checked));
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    row.appendChild(input);
+    row.appendChild(span);
     return row;
   }
 
@@ -666,6 +768,11 @@
       const d = ed.model.devices.get(ed.selected.id);
       if (!d) { ed.selected = null; renderInspector(); return; }
       host.appendChild(fieldRow('Label', d.label, (v) => { d.label = v || d.id; renderEditorCanvas(); scheduleSave(); }));
+      host.appendChild(checkboxRow('Grid layout (show ports)', d.grid, (checked) => {
+        d.grid = checked;
+        renderEditorCanvas();
+        scheduleSave();
+      }));
       const subBtn = document.createElement('button');
       subBtn.type = 'button';
       subBtn.className = 'ndg-btn';

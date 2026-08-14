@@ -56,6 +56,45 @@ console.log('\n── layout: auto-placement, nesting wraps children, bundled li
      parent.y + parent.h >= k2.y + k2.h, [parent, k2]);
 }
 
+console.log('\n── grid devices: ports are derived from links, never separately declared ──');
+{
+  const m = ndg.parse('device sw "Switch" grid\ndevice a "A"\nlink sw.ETH1-4 -> a.P1-4 "x"\n');
+  ck('the grid flag parses', m.devices.get('sw').grid === true);
+  ck('a plain device defaults to grid:false', m.devices.get('a').grid === false);
+  ck('grid survives a serialize round-trip', ndg.serialize(m).includes('device sw "Switch" grid'), ndg.serialize(m));
+
+  const pos = ndg.layout(m);
+  const sw = pos.get('sw');
+  // Not instanceof Map -- netdiagram.js runs inside the jsdom window's own
+  // realm (window.eval), so its Map constructor isn't reference-equal to
+  // this script's own global Map even for a genuine Map instance.
+  ck('a grid device gets a portCells map', typeof sw.portCells?.get === 'function' && sw.portCells.size === 4, sw);
+  ck('exactly the 4 referenced ports appear, in natural numeric order',
+     [...sw.portCells.keys()].join(',') === 'ETH1,ETH2,ETH3,ETH4', [...sw.portCells.keys()]);
+  ck('a port never mentioned in a link never appears',
+     !sw.portCells.has('ETH5'));
+
+  const anchors = ndg.anchors(m, pos);
+  const anchor = anchors.get('0:from');
+  const eth1 = sw.portCells.get('ETH1'), eth4 = sw.portCells.get('ETH4');
+  ck('the bundled link\'s anchor sits at the centroid of the ports it actually spans, not a generic edge point',
+     anchor.x === (eth1.x + eth4.x) / 2 && anchor.y === (eth1.y + eth4.y) / 2, [anchor, eth1, eth4]);
+}
+{
+  const many = ['device sw "Switch" grid', 'device a "A"'];
+  for (let i = 1; i <= 20; i++) many.push(`device a.p${i} "p${i}"`);
+  // 20 ports referenced across 5 bundled links -- exercises the wrap-to-
+  // multiple-rows path (MAX_COLS is 8), matching the real XFM's port count.
+  const linkLines = [];
+  for (let i = 1; i <= 20; i += 4) linkLines.push(`link sw.ETH${i}-${i + 3} -> a.p${i}-${i + 3} "x"`);
+  const m2 = ndg.parse(many.slice(0, 2).concat(linkLines).join('\n'));
+  ck('no errors on a 20-port grid device', m2.errors.length === 0, m2.errors);
+  const pos2 = ndg.layout(m2);
+  ck('all 20 ports laid out', pos2.get('sw').portCells.size === 20);
+  ck('wraps into multiple rows rather than one absurdly wide box',
+     pos2.get('sw').h > 50 && pos2.get('sw').w < 500, pos2.get('sw'));
+}
+
 console.log('\n── serializer round-trips the user\'s actual XFM cabling example ──');
 {
   const xfm = [
@@ -189,6 +228,21 @@ deleteBtn.click();
 ck('first click only arms it, does not delete yet', doc.querySelectorAll('#ndgCanvas .ndg-link').length === 2);
 deleteBtn.click();
 ck('second click confirms the delete', doc.querySelectorAll('#ndgCanvas .ndg-link').length === 1);
+
+console.log('\n── toggling grid layout on a device from the inspector ──');
+fire(doc.querySelector('#ndgCanvas .ndg-device[data-id="a"]'), 'mousedown', { clientX: 50, clientY: 50 });
+fire(doc, 'mouseup', { clientX: 50, clientY: 50 });
+const gridCheckbox = doc.querySelector('#ndgInspector .ndg-checkrow input');
+ck('inspector offers a grid-layout checkbox for the selected device', !!gridCheckbox);
+ck('starts unchecked', gridCheckbox.checked === false);
+gridCheckbox.checked = true;
+gridCheckbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+ck('device a\'s box now shows its one referenced port ("P1") as a cell',
+   doc.querySelectorAll('#ndgCanvas .ndg-device[data-id="a"] .ndg-port-cell').length === 1,
+   [...doc.querySelectorAll('#ndgCanvas .ndg-device[data-id="a"] .ndg-port-label')].map((t) => t.textContent));
+await new Promise((r) => setTimeout(r, 600));
+ck('the grid keyword persists into the note body', doc.querySelector('#noteSrc').value.includes('device a "Renamed A" at'), doc.querySelector('#noteSrc').value);
+ck('...specifically with grid appended', /device a "Renamed A" at \d+,\d+ grid/.test(doc.querySelector('#noteSrc').value), doc.querySelector('#noteSrc').value);
 
 console.log('\n── closing the editor re-renders the inline card from the edited model ──');
 doc.querySelector('#ndgClose').click();
