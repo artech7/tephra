@@ -6,6 +6,7 @@ const dom = new JSDOM(fs.readFileSync(`${ROOT}/index.html`, 'utf8'),
 const { window } = dom; const doc = window.document;
 let ok = 0, fail = 0;
 const ck = (l, c, x = '') => { c ? (ok++, console.log(`  PASS  ${l} ${x}`)) : (fail++, console.log(`  FAIL  ${l} ${x}`)); };
+const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
 // jsdom has no layout engine, so scrollIntoView is left unimplemented --
 // stub it so a click can be asserted on rather than just not crashing.
@@ -54,39 +55,51 @@ window.eval(fs.readFileSync(`${ROOT}/app.js`, 'utf8'));
 window.eval(fs.readFileSync(`${ROOT}/quiz-editor.js`, 'utf8'));
 window.eval(fs.readFileSync(`${ROOT}/sources-panel.js`, 'utf8'));
 window.eval(fs.readFileSync(`${ROOT}/citations.js`, 'utf8'));
-await new Promise((r) => setTimeout(r, 90));
+await tick(90);
 
 const fire = (el, type) => el.dispatchEvent(new window.MouseEvent(type, { bubbles: true }));
+const lens = () => doc.querySelector('#lens');
 
-console.log('── hovering a resolved citation shows a popup with its source ──');
+console.log('── hovering a resolved citation opens the same #lens a wikilink does ──');
 const good = doc.querySelector('.cite-link:not(.missing)');
 ck('citation marker rendered in note body', !!good);
 fire(good, 'mouseover');
-const popup = doc.querySelector('.cite-popup');
-ck('popup appears on hover', !!popup && popup.hidden === false);
-ck('popup shows the source text', popup.textContent.includes('Wikipedia'));
-ck('popup shows the source url', popup.textContent.includes('https://en.wikipedia.org/wiki/Example'));
+await tick(200);   // app.js debounces the lens open by 160ms
+ck('lens opens on hover', lens().classList.contains('on'));
+ck('kind label says SOURCE', doc.querySelector('#lensKind').textContent === 'SOURCE');
+ck('title is the source text', doc.querySelector('#lensTitle').textContent === 'Wikipedia');
+ck('body is the source url', doc.querySelector('#lensBody').textContent === 'https://en.wikipedia.org/wiki/Example');
+ck('meta names the citation number', doc.querySelector('#lensMeta').textContent.includes('Source #1'));
 fire(good, 'mouseout');
-ck('popup hides on mouseout', popup.hidden === true);
+ck('lens closes on mouseout', lens().classList.contains('on') === false);
 
-console.log('\n── hovering a missing citation explains why ──');
+console.log('\n── hovering a missing citation explains why, in the same lens ──');
 const missing = doc.querySelector('.cite-link.missing');
 ck('an out-of-range marker is flagged', !!missing);
 fire(missing, 'mouseover');
-ck('popup explains the source was not found',
-   popup.textContent.includes('#5') && popup.textContent.includes('not found'));
+await tick(200);
+ck('kind label flags it', doc.querySelector('#lensKind').textContent === 'MISSING SOURCE');
+ck('title names the citation number', doc.querySelector('#lensTitle').textContent === 'Citation #5');
+ck('body explains it was not found',
+   doc.querySelector('#lensBody').textContent.includes('Not found') &&
+   doc.querySelector('#lensBody').textContent.includes('Sources list'));
 fire(missing, 'mouseout');
+ck('lens closes on mouseout', lens().classList.contains('on') === false);
 
-console.log('\n── clicking a resolved citation opens the Sources panel and jumps to it ──');
+console.log('\n── clicking a resolved citation closes the lens, opens Sources, and jumps to it ──');
+fire(good, 'mouseover');
+await tick(200);
+ck('lens open before the click', lens().classList.contains('on'));
 const sourcesBody = doc.querySelector('#sourcesBody');
 ck('sources panel starts collapsed', sourcesBody.hidden === true);
 fire(good, 'click');
+ck('lens closes on click', lens().classList.contains('on') === false);
 ck('sources panel opens on click', sourcesBody.hidden === false);
 const target = doc.getElementById('src-1');
 ck('the matching source entry is highlighted', !!target && target.classList.contains('cite-highlight'));
 ck('the matching source entry is scrolled into view', target?.__scrolledIntoView === true);
 
-console.log('\n── clicking a missing citation is a no-op beyond the popup ──');
+console.log('\n── clicking a missing citation is a no-op beyond closing the lens ──');
 [...doc.querySelectorAll('.sources-item')].forEach((li) => li.classList.remove('cite-highlight'));
 fire(missing, 'click');
 ck('no source entry gets highlighted for an unresolved citation',

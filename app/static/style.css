@@ -513,12 +513,9 @@ body[data-wall="aurora"] .newnote:hover{
 .cite-link::after{content:']'}
 .cite-link:hover{text-decoration:underline}
 .cite-link.missing{color:#FFDCC9;text-decoration:none;border-bottom:1px dashed rgba(var(--apricot),.6)}
-.cite-popup{position:fixed;z-index:120;max-width:280px;pointer-events:none;
-  background:rgba(20,22,24,.96);border:1px solid var(--edge);border-radius:var(--r-sm);
-  box-shadow:0 1px 0 var(--edge-hi) inset,0 16px 40px -18px rgba(0,0,0,.85);
-  padding:10px 12px;font-size:12.5px;line-height:1.45;color:var(--muted)}
-.cite-popup-text{color:var(--paper);margin-bottom:4px}
-.cite-popup-url{font-family:var(--mono);font-size:10.5px;color:var(--faint);word-break:break-all}
+/* Hovering a citation opens #lens, the same popup a [[wikilink]] gets --
+   see app.js's citationLensData and the hover listeners it feeds into --
+   so there is no separate popup styling here for it. */
 /* Clicking a citation flashes its Sources entry with the same Gel-pill
    glossy cap as .wl plus the drift-animated holo ring .node[aria-current]/
    .ctx-toggle use -- not mouse-tracked, since this fires from a click that

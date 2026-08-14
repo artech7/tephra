@@ -1356,15 +1356,33 @@ if (!reduce) {
   });
 }
 
+// A [^N] citation needs none of the wikilink branch's fetch/cache -- its
+// text/url already sit on the anchor's own data attributes -- but it opens
+// the exact same #lens, tilt and all, rather than a second popup
+// implementation of its own.
+function citationLensData(a) {
+  const idx = a.dataset.idx;
+  if (a.classList.contains('missing')) {
+    return { k: 'MISSING SOURCE', t: `Citation #${idx}`,
+      b: "Not found in this note's Sources list.",
+      m: 'Add a source, or fix the citation number' };
+  }
+  return { k: 'SOURCE', t: a.dataset.text || 'Untitled source',
+    b: a.dataset.url || 'No link for this source.',
+    m: `Source #${idx} · click to jump to it below` };
+}
+
 document.addEventListener('mouseover', async (e) => {
-  const a = e.target.closest('a.wl');
+  const a = e.target.closest('a.wl, a.cite-link');
   if (!a) return;
   clearTimeout(lensT);
   lensFor = a;
   lensT = setTimeout(async () => {
     const lens = $('#lens');
     let data;
-    if (a.dataset.slug) {
+    if (a.classList.contains('cite-link')) {
+      data = citationLensData(a);
+    } else if (a.dataset.slug) {
       if (!lensCache.has(a.dataset.slug)) {
         try { lensCache.set(a.dataset.slug, await api('/notes/' + a.dataset.slug)); }
         catch { return; }
@@ -1396,7 +1414,7 @@ document.addEventListener('mouseover', async (e) => {
 });
 
 document.addEventListener('mouseout', (e) => {
-  if (e.target.closest('a.wl')) hideLens();
+  if (e.target.closest('a.wl, a.cite-link')) hideLens();
 });
 
 // mouseout is not enough on its own. Removing a hovered element does not fire
