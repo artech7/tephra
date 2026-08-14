@@ -27,6 +27,10 @@ def db_path():
 EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*(?:\|([^\]]*))?\]\]")
 WIKI_RE = re.compile(r"(?<!!)\[\[\s*([^\]|]+?)\s*(?:\|([^\]]*))?\]\]")
 TAG_RE = re.compile(r"(?:^|\s)#([\w-]{2,40})")
+# A citation marker referencing the Nth entry (1-indexed) of the note's own
+# `## Sources` list. `[^N]` rather than bare `[N]` because bare brackets
+# collide with ordinary prose; this doesn't collide with anything else here.
+CITE_RE = re.compile(r"\[\^(\d+)\]")
 CODE_RE = re.compile(r"`[^`]*`|```.*?```", re.S)
 
 # Spans the auto-linker must never write inside. Existing links are the

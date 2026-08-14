@@ -694,6 +694,31 @@ with TestClient(app) as c:
     check("save_note's own response reports the new sources",
        resaved["sources"] == [{"text": "Only", "url": "https://only.example"}], resaved["sources"])
 
+    print("\n── citations: [^N] markers index into the note's own Sources list ──")
+    cnote = c.post("/api/notes", json={"title": "Citations Note", "body": (
+        "Caffeine improves alertness[^1]. A wider claim[^2] needs more evidence[^5].\n\n"
+        "## Sources\n"
+        "- [Caffeine study](https://example.com/caffeine)\n"
+        "- Baker et al., a plain-text citation with no link\n"
+    )}).json()
+    chtml = c.get(f"/api/notes/{cnote['slug']}").json()["html"]
+    check("[^1] renders as a resolved citation link, numbered and anchored",
+       '<sup class="cite-ref"><a class="cite-link" href="#src-1" data-idx="1"' in chtml, chtml)
+    check("[^1]'s data attributes carry its source's text and url",
+       'data-text="Caffeine study" data-url="https://example.com/caffeine"' in chtml, chtml)
+    check("[^2] resolves against the second source, with no url to carry",
+       'href="#src-2" data-idx="2" data-text="Baker et al., a plain-text citation with no link" data-url=""'
+       in chtml, chtml)
+    check("[^5], past the end of a two-item Sources list, is flagged instead of silently wrong",
+       'class="cite-link missing" data-idx="5"' in chtml, chtml)
+
+    print("\n── citations: [^N] with no Sources block at all is flagged, not a crash ──")
+    nosrc = c.post("/api/notes", json={"title": "No Sources Citation",
+                                        "body": "A claim with nothing to back it[^1].\n"}).json()
+    nchtml = c.get(f"/api/notes/{nosrc['slug']}").json()["html"]
+    check("flagged the same way an out-of-range citation is",
+       'class="cite-link missing" data-idx="1"' in nchtml, nchtml)
+
     print("\n── graph ──")
     g = c.get("/api/graph").json()
     check("graph nodes", len(g["nodes"]) >= 7, len(g["nodes"]))

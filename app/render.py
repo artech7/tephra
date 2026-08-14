@@ -10,6 +10,9 @@ a folder of documents:
     ![alt|400](url)         a plain markdown image sized the same way, so a
                              note's own inline (non-attachment) images can be
                              corner-dragged too, not just ![[embeds]]
+    [^1]                     a citation, referencing the Nth entry (1-indexed)
+                             of this note's own `## Sources` list -- flagged
+                             if there's no such entry
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
@@ -44,7 +47,7 @@ import re
 from markdown_it import MarkdownIt
 
 from . import vault
-from .index import EMBED_RE, WIKI_RE
+from .index import CITE_RE, EMBED_RE, WIKI_RE
 
 md = MarkdownIt("commonmark", {"html": False, "linkify": True, "breaks": False})
 md.enable("table")
@@ -320,8 +323,13 @@ def _bookmark_html(url: str) -> str:
             f'<span class="bk-u">{html.escape(path[:90] or url)}</span></span></a>')
 
 
-def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
+def render(body: str, resolve, sources=()) -> tuple[str, list[str], list[str]]:
     """resolve(title) -> slug|None. Returns (html, link_targets, embed_names).
+
+    sources is this note's own parsed `## Sources` list (idx.parse_sources's
+    [{text, url}, ...] shape) -- [^N] markers in the body index into it, so
+    the caller has to strip and parse that section itself first and hand the
+    result back in here.
 
     Block-level HTML is swapped out for placeholders before markdown runs and
     swapped back after, so the markdown parser never sees our raw HTML and
@@ -352,6 +360,16 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
                 f'data-title="{html.escape(title, quote=True)}">'
                 f'{html.escape(shown)}</a>')
 
+    def on_cite(m):
+        n = int(m.group(1))
+        if 1 <= n <= len(sources):
+            src = sources[n - 1]
+            attrs = (f'data-text="{html.escape(src["text"], quote=True)}" '
+                     f'data-url="{html.escape(src["url"] or "", quote=True)}"')
+            return (f'<sup class="cite-ref"><a class="cite-link" href="#src-{n}" '
+                    f'data-idx="{n}" {attrs}>{n}</a></sup>')
+        return f'<sup class="cite-ref"><a class="cite-link missing" data-idx="{n}">{n}</a></sup>'
+
     # Callouts first, on the raw body -- _embed_runs (next) inserts blank
     # lines around a block embed's placeholder, and a blank line with no
     # leading `>` ends a blockquote right there, splitting a callout that
@@ -365,6 +383,7 @@ def render(body: str, resolve) -> tuple[str, list[str], list[str]]:
 
     # inline, so it must survive markdown; stash these too
     text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), text)
+    text = CITE_RE.sub(lambda m: stash(on_cite(m)), text)
     text = URL_LINE_RE.sub(lambda m: "\n\n" + stash(_bookmark_html(m.group(1))) + "\n\n",
                            text)
 

@@ -381,7 +381,8 @@ def get_note(slug: str):
     _, targets, used = rndr.render(note.body, resolve)
     prose, _ = st.split_quiz(note.body)
     prose, sources_sec = idx.split_sources_block(prose)
-    body_html, _, _ = rndr.render(prose, resolve)
+    parsed_sources = idx.parse_sources(sources_sec)
+    body_html, _, _ = rndr.render(prose, resolve, sources=parsed_sources)
     item = st.load_item(note)
     flagged = set(st.load_progress()["flagged"])
     flagged_qs = [{"id": q["id"], "question": q["question"]}
@@ -397,7 +398,7 @@ def get_note(slug: str):
         "backlinks": idx.backlinks(db(), slug),
         "words": len(note.body.split()),
         "quiz": item["quiz"],
-        "sources": idx.parse_sources(sources_sec),
+        "sources": parsed_sources,
     }
 
 

@@ -36,8 +36,9 @@
     $('#sourcesCount').textContent = `${list.length} source${list.length === 1 ? '' : 's'}`;
     const host = $('#sourcesList');
     host.innerHTML = '';
-    list.forEach((s) => {
+    list.forEach((s, i) => {
       const li = el('li', 'sources-item');
+      li.id = 'src-' + (i + 1);
       if (s.url) {
         const a = el('a', 'sources-link', s.text);
         a.href = s.url;
@@ -54,5 +55,14 @@
 
   $('#sourcesToggle').onclick = () => { open = !open; syncOpen(); };
 
-  window.tephraSourcesPanel = { render };
+  // Opens the panel (if collapsed) and returns the #src-n element for a
+  // citation marker's click handler to scroll to and highlight -- null if
+  // that source doesn't exist (a note with fewer sources than the highest
+  // [^N] cited).
+  function openTo(n) {
+    if (!open) { open = true; syncOpen(); }
+    return document.getElementById('src-' + n);
+  }
+
+  window.tephraSourcesPanel = { render, openTo };
 })();

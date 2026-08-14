@@ -445,7 +445,8 @@ body[data-wall="aurora"] .newnote:hover{
 /* Sources reuses the .quizedit shell above for its collapsible chrome --
    only the list itself needs its own rules. */
 .sources-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
-.sources-item{font-size:13.5px;line-height:1.5;color:var(--muted);padding-left:16px;position:relative}
+.sources-item{font-size:13.5px;line-height:1.5;color:var(--muted);padding-left:16px;position:relative;
+  transition:background 1.2s var(--ease);border-radius:var(--r-sm)}
 .sources-item::before{content:'';position:absolute;left:0;top:.65em;width:5px;height:5px;border-radius:50%;
   background:var(--faint)}
 .sources-link{color:var(--paper);text-decoration:none;border-bottom:1px solid rgba(var(--acc),.35);
@@ -503,6 +504,22 @@ body[data-wall="aurora"] .newnote:hover{
   border-color:rgba(var(--apricot),.72);
   box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 8px 20px -12px rgba(0,0,0,.6),0 0 22px -8px rgb(var(--apricot))}
 .wl.pending::before{background:radial-gradient(circle farthest-corner at var(--mx) var(--my),rgb(var(--apricot)),#FFD2B8 55%,transparent 100%)}
+
+/* [^1] citation markers, indexing into the note's own ## Sources list --
+   see render.py's on_cite and citations.js. */
+.cite-ref{font-size:.72em;line-height:0;vertical-align:super}
+.cite-link{color:var(--accent);text-decoration:none;font-weight:600;cursor:pointer}
+.cite-link::before{content:'['}
+.cite-link::after{content:']'}
+.cite-link:hover{text-decoration:underline}
+.cite-link.missing{color:#FFDCC9;text-decoration:none;border-bottom:1px dashed rgba(var(--apricot),.6)}
+.cite-popup{position:fixed;z-index:120;max-width:280px;pointer-events:none;
+  background:rgba(20,22,24,.96);border:1px solid var(--edge);border-radius:var(--r-sm);
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 16px 40px -18px rgba(0,0,0,.85);
+  padding:10px 12px;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.cite-popup-text{color:var(--paper);margin-bottom:4px}
+.cite-popup-url{font-family:var(--mono);font-size:10.5px;color:var(--faint);word-break:break-all}
+.sources-item.cite-highlight{background:rgba(var(--acc),.16)}
 
 /* media embeds */
 .embed{position:relative;margin:26px 0;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8)}
