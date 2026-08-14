@@ -734,9 +734,19 @@ def _study_payload() -> dict:
     cats: dict[str, dict] = {}
     for it in items:
         c = it["category"] or "Uncategorised"
-        slot = cats.setdefault(c, {"category": c, "topics": 0, "questions": 0})
+        slot = cats.setdefault(c, {"category": c, "topics": 0, "questions": 0,
+                                    "answered": 0, "correct": 0})
         slot["topics"] += 1
         slot["questions"] += len(it["quiz"])
+        # Same per-question -> per-category join the quiz-pool builder does
+        # at answer-selection time to weight which questions come up --
+        # here it's summed instead, so the Stats view can show accuracy
+        # broken out by category instead of one vault-wide number.
+        for q in it["quiz"]:
+            rec = answers.get(q["id"])
+            if rec:
+                slot["answered"] += rec["seen"]
+                slot["correct"] += rec["right"]
 
     seen = right = 0
     for rec in answers.values():

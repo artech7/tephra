@@ -482,6 +482,28 @@
     return row;
   }
 
+  // Same row shape as statBar, but the fill is the accuracy percentage
+  // itself rather than a share of some other max, and the value column
+  // spells out "pct% · correct/answered" instead of a bare count. No
+  // color -- null -- means "Overall": left at the track's default accent
+  // fill so it reads as distinct from the category-colored rows under it,
+  // without needing a second visual treatment.
+  function accuracyBar(label, correct, answered, color) {
+    const row = document.createElement('div');
+    row.className = 'gv-stat-bar-row gv-stat-bar-row-static';
+    row.innerHTML = '<span class="gv-stat-bar-lbl"></span>'
+      + '<span class="gv-stat-bar-track"><span class="gv-stat-bar-fill"></span></span>'
+      + '<span class="gv-stat-bar-val"></span>';
+    row.querySelector('.gv-stat-bar-lbl').textContent = label;
+    const pct = answered ? Math.round((correct / answered) * 100) : 0;
+    row.querySelector('.gv-stat-bar-val').textContent =
+      answered ? `${pct}% · ${correct}/${answered}` : 'No answers yet';
+    const fill = row.querySelector('.gv-stat-bar-fill');
+    fill.style.width = `${answered ? Math.max(4, pct) : 0}%`;
+    if (color) fill.style.background = `rgb(${color})`;
+    return row;
+  }
+
   // Clicking a category bar drills into a note list right here on the Stats
   // page rather than bouncing over to Crucible -- most vault notes are never
   // enabled for Crucible, so that's where the "Uncategorised" pile actually
@@ -849,16 +871,28 @@
       cruc.appendChild(tiles);
 
       const answered = p.answered || 0, correct = p.correct || 0;
-      if (answered) {
-        const pct = Math.round((correct / answered) * 100);
-        const meter = document.createElement('div');
-        meter.className = 'gv-stat-meter';
-        meter.innerHTML = '<div class="gv-stat-meter-head"><span>Quiz accuracy</span><b></b></div>'
-          + '<span class="gv-stat-bar-track"><span class="gv-stat-bar-fill"></span></span>';
-        meter.querySelector('b').textContent = `${pct}% · ${correct}/${answered}`;
-        meter.querySelector('.gv-stat-bar-fill').style.width = `${pct}%`;
-        meter.style.marginTop = '18px';
-        cruc.appendChild(meter);
+      const catStats = study.categories || [];
+      if (answered || catStats.some((c) => c.answered)) {
+        const accHead = document.createElement('div');
+        accHead.className = 'gv-stat-subhead';
+        accHead.style.marginTop = '18px';
+        accHead.textContent = 'Quiz accuracy';
+        cruc.appendChild(accHead);
+
+        const accWrap = document.createElement('div');
+        accWrap.className = 'gv-stat-bars';
+        // Overall is exactly the same vault-wide sum the single meter used
+        // to show -- every category's answers rolled into one number, kept
+        // alongside the breakdown rather than replaced by it. No color, so
+        // it keeps the track's default accent fill and reads as distinct
+        // from the category-colored rows under it.
+        accWrap.appendChild(accuracyBar('Overall', correct, answered, null));
+        const catColors = buildCategoryColors(catStats);
+        for (const c of catStats) {
+          accWrap.appendChild(accuracyBar(c.category, c.correct || 0, c.answered || 0,
+            catColors.get(c.category) || '198,214,212'));
+        }
+        cruc.appendChild(accWrap);
       } else {
         const hint = document.createElement('div');
         hint.className = 'gv-hint';

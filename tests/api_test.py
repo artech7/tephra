@@ -488,6 +488,34 @@ with TestClient(app) as c:
     check("shows up in known_categories",
        "Brand New Study Group" in c.get("/api/study").json()["known_categories"])
 
+    print("\n── quiz accuracy breaks down by category, with an Overall stat ──")
+    qa = c.post("/api/notes", json={"title": "Category Accuracy A"}).json()["slug"]
+    c.put(f"/api/notes/{qa}", json={"body": "Prose.\n\n## Quiz\n\nQ: A?\n- [x] Right\n- Wrong\nWhy: because.\n"})
+    c.post(f"/api/study/{qa}/enable", json={"category": "Accuracy Cat A"})
+    qa_qid = c.get(f"/api/study/item/{qa}").json()["quiz"][0]["id"]
+
+    qb = c.post("/api/notes", json={"title": "Category Accuracy B"}).json()["slug"]
+    c.put(f"/api/notes/{qb}", json={"body": "Prose.\n\n## Quiz\n\nQ: B?\n- [x] Right\n- Wrong\nWhy: because.\n"})
+    c.post(f"/api/study/{qb}/enable", json={"category": "Accuracy Cat B"})
+    qb_qid = c.get(f"/api/study/item/{qb}").json()["quiz"][0]["id"]
+
+    # Category A: 2 answers, 1 right (50%). Category B: 1 answer, 1 right (100%).
+    c.post("/api/study/answer", json={"qid": qa_qid, "correct": True})
+    c.post("/api/study/answer", json={"qid": qa_qid, "correct": False})
+    c.post("/api/study/answer", json={"qid": qb_qid, "correct": True})
+
+    overview = c.get("/api/study").json()
+    by_cat = {cat["category"]: cat for cat in overview["categories"]}
+    check("category A tallies its own answered/correct, not the whole vault's",
+       by_cat["Accuracy Cat A"]["answered"] == 2 and by_cat["Accuracy Cat A"]["correct"] == 1,
+       by_cat.get("Accuracy Cat A"))
+    check("category B tallies separately",
+       by_cat["Accuracy Cat B"]["answered"] == 1 and by_cat["Accuracy Cat B"]["correct"] == 1,
+       by_cat.get("Accuracy Cat B"))
+    check("Overall is the sum across categories, same field the old single meter read",
+       overview["progress"]["answered"] == 3 and overview["progress"]["correct"] == 2,
+       overview["progress"])
+
     print("\n── cold-start suggestion is topic-agnostic ──")
     # A fresh Classifier with nothing fitted, exercised directly — this is
     # the same "before any labelled items exist" state a brand-new vault (or
