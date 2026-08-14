@@ -104,5 +104,22 @@ const put = calls.filter((c) => c.p.endsWith('/api/notes/n') && c.body).pop();
 ck('a save went out with the resized body', !!put && JSON.parse(put.body).body === '```mermaid|380\ngraph TD\nA --> B\n```',
    put && put.body);
 
+console.log('\n── unlike an image, a diagram can be dragged wider than its column ──');
+// A photo in running prose is capped at the column it sits in (see
+// ui_image_resize.mjs); a dense diagram needs to actually get legible, so
+// startResize gives 'mermaid' a viewport-relative cap instead of the
+// parent's clientWidth. innerWidth defaults to 1024 in jsdom -- the cap
+// should land at innerWidth-120 (904), not the artificially narrow 300px
+// parent used here to prove the column alone isn't what's limiting it.
+fig.style.width = '';
+fig.getBoundingClientRect = () => ({ width: 300, height: 200, left: 0, top: 0, right: 300, bottom: 200 });
+Object.defineProperty(fig.parentElement, 'clientWidth', { value: 300, configurable: true });
+const seHandle2 = fig.querySelector('.embed-handle.se');
+seHandle2.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100 }));
+doc.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true, clientX: 800, clientY: 100 }));
+ck('grows well past the narrow parent, clamped at the viewport-relative cap instead',
+   fig.style.width === '904px', fig.style.width);
+doc.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true, clientX: 800, clientY: 100 }));
+
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

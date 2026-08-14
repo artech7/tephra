@@ -1680,13 +1680,33 @@ async function enhanceMermaid() {
     // unexpected/config-level failures.
     try { await mermaid.run({ nodes }); }
     catch (err) { console.error('Mermaid render failed', err); }
+    // mermaid's own useMaxWidth default bakes a `style="max-width:Npx"` (and
+    // width="100%") onto the svg, computed from whatever the container
+    // happened to measure at render time -- that inline style beats any of
+    // our own CSS regardless of what we do to the container, and is why
+    // "make the container wider" alone never actually made a diagram bigger.
+    // Stripping it and setting explicit width/height from the svg's own
+    // viewBox restores its true natural size; .body pre.mermaid's own CSS
+    // (max-width:100% by default, width:100% once .sized -- see style.css)
+    // takes it from there, so an unsized diagram is genuinely natural-sized
+    // and a resized one genuinely scales, not just pads.
+    for (const fig of nodes) {
+      const svg = fig.querySelector('svg');
+      if (!svg) continue;
+      svg.removeAttribute('style');
+      const vb = (svg.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+      if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+        svg.setAttribute('width', Math.round(vb[2]));
+        svg.setAttribute('height', Math.round(vb[3]));
+      }
+    }
   }
-  // Handles go on *every* .mermaid block, not just the ones just processed
-  // above -- a re-render (e.g. leaving edit mode) rebuilds #noteBody from
-  // scratch, so even an already-rendered diagram needs them reattached.
-  // Added after mermaid.run(), never before: mermaid replaces the whole
-  // element's content with its SVG, which would silently wipe out any
-  // handle appended ahead of that.
+  // Handles and panning go on *every* .mermaid block, not just the ones just
+  // processed above -- a re-render (e.g. leaving edit mode) rebuilds
+  // #noteBody from scratch, so even an already-rendered diagram needs them
+  // reattached. Added after mermaid.run(), never before: mermaid replaces
+  // the whole element's content with its SVG, which would silently wipe out
+  // anything appended ahead of that.
   for (const fig of $('#noteBody').querySelectorAll('pre.mermaid')) {
     if (fig.querySelector('.embed-handle')) continue;
     for (const corner of ['nw', 'ne', 'sw', 'se']) {
@@ -1695,6 +1715,7 @@ async function enhanceMermaid() {
       h.addEventListener('mousedown', (e) => startResize(e, fig, corner, 'mermaid'));
       fig.appendChild(h);
     }
+    fig.addEventListener('mousedown', (e) => startMermaidPan(e, fig));
   }
 }
 
@@ -1869,11 +1890,15 @@ function startResize(e, fig, corner, kind = 'embed') {
   // Otherwise dragging across the note body selects its text on the way,
   // which both looks wrong and can itself derail the drag in some browsers.
   document.body.classList.add('resize-live');
+  // A photo in running prose has no business growing past the column it
+  // sits in, but a diagram was the whole point of asking for this -- a
+  // dense one needs to get legible, not just wide enough to stop scrolling.
+  const parentW = (fig.parentElement || fig).clientWidth || fig.getBoundingClientRect().width;
   resizeState = {
     fig, corner, kind, startX: e.clientX, slug: state.slug,
     startW: fig.getBoundingClientRect().width,
     minW: 60,
-    maxW: (fig.parentElement || fig).clientWidth || fig.getBoundingClientRect().width,
+    maxW: kind === 'mermaid' ? Math.max(parentW, innerWidth - 120) : parentW,
   };
   document.addEventListener('mousemove', onResizeMove);
   document.addEventListener('mouseup', onResizeUp);
@@ -1922,6 +1947,41 @@ async function onResizeUp() {
   state.note.body = newBody;
   $('#noteSrc').value = newBody;
   touched();
+}
+
+/* Click-and-drag panning for a Mermaid diagram too big to show at once --
+   .body pre.mermaid is a real overflow:auto box (see style.css), so this is
+   just a friendlier way to drive its own scrollLeft/scrollTop than hunting
+   for the scrollbars. A handle's own mousedown already calls
+   stopPropagation() (see startResize), so one never reaches here; the
+   closest() check below is a second, cheap guard against that assumption
+   ever quietly breaking. Doesn't engage until the pointer has actually
+   moved a few px, so a plain click inside the diagram -- picking text,
+   whatever -- is never mistaken for the start of a pan. */
+function startMermaidPan(e, fig) {
+  if (e.button !== 0 || e.target.closest('.embed-handle')) return;
+  const startX = e.clientX, startY = e.clientY;
+  const startLeft = fig.scrollLeft, startTop = fig.scrollTop;
+  let dragging = false;
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!dragging) {
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      dragging = true;
+      fig.classList.add('panning');
+    }
+    ev.preventDefault();
+    fig.scrollLeft = startLeft - dx;
+    fig.scrollTop = startTop - dy;
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    fig.classList.remove('panning');
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 /* ══ GRAPH ══════════════════════════════════════

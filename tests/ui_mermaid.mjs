@@ -18,7 +18,14 @@ window.mermaid = {
   initialize: (opts) => calls.initialize.push(opts),
   run: async (opts) => {
     calls.run.push(opts);
-    for (const n of opts.nodes) n.setAttribute('data-processed', 'true');
+    for (const n of opts.nodes) {
+      n.setAttribute('data-processed', 'true');
+      // Shaped like mermaid's real output (confirmed by actually running it
+      // against a real diagram): a viewBox carrying the true natural size,
+      // plus its own responsive width="100%" + inline max-width style that
+      // enhanceMermaid() is supposed to strip back out again.
+      n.innerHTML = '<svg viewBox="0 0 940 300" width="100%" style="max-width: 350px;"></svg>';
+    }
   },
 };
 
@@ -61,6 +68,42 @@ ck('run was handed exactly the .mermaid node, not the plain code block',
    calls.run[0]?.nodes.length === 1 && calls.run[0].nodes[0] === dia,
    calls.run[0]?.nodes.map((n) => n.id));
 ck('the stubbed run marked it processed', dia.getAttribute('data-processed') === 'true', dia.outerHTML);
+
+console.log('\n── mermaid\'s own responsive sizing is stripped, natural size restored from viewBox ──');
+const svg = dia.querySelector('svg');
+ck('the svg exists', !!svg);
+ck('mermaid\'s own inline max-width style is gone -- it always beat our CSS regardless of container width',
+   svg.getAttribute('style') === null, svg.getAttribute('style'));
+ck('width is set from the viewBox, not left at mermaid\'s responsive 100%',
+   svg.getAttribute('width') === '940', svg.getAttribute('width'));
+ck('height likewise', svg.getAttribute('height') === '300', svg.getAttribute('height'));
+
+console.log('\n── click-and-drag pans a diagram too big to show at once ──');
+const fire = (el, type, opts = {}) => el.dispatchEvent(new window.MouseEvent(type, { bubbles: true, button: 0, ...opts }));
+ck('starts unscrolled', dia.scrollLeft === 0 && dia.scrollTop === 0);
+fire(dia, 'mousedown', { clientX: 200, clientY: 200 });
+fire(doc, 'mousemove', { clientX: 202, clientY: 201 });
+ck('a couple px of jitter is not mistaken for a pan (avoids hijacking a plain click)',
+   dia.scrollLeft === 0 && dia.scrollTop === 0, [dia.scrollLeft, dia.scrollTop]);
+fire(doc, 'mousemove', { clientX: 140, clientY: 170 });
+ck('panning engages once the drag clears a small threshold, and marks the diagram',
+   dia.classList.contains('panning'), dia.className);
+ck('dragging left/up scrolls the view right/down (grabbing the canvas, not the content)',
+   dia.scrollLeft === 60 && dia.scrollTop === 30, [dia.scrollLeft, dia.scrollTop]);
+fire(doc, 'mouseup', { clientX: 140, clientY: 170 });
+ck('stops marking panning once released', !dia.classList.contains('panning'));
+ck('the scroll position from the drag sticks', dia.scrollLeft === 60 && dia.scrollTop === 30,
+   [dia.scrollLeft, dia.scrollTop]);
+
+console.log('\n── a drag that starts on a resize handle never engages panning ──');
+dia.scrollLeft = 0; dia.scrollTop = 0;
+const handle = dia.querySelector('.embed-handle.se');
+ck('diagram has its resize handles too', !!handle);
+fire(handle, 'mousedown', { clientX: 100, clientY: 100 });
+fire(doc, 'mousemove', { clientX: 300, clientY: 300 });
+ck('scroll position untouched -- the handle drag is a resize, not a pan',
+   dia.scrollLeft === 0 && dia.scrollTop === 0, [dia.scrollLeft, dia.scrollTop]);
+fire(doc, 'mouseup', { clientX: 300, clientY: 300 });
 
 console.log('\n── enhanceCodeBlocks() skips .mermaid blocks entirely ──');
 Object.defineProperty(code, 'scrollHeight', { value: 4000, configurable: true });

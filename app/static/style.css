@@ -386,25 +386,35 @@ body[data-wall="aurora"] .newnote:hover{
 /* A ```mermaid fence: a card in the .embed/.bookmark family, not the code-
    block look above -- after mermaid.run() (app.js's enhanceMermaid) this
    holds a rendered <svg>, not text, so none of .body pre's resize handle,
-   monospace color, or scrolling-text treatment apply. overflow-x:auto lets
-   a wide diagram scroll instead of forcing the whole note wider.
-   align-items:flex-start is load-bearing, not decoration: flex's default
-   align-items:stretch fights the svg's own height:auto (its intrinsic-
-   aspect-ratio sizing, driven by its viewBox) and produces a too-short
-   computed height, silently clipping a tall diagram -- same bug
-   .embed-media (below) already dodges with its own align-items:center.
-   overflow-y is spelled out for the same reason: CSS quietly turns an
-   unset overflow-y into overflow-y:auto the moment overflow-x is anything
-   but visible, which combined with the wrong height clipped the diagram
-   inside its own tiny scroll box instead of the card growing and the page
-   (.doc) scrolling normally -- exactly "top shows, bottom is cut off"
-   with no visible scrollbar to explain why. */
+   monospace color, or scrolling-text treatment apply.
+
+   No flex/centering here on purpose (an earlier version used display:flex,
+   which fought the svg's intrinsic sizing and clipped tall diagrams -- see
+   the resize-handle comment below for the second half of that bug). This
+   is a plain scrollable box instead: width:fit-content wraps tightly around
+   an unsized diagram's own natural size (app.js strips mermaid's own
+   useMaxWidth inline style and restores that natural size from the svg's
+   viewBox -- our max-width:100% here would otherwise be fighting an inline
+   style that always wins anyway), clamped at max-width/max-height so one
+   huge diagram can't blow out the note layout. overflow:auto is what makes
+   the box scrollable at all -- both for its own native scrollbars and for
+   app.js's startMermaidPan, which is really just a friendlier way to drive
+   scrollLeft/scrollTop than hunting for them. cursor:grab hints at that
+   before the first drag. */
 .body pre.mermaid{position:relative;margin:26px 0;padding:20px;border-radius:18px;
   background:rgba(255,255,255,.04);border:1px solid var(--edge);
   box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8);
-  overflow-x:auto;overflow-y:visible;display:flex;justify-content:center;
-  align-items:flex-start;resize:none;min-height:0}
-.body pre.mermaid svg{max-width:100%;height:auto}
+  width:fit-content;max-width:100%;max-height:min(560px,70vh);overflow:auto;
+  cursor:grab;resize:none}
+.body pre.mermaid.panning{cursor:grabbing}
+.body pre.mermaid svg{display:block}
+/* A manual resize (the handles just below) sets an explicit inline width on
+   the box itself -- max-width:none lets that go wider than the column if
+   that's what was dragged, and the svg's own width:100% makes it actually
+   fill that box (shrinking OR growing from natural size) instead of just
+   padding empty space around a diagram that never changed size. */
+.body pre.mermaid.sized{max-width:none}
+.body pre.mermaid.sized svg{width:100%;height:auto}
 /* Same corner-drag resize handles .embed/.inline-img use (app.js's
    enhanceMermaid appends them after mermaid.run(), startResize(..,
    'mermaid') persists via ```mermaid|N -- see app.js), hidden until
