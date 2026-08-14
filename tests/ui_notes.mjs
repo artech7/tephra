@@ -23,6 +23,12 @@ const dupPairs = [
   { a_slug: 'dup-x', a_title: 'Scratch dup X', a_updated: '2026-06-01T00:00:00Z',
     b_slug: 'dup-y', b_title: 'Scratch dup Y', b_updated: '2026-06-02T00:00:00Z', similarity: 0.911 },
 ];
+const reconcileReport = {
+  scanned: 3,
+  changed: [{ title: 'Networking Index', slug: 'networking-index', dead: ['Old Topic'] }],
+  removed: [{ title: 'Empty Cat Index', slug: 'empty-cat-index', dead: ['Sole Topic'] }],
+  dry_run: false,
+};
 const calls = [];
 window.fetch = async (u, o = {}) => {
   const p = String(u); calls.push({ p, m: o.method || 'GET', body: o.body });
@@ -38,6 +44,7 @@ window.fetch = async (u, o = {}) => {
     b = { slug: n.slug, title: n.title, body: '', tags: n.tags, favorite: n.favorite, meta: {}, html: '<p>x</p>', links_out: n.links_out, media: [], backlinks: [], suggestions: [], words: 1, updated: n.updated }; }
   else if (p.includes('/api/notes')) b = notes;
   else if (p.includes('/api/duplicates')) b = { pairs: dupPairs };
+  else if (p.includes('/api/study/import/reconcile')) b = reconcileReport;
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
   else if (p.includes('/api/media')) b = [];
   else if (p.includes('/api/study')) b = { known_categories: [] };
@@ -69,7 +76,7 @@ console.log('── every control app.js wires exists in the markup ──');
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
                '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
                '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
-               '#btnReindex', '#themeBtn', '#healthBtn', '#healthClose', '#newNote',
+               '#btnReindex', '#themeBtn', '#newNote',
                '#openPalette', '#favBtn', '#dupRun', '#dupFilter'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
@@ -134,6 +141,29 @@ ck('result count updates to reflect one pair left', dupResult.textContent.includ
 // asserted by count (not just presence) further down, for the *next*
 // deletion this file does (via the note editor's own Delete chip).
 deleted.length = 0;
+
+console.log('\n── vault health: dead references, as a reviewable card list ──');
+doc.querySelector('#reconcileCheck').onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('checked with dry_run', calls.some((c) => c.p.includes('/api/study/import/reconcile') && c.p.includes('dry_run=true')));
+const reconList = doc.querySelector('#reconcileList');
+ck('one card per affected index page, not a bare count', reconList.querySelectorAll('.recon-card').length === 2);
+const changedCard = [...reconList.querySelectorAll('.recon-card')].find((c) => c.textContent.includes('Networking Index'));
+const removedCard = [...reconList.querySelectorAll('.recon-card')].find((c) => c.textContent.includes('Empty Cat Index'));
+ck('a changed page lists the specific dead title', changedCard.textContent.includes('Old Topic'), changedCard.textContent);
+ck('...without a REMOVED badge', !changedCard.querySelector('.recon-badge'));
+ck('a page dropped entirely is badged REMOVED', !!removedCard.querySelector('.recon-badge'), removedCard.innerHTML);
+ck('...and still names what left it empty', removedCard.textContent.includes('Sole Topic'), removedCard.textContent);
+ck('Clean-up is enabled now that something was found', !doc.querySelector('#reconcileRun').disabled);
+const reconTitle = changedCard.querySelector('.recon-title');
+reconTitle.onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('clicking a card\'s title opens that page', calls.some((c) => c.p.endsWith('/networking-index')));
+
+doc.querySelector('#reconcileRun').onclick();
+await new Promise((r) => setTimeout(r, 20));
+ck('clean-up ran for real, no dry_run', calls.some((c) => c.p.endsWith('/api/study/import/reconcile') && c.m === 'POST'));
+ck('Clean-up disables again until the next check', doc.querySelector('#reconcileRun').disabled);
 
 console.log('\n── favorites float to the top, under any sort ──');
 setSort('updated');

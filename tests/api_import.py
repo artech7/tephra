@@ -108,13 +108,20 @@ check("the category page still links the now-deleted topic and guide (nothing pr
 print("\n── /api/study/import/reconcile drops the dead references ──")
 with TestClient(app) as c:
     preview = c.post("/api/study/import/reconcile", params={"dry_run": "true"}).json()
-    check("dry run reports the category as changed, writes nothing",
-          cat_note.title in preview["changed"], preview)
+    changed_entry = next((e for e in preview["changed"] if e["title"] == cat_note.title), None)
+    check("dry run reports the category as changed, writes nothing", changed_entry is not None, preview)
+    # dead only covers the bullet-list topic links -- a dead "Part of
+    # [[Guide]]" reference is dropped via import_roots filtering separately
+    # and isn't reflected here.
+    check("...and lists the specific dead topic link, not just a bare count",
+          changed_entry and changed_entry["dead"] == ["Shared Topic B"], changed_entry)
+    check("...tagged with the page's own slug, for the frontend to link to it",
+          changed_entry and changed_entry["slug"] == cat_note.slug, changed_entry)
     stillstale = next(n for n in _vault.all_notes() if n.slug == cat_note.slug)
     check("dry run did not touch the file", "[[Shared Topic B]]" in stillstale.body)
 
     r = c.post("/api/study/import/reconcile").json()
-    check("real run reports it changed", cat_note.title in r["changed"], r)
+    check("real run reports it changed", any(e["title"] == cat_note.title for e in r["changed"]), r)
     fixed = next(n for n in _vault.all_notes() if n.slug == cat_note.slug)
     check("the dead topic link is gone", "[[Shared Topic B]]" not in fixed.body, fixed.body)
     check("the dead guide is gone from Part of", "[[Guide B]]" not in fixed.body, fixed.body)
@@ -130,8 +137,11 @@ last_topic = next(n for n in _vault.all_notes() if n.title == "Shared Topic A")
 _vault.delete(last_topic.slug)
 with TestClient(app) as c:
     r3 = c.post("/api/study/import/reconcile").json()
+    removed_entry = next((e for e in r3["removed"] if e["title"] == cat_note.title), None)
     check("the now-empty category page is removed, not left as a hollow shell",
-          cat_note.title in r3["removed"], r3)
+          removed_entry is not None, r3)
+    check("...and reports which title left it empty",
+          removed_entry and removed_entry["dead"] == ["Shared Topic A"], removed_entry)
 check("it's actually gone from disk",
       not any(n.slug == cat_note.slug for n in _vault.all_notes()))
 

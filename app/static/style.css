@@ -772,17 +772,6 @@ body[data-wall="aurora"] .newnote:hover{
   transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
 #theme.on{transform:translateX(0)}
 
-/* ══ VAULT HEALTH DRAWER ═════════════════════════════════════
-   Same right-edge slide-in as Appearance and Vaults, just wider -- the
-   duplicate list needs room for two titles, a delta and a delete action
-   per row that Appearance's narrow settings column was never meant to fit. */
-#health{position:fixed;z-index:90;top:var(--inset);right:var(--inset);bottom:var(--inset);width:380px;border-radius:var(--radius);
-  background:rgba(255,255,255,.09);backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
-  border:1px solid var(--edge);box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,0 46px 100px -34px rgba(0,0,0,.85);
-  transform:translateX(calc(100% + var(--inset) + 14px));
-  transition:transform .48s var(--ease);display:flex;flex-direction:column;overflow:hidden}
-#health.on{transform:translateX(0)}
-
 /* ══ FORMATTING & UPLOADS ═════════════════════════════════════
    A whole-screen overlay, same pattern as #statsview/#linksview (position:
    absolute + opacity/pointer-events toggle on .on, mounted into #sideTephra
@@ -1403,6 +1392,17 @@ input.sv-select{cursor:text}
   .gv-stats-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;align-items:start}
 }
 .gv-stat-section h4{font-size:13px;font-weight:600;letter-spacing:-.01em;margin-bottom:14px}
+/* Vault Health's four tools (#gvHealthSection, moved in by graph.js's
+   renderStats()) reuse .th-sect -- the same section shell every settings
+   drawer (Appearance, Vaults, Admin) still uses -- so this only overrides
+   it scoped to .gv-health-grid specifically, never the bare selector, or
+   those other drawers would lose their own bottom-border stacking. Here
+   it's a repeat(auto-fit) grid of small cards instead: a wide window fits
+   two or four side by side, the same "wrap to fit, not one long column"
+   fix the rest of this view already uses. */
+.gv-health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:4px}
+.gv-health-grid .th-sect{padding:14px 16px;border-bottom:0;border-radius:12px;
+  background:rgba(255,255,255,.03);border:1px solid var(--edge)}
 .gv-stat-tiles{display:flex;flex-wrap:wrap;gap:1px;
   background:var(--edge);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
 .gv-stat-tile{background:rgba(0,0,0,.22);padding:14px 16px;display:flex;flex-direction:column;gap:4px;
@@ -1687,6 +1687,19 @@ input.sv-select{cursor:text}
 .dup-del:hover{color:#fff;border-color:rgba(255,110,110,.5);background:rgba(255,110,110,.16)}
 .dup-del.armed{color:#fff;background:rgba(255,80,80,.55);border-color:rgba(255,80,80,.7)}
 .dup-del svg{width:11px;height:11px}
+
+/* Dead-references results (Vault Health's "Study guide indexes" tool) --
+   same card-list shape #dupList uses just above, one card per affected
+   index page instead of one per pair. */
+#reconcileList{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.recon-card{padding:9px 10px;border-radius:11px;background:rgba(255,255,255,.045);border:1px solid var(--edge)}
+.recon-head{display:flex;align-items:center;gap:6px}
+.recon-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:inherit;font-size:12px;text-align:left;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;transition:.2s var(--ease)}
+.recon-title:hover{color:#fff;text-decoration:underline}
+.recon-badge{flex:none;font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;padding:1px 5px;border-radius:4px;
+  background:rgba(var(--apricot),.18);border:1px solid rgba(var(--apricot),.4);color:rgb(var(--apricot))}
+.recon-dead{margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--faint);line-height:1.5}
 
 /* topbar crumb now names the vault */
 #vaultCrumb{cursor:pointer;transition:color .2s var(--ease)}

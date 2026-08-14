@@ -91,7 +91,16 @@ await window.tephraStats.open();
 ck('mounts #statsview into the DOM', !!window.document.querySelector('#statsview'));
 ck('marks it open', window.document.querySelector('#statsview').classList.contains('on'));
 ck('never touched the canvas graph', !window.tephraGraph.isOpen());
+ck('view heading renamed from Stats to Overview',
+   window.document.querySelector('.stv-head h3').textContent === 'Overview');
 const statsPanel = () => window.document.querySelector('#gvStatsPanel');
+ck('Vault Health -- formerly its own drawer -- is now a third section inside this same panel',
+   !!statsPanel().querySelector('#gvHealthSection'));
+ck('...visible, not left hidden after being moved in',
+   statsPanel().querySelector('#gvHealthSection').hidden === false);
+ck('...with its actual tools intact (same ids app.js already wires)',
+   !!statsPanel().querySelector('#dupRun') && !!statsPanel().querySelector('#reconcileCheck')
+   && !!statsPanel().querySelector('#auditRun') && !!statsPanel().querySelector('#btnReindex'));
 ck('vault tile counts real notes, stubs excluded',
    statsPanel().textContent.includes('Notes') &&
    statsPanel().querySelector('.gv-stat-tile b').textContent === '4');

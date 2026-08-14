@@ -459,6 +459,11 @@ def reconcile_indexes(dry_run: bool = False) -> dict:
     category index notes this importer generates and owns outright, never
     a hand-written note. A category with no topic left at all is removed
     rather than kept as an empty shell.
+
+    `changed`/`removed` entries carry the specific dead titles dropped
+    from each page (not just a bare count) -- the frontend shows these as
+    a reviewable list before Clean-up runs, the same "see what's about to
+    happen" shape /api/duplicates already gives Find-duplicate-notes.
     """
     notes = vault.all_notes()
     existing_titles = {n.title.strip().lower() for n in notes}
@@ -467,13 +472,14 @@ def reconcile_indexes(dry_run: bool = False) -> dict:
         if "import_roots" not in note.meta:
             continue
         report["scanned"] += 1
-        all_titles = sorted(t for t in _linked_titles(note.body)
-                            if t.strip().lower() in existing_titles)
+        linked = sorted(_linked_titles(note.body))
+        all_titles = sorted(t for t in linked if t.strip().lower() in existing_titles)
+        dead = sorted(t for t in linked if t.strip().lower() not in existing_titles)
         roots = sorted(r for r in (note.meta.get("import_roots") or ())
                        if r.strip().lower() in existing_titles)
 
         if not all_titles:
-            report["removed"].append(note.title)
+            report["removed"].append({"title": note.title, "slug": note.slug, "dead": dead})
             if not dry_run:
                 vault.delete(note.slug)
             continue
@@ -484,7 +490,7 @@ def reconcile_indexes(dry_run: bool = False) -> dict:
         # stripped on both sides, or a fresh reconstruction with no trailing
         # newline reads as "changed" against every already-clean note too.
         if body.strip() != note.body.strip() or roots != sorted(note.meta.get("import_roots") or ()):
-            report["changed"].append(note.title)
+            report["changed"].append({"title": note.title, "slug": note.slug, "dead": dead})
             if not dry_run:
                 note.meta["import_roots"] = roots
                 note.body = body

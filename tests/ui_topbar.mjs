@@ -98,15 +98,15 @@ ck('⌥D toggles Crucible', studyState.open === true);
 doc.querySelector('#tephraBtn').onclick();
 await new Promise(r => setTimeout(r, 20));
 
-console.log('\n── Stats is a tab like Graph and Links, not nested inside Graph ──');
+console.log('\n── Overview is a tab like Graph and Links, not nested inside Graph ──');
 doc.querySelector('[data-view="stats"]').onclick();
 await new Promise(r => setTimeout(r, 20));
-ck('Stats opens', statsState.open === true);
-ck('Stats button shows pressed', pressed('[data-view="stats"]') === 'true');
+ck('Overview opens', statsState.open === true);
+ck('Overview button shows pressed', pressed('[data-view="stats"]') === 'true');
 ck('leaves Graph', pressed('[data-view="graph"]') === 'false');
 doc.querySelector('[data-view="write"]').onclick();
 await new Promise(r => setTimeout(r, 20));
-ck('leaving Stats closes it', statsState.open === false);
+ck('leaving Overview closes it', statsState.open === false);
 
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -910,6 +910,16 @@
     grid.className = 'gv-stats-grid';
     grid.append(vault, cruc);
     panel.appendChild(grid);
+
+    // A third, full-width section below Vault/Crucible -- moved in, not
+    // rebuilt: #gvHealthSection is real static markup in index.html (see
+    // its own comment there) with every control's id already wired by
+    // app.js at load time, appendChild() on an existing node relocates it
+    // without touching any of those listeners. Un-hide it now that it's
+    // actually inside the panel -- it starts `hidden` in the static
+    // markup so it's neither visible nor reachable before this ever runs.
+    const health = document.getElementById('gvHealthSection');
+    if (health) { health.hidden = false; panel.appendChild(health); }
   }
 
   /* Frame the nodes, not the nominal world box. The layout only occupies part
@@ -1283,7 +1293,7 @@
      with the canvas view rather than duplicating them. */
   const statsView = document.createElement('div');
   statsView.id = 'statsview';
-  statsView.innerHTML = '<div class="stv-head"><h3>Stats</h3></div><div id="gvStatsPanel"></div>';
+  statsView.innerHTML = '<div class="stv-head"><h3>Overview</h3></div><div id="gvStatsPanel"></div>';
 
   function mountStats() {
     if (statsView.parentElement) return;

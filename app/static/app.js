@@ -2199,7 +2199,6 @@ addEventListener('keydown', (e) => {
     if (!$('#imgLightbox').hidden) return closeLightbox();
     if (window.tephraStudy?.isOpen()) return setStudy(false);
     if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
-    if ($('#health').classList.contains('on')) return $('#health').classList.remove('on');
     if ($('#theme').classList.contains('on')) return $('#theme').classList.remove('on');
     setView('write');
   }
@@ -2213,7 +2212,6 @@ addEventListener('keydown', (e) => {
   if (e.altKey && k === 'g') { e.preventDefault(); setView('graph'); }
   if (e.altKey && k === 'd') { e.preventDefault(); setView('study'); }
   if (e.altKey && k === 't') { e.preventDefault(); $('#themeBtn').click(); }
-  if (e.altKey && k === 'h') { e.preventDefault(); $('#healthBtn').click(); }
   if (e.altKey && k === 'v') { e.preventDefault(); $('#vaultBtn').click(); }
   if (e.altKey && k === 'n') { e.preventDefault(); $('#newNote').click(); }
 });
@@ -2301,14 +2299,9 @@ $('#newNote').onclick = async () => {
 /* ══ THEME DRAWER WIRING ═════════════════════════════════════ */
 $('#themeBtn').onclick = () => {
   const on = $('#theme').classList.toggle('on');
-  if (on) { $('#health').classList.remove('on'); vaultsEl().classList.remove('on'); $('#admin').classList.remove('on'); }
+  if (on) { vaultsEl().classList.remove('on'); $('#admin').classList.remove('on'); }
 };
 $('#themeClose').onclick = () => $('#theme').classList.remove('on');
-$('#healthBtn').onclick = () => {
-  const on = $('#health').classList.toggle('on');
-  if (on) { $('#theme').classList.remove('on'); vaultsEl().classList.remove('on'); $('#admin').classList.remove('on'); }
-};
-$('#healthClose').onclick = () => $('#health').classList.remove('on');
 
 /* ══ ADMIN LOCK ═══════════════════════════════════════════════
    Off until a password is set -- ADMIN.configured stays false and every
@@ -2343,7 +2336,6 @@ function showAdminPane() {
 // locked write can be discovered from, no matter which button triggered it.
 window.tephraOpenAdmin = (focus = false) => {
   $('#theme').classList.remove('on');
-  $('#health').classList.remove('on');
   vaultsEl().classList.remove('on');
   $('#admin').classList.add('on');
   showAdminPane();
@@ -2594,7 +2586,6 @@ $('#vaultCrumb').onclick = () => $('#vaultBtn').click();
 $('#vaultBtn').onclick = () => {
   vaultsEl().classList.toggle('on');
   $('#theme').classList.remove('on');
-  $('#health').classList.remove('on');
   $('#admin').classList.remove('on');
   if (vaultsEl().classList.contains('on')) showVaultHome();
 };
@@ -2923,7 +2914,10 @@ $('#dupRun').onclick = async () => {
 /* Study guide index pages accumulate every topic and every guide that ever
    touched a category and never drop one on their own -- deleting a
    duplicate topic or an entire guide leaves the surviving index page still
-   linking to it. Same check-then-run shape as Audit/Repair above. */
+   linking to it. Same check-then-run shape as Audit/Repair above, and now
+   the same card-list display Find-duplicate-notes uses -- a bare count
+   used to be all this showed, which meant Clean-up ran on faith about
+   what it would actually touch. */
 function describeReconcile(r) {
   const bits = [];
   if (r.changed.length) bits.push(`${r.changed.length} index page${r.changed.length === 1 ? '' : 's'} cleaned up`);
@@ -2931,8 +2925,67 @@ function describeReconcile(r) {
   return bits.join('; ') || 'Nothing to clean up';
 }
 
+// One card per affected index page: its title (click to open), a REMOVED
+// badge if the page had nothing left to link and was dropped entirely, and
+// the specific dead titles that caused it -- reordering with no actual
+// dead link (a rare case: only import_roots changed) still shows a card,
+// just without a dead-list line, rather than an empty-looking one.
+function reconcileCard(entry, removed) {
+  const card = document.createElement('div');
+  card.className = 'recon-card';
+
+  const head = document.createElement('div');
+  head.className = 'recon-head';
+  const t = document.createElement('button');
+  t.className = 'recon-title'; t.type = 'button'; t.textContent = entry.title;
+  t.title = 'Open ' + entry.title;
+  t.onclick = () => openNote(entry.slug);
+  head.appendChild(t);
+  if (removed) {
+    const badge = document.createElement('span');
+    badge.className = 'recon-badge'; badge.textContent = 'REMOVED';
+    head.appendChild(badge);
+  }
+  card.appendChild(head);
+
+  const dead = document.createElement('div');
+  dead.className = 'recon-dead';
+  dead.textContent = entry.dead.length
+    ? (removed ? 'Only linked: ' : 'Dead: ') + entry.dead.join(', ')
+    : 'Reordered — no dead links, just out of date order';
+  card.appendChild(dead);
+  return card;
+}
+
+function updateReconcileCount() {
+  const left = $('#reconcileList').children.length;
+  $('#reconcileFilter').hidden = left === 0;
+  if (left === 0) { $('#reconcileResult').textContent = 'No dead references left.'; return; }
+  const shown = [...$('#reconcileList').children].filter((el) => el.style.display !== 'none').length;
+  $('#reconcileResult').textContent = shown === left
+    ? `${left} index page${left === 1 ? '' : 's'} affected.`
+    : `${shown} of ${left} index pages affected (filtered).`;
+}
+
+$('#reconcileFilter').oninput = (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  for (const card of $('#reconcileList').children) {
+    card.style.display = !q || card.textContent.toLowerCase().includes(q) ? '' : 'none';
+  }
+  updateReconcileCount();
+};
+
+function renderReconcileReport(r) {
+  const list = $('#reconcileList');
+  list.innerHTML = '';
+  for (const entry of r.changed) list.appendChild(reconcileCard(entry, false));
+  for (const entry of r.removed) list.appendChild(reconcileCard(entry, true));
+  updateReconcileCount();
+}
+
 $('#reconcileCheck').onclick = async () => {
   const out = $('#reconcileResult');
+  $('#reconcileList').innerHTML = ''; $('#reconcileFilter').hidden = true; $('#reconcileFilter').value = '';
   out.textContent = 'Checking…';
   try {
     const preview = await api('/study/import/reconcile?dry_run=true', { method: 'POST' });
@@ -2941,7 +2994,7 @@ $('#reconcileCheck').onclick = async () => {
       $('#reconcileRun').disabled = true;
       return;
     }
-    out.textContent = describeReconcile(preview) + '.';
+    renderReconcileReport(preview);
     $('#reconcileRun').disabled = false;
   } catch { out.textContent = 'Could not run the check.'; }
 };
@@ -2951,9 +3004,9 @@ $('#reconcileRun').onclick = async () => {
   out.textContent = 'Cleaning up…';
   try {
     const r = await api('/study/import/reconcile', { method: 'POST' });
-    out.textContent = describeReconcile(r) + '.';
+    renderReconcileReport(r);
     $('#reconcileRun').disabled = true;
-    toast(out.textContent, 6000);
+    toast(describeReconcile(r) + '.', 6000);
     await loadList();
     await loadGraph();
     if (state.slug) await openNote(state.slug, false);

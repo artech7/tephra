@@ -44,7 +44,7 @@
     <div class="segmented">
       <button aria-pressed="true" data-view="write">Write</button>
       <button aria-pressed="false" data-view="graph">Graph</button>
-      <button aria-pressed="false" data-view="stats">Stats</button>
+      <button aria-pressed="false" data-view="stats">Overview</button>
       <button aria-pressed="false" data-view="links">Links<span class="tabbadge" id="linksBadge" hidden></span></button>
     </div>
     <button class="sv-import" id="svImport"
@@ -56,10 +56,6 @@
     <button class="iconbtn" id="vaultBtn" title="Vaults">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
-    </button>
-    <button class="iconbtn" id="healthBtn" title="Vault Health (⌥H)">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-           stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-8 4 16 2-8h6"/></svg>
     </button>
     <button class="iconbtn" id="themeBtn" title="Appearance (⌥T)">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 000-9 4.5 4.5 0 010-9z"/></svg>
@@ -412,9 +408,17 @@
   </div>
 </aside>
 
-<aside id="health">
-  <div class="th-head"><h4>Vault Health</h4><button class="mini" id="healthClose">×</button></div>
-  <div class="th-body">
+<!-- Vault Health used to be its own slide-in drawer (⌥H). It's now a third
+     section of the Overview view (see graph.js's renderStats(), which
+     relocates this exact node into #gvStatsPanel on every render) rather
+     than a separate place to go -- starts hidden and off in normal flow so
+     it isn't visible/reachable before that first happens. Every control
+     inside keeps the same id app.js already wires (#auditRun, #dupRun,
+     #reconcileCheck, ...), so none of that event-binding code changed,
+     only where this markup lives. -->
+<div id="gvHealthSection" class="gv-stat-section" hidden>
+  <h4>Vault Health</h4>
+  <div class="gv-health-grid">
     <div class="th-sect">
       <div class="th-l"><span>Links</span></div>
       <div id="auditResult" class="th-note">Not checked yet.</div>
@@ -448,10 +452,12 @@
         <button class="sv-btn" id="reconcileCheck">Check for dead references</button>
         <button class="sv-btn primary admin-only" id="reconcileRun" disabled>Clean up</button>
       </div>
+      <input type="text" id="reconcileFilter" class="th-input" placeholder="Filter by page title…" hidden>
+      <div id="reconcileList"></div>
       <div class="th-note">A guide's category page keeps listing every topic and every guide that ever contributed to it, even after you delete the topic or the whole guide — deleting a duplicate leaves the surviving page still linking to it. This drops references to whatever no longer exists, and removes a category page left with no topics at all. Only touches index pages an import wrote, never a note you wrote by hand.</div>
     </div>
   </div>
-</aside>
+</div>
 
 <aside id="admin">
   <div class="th-head"><h4>Admin</h4><button class="mini" id="adminClose">×</button></div>
