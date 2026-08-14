@@ -420,6 +420,30 @@ body[data-wall="aurora"] .newnote:hover{
    'mermaid') persists via ```mermaid|N -- see app.js), hidden until
    hover/drag the same way theirs are. */
 .body pre.mermaid:hover .embed-handle,.body pre.mermaid.resizing .embed-handle{opacity:1}
+
+/* A ```netdiagram fence: same card family as .mermaid, but its content is
+   our own SVG (app/static/netdiagram.js), not a third-party renderer's. */
+.netdiagram{position:relative;margin:26px 0;padding:20px;border-radius:18px;
+  background:rgba(255,255,255,.04);border:1px solid var(--edge);
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8);
+  overflow-x:auto}
+.ndg-svg{display:block;max-width:100%}
+.ndg-errors{font-family:var(--mono);font-size:11.5px;color:rgb(var(--apricot));margin-bottom:10px}
+.ndg-box{fill:rgba(255,255,255,.06);stroke:var(--edge);stroke-width:1.5}
+.ndg-box-nested{fill:rgba(255,255,255,.1)}
+.ndg-label{font-family:var(--display);font-size:12.5px;fill:var(--paper)}
+.ndg-link-line{stroke:rgba(var(--acc),.55);stroke-width:2}
+.ndg-link-label{font-family:var(--mono);font-size:10px;fill:var(--faint)}
+.ndg-device{cursor:pointer}
+.ndg-device.ndg-selected .ndg-box,.ndg-link.ndg-selected .ndg-link-line{stroke:var(--accent);stroke-width:2.5}
+/* Same hover-reveal handles already use on .embed/.mermaid -- this card's
+   equivalent of a corner handle is a single "open the editor" button. */
+.ndg-edit-btn{position:absolute;top:12px;right:12px;opacity:0;transition:opacity .15s var(--ease);
+  background:rgba(0,0,0,.5);border:1px solid var(--edge);color:var(--muted);
+  border-radius:8px;padding:5px 10px;font:inherit;font-size:11.5px;cursor:pointer}
+.ndg-edit-btn:hover{color:#fff;background:rgba(var(--acc),.25);border-color:rgba(var(--acc),.5)}
+.netdiagram:hover .ndg-edit-btn{opacity:1}
+
 .body a:not(.wl):not(.bookmark):not(.filechip){color:#9FE8FF;text-decoration:underline;text-underline-offset:3px}
 
 /* markdown source editing */
@@ -947,6 +971,38 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
    that fill color means category -- this explains that convention once,
    generically, rather than repeating it per category. */
 .gv-stub-key i{background:none;border:1.3px dashed rgba(255,255,255,.55)}
+
+/* The netdiagram drag editor: a real viewport-level overlay (position:fixed,
+   not scoped into any panel like #graphview is), same opacity+pointer-
+   events toggle-on-.on convention. Canvas + a fixed inspector column,
+   mirroring #graphview's own grid-template-columns:1fr 268px split. */
+#ndgEditor{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transition:opacity .3s var(--ease);
+  background:radial-gradient(130% 90% at 50% 30%,#0d1922 0%,#070f14 45%,#04080a 75%,#020405 100%)}
+#ndgEditor.on{opacity:1;pointer-events:auto}
+.ndg-toolbar{flex:none;display:flex;align-items:center;gap:10px;padding:16px 20px;
+  border-bottom:1px solid var(--edge)}
+.ndg-toolbar button{background:rgba(255,255,255,.09);border:1px solid var(--edge);color:var(--muted);
+  border-radius:9px;padding:7px 14px;font:inherit;font-size:12.5px;cursor:pointer;transition:.2s var(--ease)}
+.ndg-toolbar button:hover{color:#fff;background:rgba(255,255,255,.15)}
+#ndgClose{margin-left:auto;background:rgba(var(--acc),.2);border-color:rgba(var(--acc),.45)}
+#ndgClose:hover{background:rgba(var(--acc),.32)}
+.ndg-toolbar-hint{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.ndg-body{flex:1;display:grid;grid-template-columns:1fr 280px;min-height:0}
+.ndg-canvas{overflow:auto;padding:30px}
+.ndg-canvas svg{display:block}
+.ndg-inspector{border-left:1px solid var(--edge);padding:18px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:14px}
+.ndg-hint{font-size:12.5px;color:var(--faint);line-height:1.5}
+.ndg-field{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:var(--faint)}
+.ndg-field input{background:rgba(255,255,255,.06);border:1px solid var(--edge);border-radius:8px;
+  padding:8px 10px;color:var(--paper);font:inherit;font-size:13px}
+.ndg-field input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.ndg-btn{align-self:flex-start;background:rgba(255,255,255,.08);border:1px solid var(--edge);
+  color:var(--muted);border-radius:8px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;transition:.2s var(--ease)}
+.ndg-btn:hover{color:#fff;background:rgba(255,255,255,.14)}
+.ndg-btn-danger{color:#FFDCC9;border-color:rgba(var(--apricot),.4)}
+.ndg-btn-danger:hover{background:rgba(var(--apricot),.18);border-color:rgba(var(--apricot),.6)}
 
 #toast{position:fixed;z-index:95;bottom:calc(var(--inset) + 18px);left:50%;transform:translateX(-50%) translateY(14px);
   padding:11px 18px;border-radius:12px;font-size:13px;opacity:0;pointer-events:none;transition:.32s var(--ease);white-space:nowrap}

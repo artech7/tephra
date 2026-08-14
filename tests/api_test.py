@@ -209,6 +209,22 @@ with TestClient(app) as c:
     check("a bare URL alone on its own line inside a fence stays code, not a bookmark card",
           'class="bookmark' not in h and "https://example.com/whitepaper" in h, h)
 
+    print("\n── netdiagram: a custom device/port diagram fence is passed through as raw text ──")
+    ndg_src = 'device a "A"\ndevice b "B"\nlink a.ETH1-4 -> b.ETH1-4 "100G" #A'
+    h = rendered(f"```netdiagram\n{ndg_src}\n```")
+    check('renders as <div class="netdiagram">, not a code block',
+          '<div class="netdiagram" data-netdiagram-index="0">' in h and "language-netdiagram" not in h, h)
+    check("the raw DSL source is preserved (escaped) inside it, untouched by any markdown rendering",
+          "device a &quot;A&quot;" in h and "link a.ETH1-4 -&gt; b.ETH1-4 &quot;100G&quot; #A" in h, h)
+
+    h = rendered(f"```netdiagram\n{ndg_src}\n```\n\n```netdiagram\ndevice c \"C\"\n```")
+    check("each diagram on a note gets its own sequential data-netdiagram-index",
+          'data-netdiagram-index="0"' in h and 'data-netdiagram-index="1"' in h, h)
+
+    h = rendered('```netdiagram\ndevice a "A"\ndevice b.sub "Sub" at 10,10\nlink a.P1 -> b.sub.P1 "[[not a link]]" #B\n```')
+    check("a [[...]]-looking label inside a netdiagram fence survives literally, not rewritten into a wikilink",
+          "[[not a link]]" in h and 'class="wl' not in h, h)
+
     print("\n── search ──")
     s = c.get("/api/search", params={"q": "inverter"}).json()
     check("fts finds note", any(x["slug"] == new["slug"] for x in s), [x["slug"] for x in s])

@@ -17,6 +17,11 @@ a folder of documents:
     graph TD                 a diagram instead of code
     A --> B
     ```
+    ```netdiagram            a custom device/port/cabling diagram -- see
+    device a "A"              app/static/netdiagram.js, which owns this
+    device b "B"               DSL entirely; this file just passes the
+    link a.P1 -> b.P1           fence content through untouched
+    ```
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
@@ -197,6 +202,19 @@ def _fence_rule(tokens, idx, options, env):
         sized = " sized" if css_width else ""
         return (f'<pre class="mermaid{sized}" data-mermaid-index="{i}"{style}>'
                 f'{html.escape(token.content)}</pre>\n')
+    if lang.lower() == "netdiagram":
+        # A custom device/port/cabling diagram type -- see app/static/
+        # netdiagram.js, which owns the whole DSL: parsing, SVG rendering,
+        # the drag editor, and serializing edits back into this same fence.
+        # This is a dumb passthrough, same as the mermaid branch above and
+        # for the same reason: nothing server-side needs to understand this
+        # syntax's structure (unlike ## Quiz, which the study/Crucible
+        # system also reads), so there's nothing to gain from parsing it in
+        # Python too.
+        i = env.get("_ndg_i", 0)
+        env["_ndg_i"] = i + 1
+        return (f'<div class="netdiagram" data-netdiagram-index="{i}">'
+                f'{html.escape(token.content)}</div>\n')
     return _default_fence(tokens, idx, options, env)
 
 

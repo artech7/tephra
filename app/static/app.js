@@ -517,6 +517,7 @@ async function openNote(slug, push = true) {
   enhanceInlineImages();
   enhanceCodeBlocks();
   enhanceMermaid();
+  window.tephraNetDiagram?.enhance();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
   $('#noteBody').hidden = false;
@@ -1115,6 +1116,24 @@ function touched() {
   saveT = setTimeout(flush, 700);
 }
 
+// A small bridge for netdiagram.js -- a separate file, so it never reaches
+// into `state`/`touched` directly, the same arm's-length relationship
+// sources-panel.js/quiz-editor.js already keep with app.js's internals.
+// `compute` transforms the current body into the new one (netdiagram.js's
+// own setBody, rewriting just the one fence it's editing); expectedSlug
+// guards against a note switch mid-edit writing into the wrong note, the
+// same class of guard onResizeUp's own state.slug check already covers
+// for drag-resize.
+window.tephraSaveNoteBody = (expectedSlug, compute) => {
+  if (!state.note || state.slug !== expectedSlug) return;
+  const newBody = compute(state.note.body);
+  if (newBody === state.note.body) return;
+  state.note.body = newBody;
+  $('#noteSrc').value = newBody;
+  touched();
+};
+window.tephraCurrentSlug = () => state.slug;
+
 function autoGrow(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
 
 $('#noteTitle').addEventListener('input', (e) => { autoGrow(e.target); touched(); });
@@ -1154,6 +1173,7 @@ async function setEditing(on) {
     enhanceEmbeds();
     enhanceCodeBlocks();
     enhanceMermaid();
+    window.tephraNetDiagram?.enhance();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
@@ -1647,6 +1667,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   enhanceInlineImages();
   enhanceCodeBlocks();
   enhanceMermaid();
+  window.tephraNetDiagram?.enhance();
 }
 
 // The default cap on a rendered code block's height (see .body pre in
