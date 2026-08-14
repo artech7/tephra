@@ -281,8 +281,8 @@
     $('#svFormatsClose').onclick = closeFormats;
   }
 
-  function fmtBlock(h, s, ex) {
-    const blk = el('div', 'sv-fmt');
+  function fmtBlock(h, s, ex, wide) {
+    const blk = el('div', wide ? 'sv-fmt wide' : 'sv-fmt');
     blk.appendChild(el('div', 'sv-fmt-h', h));
     blk.appendChild(el('div', 'sv-fmt-s', s));
     const pre = el('pre');
@@ -301,8 +301,12 @@
         `Images, video and audio render inline; anything else becomes a downloadable chip. `
         + `Up to ${F.media.max_mb} MB per file.`, kindList));
     } else if (F.tab === 'import') {
+      // Markdown's example is a full note, not a one-line excerpt like its
+      // siblings -- give it the full grid width instead of squeezing it
+      // into the same 340px column, where it'd read as a tall, tiny strip.
       for (const f of F.formats) {
-        body.appendChild(fmtBlock(`${f.label} — ${f.extensions.join(' ')}`, f.summary, f.example));
+        body.appendChild(fmtBlock(`${f.label} — ${f.extensions.join(' ')}`, f.summary, f.example,
+          f.id === 'markdown'));
       }
     } else {
       for (const m of MARKDOWN_SYNTAX) {

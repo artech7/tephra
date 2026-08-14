@@ -797,6 +797,24 @@ body[data-wall="aurora"] .newnote:hover{
    below it in the same column instead of waiting on a tall neighbour. */
 .fmt-grid{max-width:1120px;margin:0 auto;column-width:340px;column-gap:14px}
 .fmt-grid .sv-fmt{break-inside:avoid;-webkit-column-break-inside:avoid;margin-bottom:14px}
+/* One card -- the full-note markdown example -- carries far more text than
+   its siblings and reads as a tall, tiny strip squeezed into a 340px
+   column. Pull it out of the column flow so it spans the whole grid, with
+   the label/description as a sidebar next to a much larger code pane
+   instead of stacked above it, so the extra width actually gets used. */
+.fmt-grid .sv-fmt.wide{
+  column-span:all;max-width:none;margin-bottom:14px;
+  display:grid;grid-template-columns:230px 1fr;
+  grid-template-areas:"head code" "desc code";
+  gap:4px 24px;align-items:start;
+}
+.fmt-grid .sv-fmt.wide .sv-fmt-h{grid-area:head}
+.fmt-grid .sv-fmt.wide .sv-fmt-s{grid-area:desc;margin-bottom:0}
+.fmt-grid .sv-fmt.wide pre{grid-area:code;font-size:13px;line-height:1.7;padding:18px 22px}
+@media(max-width:900px){
+  .fmt-grid .sv-fmt.wide{grid-template-columns:1fr;grid-template-areas:"head" "desc" "code";gap:5px 0}
+  .fmt-grid .sv-fmt.wide .sv-fmt-s{margin-bottom:7px}
+}
 
 /* ══ ADMIN DRAWER ═════════════════════════════════════════════
    Same right-edge slide-in as the other three -- set/unlock/change the
