@@ -1855,7 +1855,7 @@ function enhanceInlineImages() {
 /* ══ COLLAPSIBLE HEADINGS ══════════════════════════════════════
    render.py emits headings as flat siblings of the content under them --
    markdown has no nesting construct for "everything under this heading."
-   This regroups them after the fact: each heading (h1-h6) gets a caret
+   This regroups them after the fact: each heading (h2-h6) gets a caret
    prepended, and everything until the next heading of the same or shallower
    level moves into a trailing .h-section div that the caret shows/hides.
    A stack keyed by heading level handles nesting -- collapsing an h2 also
@@ -1863,15 +1863,23 @@ function enhanceInlineImages() {
    because anything here tracks parent/child relationships explicitly.
    Purely a view-layer regrouping of the rendered HTML: the saved markdown
    is untouched, and collapse state is not persisted -- every open/close of
-   a note starts fully expanded, same as scroll position always does. */
+   a note starts fully expanded, same as scroll position always does.
+
+   h1 is deliberately left out of the fold hierarchy: every note here opens
+   with exactly one, as its title, and a truly hierarchical fold would make
+   it own every section under it -- collapsing the one heading a note is
+   guaranteed to have would hide the entire note, which defeats the point
+   of a per-section toggle. h1 still resets the stack back to root (so a
+   stray later h1 doesn't end up trapped inside an earlier h2's section),
+   it just never gets a caret or a section of its own. */
 function enhanceHeadings() {
   const root = $('#noteBody');
   const nodes = Array.from(root.childNodes);
   const stack = [{ level: 0, el: root }];
   for (const node of nodes) {
     const level = node.nodeType === 1 && /^H[1-6]$/.test(node.tagName) ? Number(node.tagName[1]) : 0;
-    if (!level) { stack[stack.length - 1].el.appendChild(node); continue; }
-    while (stack.length > 1 && stack[stack.length - 1].level >= level) stack.pop();
+    if (level) while (stack.length > 1 && stack[stack.length - 1].level >= level) stack.pop();
+    if (level < 2) { stack[stack.length - 1].el.appendChild(node); continue; }
     const parent = stack[stack.length - 1].el;
     parent.appendChild(node);
     const caret = document.createElement('button');
@@ -1916,6 +1924,13 @@ function updateFoldChip() {
   b.textContent = allCollapsed ? 'Expand all' : 'Collapse all';
   b.onclick = () => foldAllHeadings(!allCollapsed);
   host.appendChild(b);
+  // The dot lives inside the host, not statically in index.html, so an
+  // empty (no-heading) note doesn't leave an orphaned separator sitting
+  // between backlinks and the study chip.
+  const sep = document.createElement('span');
+  sep.className = 'sep';
+  sep.textContent = '·';
+  host.appendChild(sep);
 }
 
 // Only the caret toggles -- clicking heading text itself still just reads
