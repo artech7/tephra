@@ -387,11 +387,23 @@ body[data-wall="aurora"] .newnote:hover{
    block look above -- after mermaid.run() (app.js's enhanceMermaid) this
    holds a rendered <svg>, not text, so none of .body pre's resize handle,
    monospace color, or scrolling-text treatment apply. overflow-x:auto lets
-   a wide diagram scroll instead of forcing the whole note wider. */
+   a wide diagram scroll instead of forcing the whole note wider.
+   align-items:flex-start is load-bearing, not decoration: flex's default
+   align-items:stretch fights the svg's own height:auto (its intrinsic-
+   aspect-ratio sizing, driven by its viewBox) and produces a too-short
+   computed height, silently clipping a tall diagram -- same bug
+   .embed-media (below) already dodges with its own align-items:center.
+   overflow-y is spelled out for the same reason: CSS quietly turns an
+   unset overflow-y into overflow-y:auto the moment overflow-x is anything
+   but visible, which combined with the wrong height clipped the diagram
+   inside its own tiny scroll box instead of the card growing and the page
+   (.doc) scrolling normally -- exactly "top shows, bottom is cut off"
+   with no visible scrollbar to explain why. */
 .body pre.mermaid{margin:26px 0;padding:20px;border-radius:18px;
   background:rgba(255,255,255,.04);border:1px solid var(--edge);
   box-shadow:0 1px 0 var(--edge-hi) inset,0 20px 44px -24px rgba(0,0,0,.8);
-  overflow-x:auto;display:flex;justify-content:center;resize:none;min-height:0}
+  overflow-x:auto;overflow-y:visible;display:flex;justify-content:center;
+  align-items:flex-start;resize:none;min-height:0}
 .body pre.mermaid svg{max-width:100%;height:auto}
 .body a:not(.wl):not(.bookmark):not(.filechip){color:#9FE8FF;text-decoration:underline;text-underline-offset:3px}
 
