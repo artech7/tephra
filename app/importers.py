@@ -398,13 +398,49 @@ FORMATS = [
                    "quiz questions: stack as many `Q:` blocks as you like under the one "
                    "`## Quiz` heading. You can also skip the importer and drop the file "
                    "straight into vault/notes/, then reindex.",
-        "example": "---\ntitle: RAID levels\ncategory: Storage\n"
-                   "question: What are the common RAID levels?\n---\n\n"
-                   "**RAID 0** stripes...\n\n## Quiz\n\n"
-                   "Q: Which level has no redundancy?\n- [x] RAID 0\n- RAID 1\n"
-                   "Why: Striping only.\n\n"
-                   "Q: Which level mirrors data across disks?\n- RAID 0\n- [x] RAID 1\n"
-                   "Why: Every write is duplicated to a second disk.",
+        "example": """---
+title: Honey to mead -- a beekeeper's brew day
+category: Beekeeping & Brewing
+question: How does raw honey become a batch of mead?
+---
+
+## Overview
+
+Mead is fermented honey and water, so a beekeeper's harvest doubles as a
+brewer's fermentable sugar. Yeast converts the honey's sugars into alcohol
+and CO2 over weeks, not days.[^1]
+
+## Honey varieties and their mead
+
+| Honey source | Flavor profile | Best mead style |
+| --- | --- | --- |
+| Clover | Mild, floral | Traditional (dry) |
+| Buckwheat | Dark, molasses-like | Bochet (caramelized) |
+| Orange blossom | Citrusy, light | Melomel (fruit-added) |
+
+## Sanitation matters more than the recipe
+
+Wild yeast riding in on unpasteurized honey can sour a batch before pitched
+yeast gets a foothold.[^2] Sanitize everything that touches the must.
+
+## Sources
+
+- [The Complete Guide to Making Mead](https://example.com/mead-guide)
+- [Honeybee Foraging and Nectar Flow](https://example.com/nectar-flow)
+
+## Quiz
+
+Q: What is mead fermented from?
+- [x] Honey and water
+- Malted barley
+- Grape juice
+Why: Mead is a wine-strength beverage made from honey dissolved in water, not grain or grapes.
+
+Q: Which of these raise the risk of a stalled or contaminated ferment?
+- [x] Unpasteurized honey carrying wild yeast
+- [x] Unsanitized equipment
+- Pitching a healthy yeast starter
+Why: Wild microbes from raw honey and dirty equipment compete with the pitched yeast; a healthy starter does the opposite.""",
     },
 ]
 
