@@ -1885,6 +1885,37 @@ function enhanceHeadings() {
     parent.appendChild(section);
     stack.push({ level, el: section });
   }
+  updateFoldChip();
+}
+
+function headingsWithCarets() {
+  return [...$('#noteBody').querySelectorAll('h1,h2,h3,h4,h5,h6')]
+    .filter((h) => h.firstElementChild?.classList.contains('h-fold'));
+}
+
+function foldAllHeadings(collapse) {
+  for (const h of headingsWithCarets()) {
+    h.classList.toggle('h-collapsed', collapse);
+    h.firstElementChild.setAttribute('aria-expanded', String(!collapse));
+  }
+  updateFoldChip();
+}
+
+// One button, not two -- its own label says which way it's about to go, so
+// there's no "expand all" sitting uselessly disabled while already expanded.
+function updateFoldChip() {
+  const host = $('#foldChip');
+  if (!host) return;
+  host.innerHTML = '';
+  const headings = headingsWithCarets();
+  if (!headings.length) return;
+  const allCollapsed = headings.every((h) => h.classList.contains('h-collapsed'));
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chipbtn';
+  b.textContent = allCollapsed ? 'Expand all' : 'Collapse all';
+  b.onclick = () => foldAllHeadings(!allCollapsed);
+  host.appendChild(b);
 }
 
 // Only the caret toggles -- clicking heading text itself still just reads
@@ -1895,6 +1926,7 @@ $('#noteBody').addEventListener('click', (e) => {
   const heading = caret.parentElement;
   const collapsed = heading.classList.toggle('h-collapsed');
   caret.setAttribute('aria-expanded', String(!collapsed));
+  updateFoldChip();
 });
 
 /* ══ IMAGE CAPTION ═════════════════════════════════════
