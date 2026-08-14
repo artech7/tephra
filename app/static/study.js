@@ -229,6 +229,8 @@
       s: 'A `[^N]` marker cites the Nth entry (1-indexed) of the note’s own `## Sources` list above. Hover it to preview that source, click it to jump to the matching entry in the Sources panel. A number past the end of the list renders flagged rather than failing silently.' },
     { h: 'Frontmatter', ex: '---\ntitle: RAID levels\ncategory: Storage\nstudy: true\n---',
       s: 'An optional metadata block at the very top of a note. Title and tags are normally set from the UI; `category` and `study: true` are what put a note into Crucible. Only worth hand-editing when pasting a note in from outside the app.' },
+    { h: 'Note list dot colors', ex: '---\ntags: [index]\n---',
+      s: 'The small dot beside each note in the sidebar shows its kind: violet for a note tagged `index` (a hub/overview note -- tag it yourself, there’s no dedicated button), apricot for a `study` item (tagged automatically by "Make study item", not by hand), plain grey for an ordinary note. Whichever note is open right now shows a glowing accent-colored dot instead, regardless of its kind.' },
   ];
 
   /* A whole-screen overlay, same pattern as #statsview/#linksview (built
