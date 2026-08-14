@@ -513,6 +513,7 @@ async function openNote(slug, push = true) {
   $('#noteTitle').value = note.title;
   autoGrow($('#noteTitle'));
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
+  enhanceHeadings();
   enhanceEmbeds();
   enhanceInlineImages();
   enhanceCodeBlocks();
@@ -1170,6 +1171,7 @@ async function setEditing(on) {
     const note = await api('/notes/' + encodeURIComponent(state.slug));
     state.note = note;
     $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
+    enhanceHeadings();
     enhanceEmbeds();
     enhanceCodeBlocks();
     enhanceMermaid();
@@ -1663,6 +1665,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   const note = await api('/notes/' + encodeURIComponent(state.slug));
   state.note = note;
   $('#noteBody').innerHTML = note.html || '<p class="empty">Empty note. Double-click here to start writing.</p>';
+  enhanceHeadings();
   enhanceEmbeds();
   enhanceInlineImages();
   enhanceCodeBlocks();
@@ -1848,6 +1851,51 @@ function enhanceInlineImages() {
     }
   }
 }
+
+/* ══ COLLAPSIBLE HEADINGS ══════════════════════════════════════
+   render.py emits headings as flat siblings of the content under them --
+   markdown has no nesting construct for "everything under this heading."
+   This regroups them after the fact: each heading (h1-h6) gets a caret
+   prepended, and everything until the next heading of the same or shallower
+   level moves into a trailing .h-section div that the caret shows/hides.
+   A stack keyed by heading level handles nesting -- collapsing an h2 also
+   hides the h3s inside it, because they end up inside its .h-section, not
+   because anything here tracks parent/child relationships explicitly.
+   Purely a view-layer regrouping of the rendered HTML: the saved markdown
+   is untouched, and collapse state is not persisted -- every open/close of
+   a note starts fully expanded, same as scroll position always does. */
+function enhanceHeadings() {
+  const root = $('#noteBody');
+  const nodes = Array.from(root.childNodes);
+  const stack = [{ level: 0, el: root }];
+  for (const node of nodes) {
+    const level = node.nodeType === 1 && /^H[1-6]$/.test(node.tagName) ? Number(node.tagName[1]) : 0;
+    if (!level) { stack[stack.length - 1].el.appendChild(node); continue; }
+    while (stack.length > 1 && stack[stack.length - 1].level >= level) stack.pop();
+    const parent = stack[stack.length - 1].el;
+    parent.appendChild(node);
+    const caret = document.createElement('button');
+    caret.type = 'button';
+    caret.className = 'h-fold';
+    caret.setAttribute('aria-expanded', 'true');
+    caret.textContent = '▸';
+    node.insertBefore(caret, node.firstChild);
+    const section = document.createElement('div');
+    section.className = 'h-section';
+    parent.appendChild(section);
+    stack.push({ level, el: section });
+  }
+}
+
+// Only the caret toggles -- clicking heading text itself still just reads
+// as text, and doesn't fight the dblclick-to-edit handler above it.
+$('#noteBody').addEventListener('click', (e) => {
+  const caret = e.target.closest('.h-fold');
+  if (!caret) return;
+  const heading = caret.parentElement;
+  const collapsed = heading.classList.toggle('h-collapsed');
+  caret.setAttribute('aria-expanded', String(!collapsed));
+});
 
 /* ══ IMAGE CAPTION ═════════════════════════════════════
    Click the caption bar to edit it in place. Swaps in a real <input> rather

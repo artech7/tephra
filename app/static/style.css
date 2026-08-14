@@ -351,6 +351,19 @@ body[data-wall="aurora"] .newnote:hover{
 .body h2{font-size:15px;letter-spacing:.02em;margin:36px 0 12px;padding-top:22px;border-top:1px solid var(--edge)}
 .body h3{font-size:14px;margin:26px 0 10px}
 .body h1{font-size:22px;margin:32px 0 12px}
+/* Collapsible headings (see enhanceHeadings() in app.js). The caret is a
+   real <button> for a11y, reset to look like the app's other inline carets
+   (.mcaret, .sv-qpeek-caret) -- pointing down/open by default, rotating
+   back to closed only once a heading picks up .h-collapsed. */
+.h-fold{background:none;border:0;padding:0;margin:0 6px 0 0;display:inline-flex;
+  align-items:center;justify-content:center;width:10px;font-size:9px;
+  color:var(--faint);cursor:pointer;vertical-align:1px;transform:rotate(90deg);
+  transition:transform .18s var(--ease),color .18s var(--ease)}
+.h-fold:hover{color:var(--accent)}
+h1.h-collapsed>.h-fold,h2.h-collapsed>.h-fold,h3.h-collapsed>.h-fold,
+h4.h-collapsed>.h-fold,h5.h-collapsed>.h-fold,h6.h-collapsed>.h-fold{transform:rotate(0)}
+.body h1.h-collapsed+.h-section,.body h2.h-collapsed+.h-section,.body h3.h-collapsed+.h-section,
+.body h4.h-collapsed+.h-section,.body h5.h-collapsed+.h-section,.body h6.h-collapsed+.h-section{display:none}
 .body p{margin-bottom:17px}
 .body ul,.body ol{margin:0 0 17px 22px}
 .body li{margin-bottom:6px}
