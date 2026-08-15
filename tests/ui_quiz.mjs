@@ -24,6 +24,7 @@ window.tephraApi = async (p, o = {}) => {
   if (p === '/study') return JSON.parse(JSON.stringify({ ...data, settings: { quiz_count: saved } }));
   if (p === '/vault/info') return { vault: '/v', files_on_disk: 5, indexed: 5, study_items: 5 };
   if (p === '/study/prefs') { saved = JSON.parse(o.body).quiz_count; return { quiz_count: saved }; }
+  if (p === '/study/answer') return { seen: 1, right: JSON.parse(o.body).correct ? 1 : 0 };
   if (p.startsWith('/study/quiz')) {
     const n = +new URLSearchParams(p.split('?')[1]).get('n');
     return { pool: 29, questions: Array.from({ length: Math.min(n, 29) }, (_, i) =>
@@ -113,6 +114,52 @@ doc.querySelector('.sv-modes button[data-mode="quiz"]').onclick();
 await new Promise(r => setTimeout(r, 20));
 ck('back to the intro, not the old round', !!S().querySelector('.sv-slider input'));
 ck('no stale question showing', !S().querySelector('.sv-quiz-q'));
+
+// Regression for a bug where a single-choice click's correctness was judged
+// against a stale, pre-click snapshot of S.quizPicked (always [] on a
+// question's first answer) instead of what was actually clicked -- every
+// single-choice question was posted to /study/answer, scored, and reported
+// as wrong no matter what was picked, even though the on-screen "Correct" /
+// "Not quite" label (recomputed on the next render, after the click) was
+// right. Multi-choice questions never hit this because their handler
+// mutates the same array in place instead of replacing it.
+console.log('\n── a single-choice click is scored by what was actually clicked ──');
+cat('Networking').onclick(); await new Promise(r => setTimeout(r, 20));
+doc.querySelector('.sv-modes button[data-mode="quiz"]').onclick();
+await new Promise(r => setTimeout(r, 20));
+set(2);
+S().querySelector('.sv-btn.primary').onclick();
+await new Promise(r => setTimeout(r, 40));
+
+// Mock questions are { options: ['a','b'], answers: [0] } -- index 0 is
+// correct, index 1 is wrong.
+let mark = calls.length;
+S().querySelectorAll('.sv-opt')[0].onclick();
+await new Promise(r => setTimeout(r, 20));
+let posted = calls.slice(mark).find((c) => c.p === '/study/answer');
+ck('the correct click is posted as correct',
+   posted && JSON.parse(posted.body).correct === true, posted && posted.body);
+ck('and shown as Correct on screen',
+   S().querySelector('.sv-why-h')?.textContent === 'Correct', S().querySelector('.sv-why-h')?.textContent);
+
+S().querySelector('.sv-btn.primary').onclick(); // Next question →
+await new Promise(r => setTimeout(r, 20));
+mark = calls.length;
+S().querySelectorAll('.sv-opt')[1].onclick();
+await new Promise(r => setTimeout(r, 20));
+posted = calls.slice(mark).find((c) => c.p === '/study/answer');
+ck('the wrong click is posted as wrong',
+   posted && JSON.parse(posted.body).correct === false, posted && posted.body);
+
+S().querySelector('.sv-btn.primary').onclick(); // See results
+await new Promise(r => setTimeout(r, 40));
+ck('the report score matches (1 / 2, not 0 / 2)',
+   S().querySelector('.sv-score')?.textContent === '1 / 2', S().querySelector('.sv-score')?.textContent);
+const tiles = [...S().querySelectorAll('.gv-stat-tile b')].map((b) => b.textContent);
+ck('one missed, one correct', tiles[0] === '1' && tiles[2] === '1', tiles.join(','));
+ck('the missed question gets a detail card', S().querySelectorAll('.sv-report-card').length === 1);
+ck('the correct one gets a compact row',
+   S().querySelectorAll('.gv-p-list.gv-stat-list .gv-p-row').length === 1);
 
 console.log('\n── empty pool shows a message, not a slider ──');
 data.totals.questions = 0; data.categories = [];

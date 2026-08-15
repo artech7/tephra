@@ -3017,6 +3017,7 @@ function describeReconcile(r) {
   const bits = [];
   if (r.changed.length) bits.push(`${r.changed.length} index page${r.changed.length === 1 ? '' : 's'} cleaned up`);
   if (r.removed.length) bits.push(`${r.removed.length} empty index page${r.removed.length === 1 ? '' : 's'} removed`);
+  if (r.orphaned?.length) bits.push(`${r.orphaned.length} topic${r.orphaned.length === 1 ? '' : 's'} un-studied (index deleted)`);
   return bits.join('; ') || 'Nothing to clean up';
 }
 
@@ -3052,14 +3053,41 @@ function reconcileCard(entry, removed) {
   return card;
 }
 
+// A card per topic note un-studied because the category index that once
+// organized it is gone -- same shape as reconcileCard so the two read as
+// one report, but the note beneath is "why", not "what was dead", since
+// there's no [[link]] list to show for a single note.
+function orphanCard(entry) {
+  const card = document.createElement('div');
+  card.className = 'recon-card';
+
+  const head = document.createElement('div');
+  head.className = 'recon-head';
+  const t = document.createElement('button');
+  t.className = 'recon-title'; t.type = 'button'; t.textContent = entry.title;
+  t.title = 'Open ' + entry.title;
+  t.onclick = () => openNote(entry.slug);
+  head.appendChild(t);
+  const badge = document.createElement('span');
+  badge.className = 'recon-badge'; badge.textContent = 'UN-STUDIED';
+  head.appendChild(badge);
+  card.appendChild(head);
+
+  const dead = document.createElement('div');
+  dead.className = 'recon-dead';
+  dead.textContent = `"${entry.category}" has no index note anymore`;
+  card.appendChild(dead);
+  return card;
+}
+
 function updateReconcileCount() {
   const left = $('#reconcileList').children.length;
   $('#reconcileFilter').hidden = left === 0;
   if (left === 0) { $('#reconcileResult').textContent = 'No dead references left.'; return; }
   const shown = [...$('#reconcileList').children].filter((el) => el.style.display !== 'none').length;
   $('#reconcileResult').textContent = shown === left
-    ? `${left} index page${left === 1 ? '' : 's'} affected.`
-    : `${shown} of ${left} index pages affected (filtered).`;
+    ? `${left} item${left === 1 ? '' : 's'} affected.`
+    : `${shown} of ${left} items affected (filtered).`;
 }
 
 $('#reconcileFilter').oninput = (e) => {
@@ -3075,6 +3103,7 @@ function renderReconcileReport(r) {
   list.innerHTML = '';
   for (const entry of r.changed) list.appendChild(reconcileCard(entry, false));
   for (const entry of r.removed) list.appendChild(reconcileCard(entry, true));
+  for (const entry of r.orphaned || []) list.appendChild(orphanCard(entry));
   updateReconcileCount();
 }
 
@@ -3084,7 +3113,7 @@ $('#reconcileCheck').onclick = async () => {
   out.textContent = 'Checking…';
   try {
     const preview = await api('/study/import/reconcile?dry_run=true', { method: 'POST' });
-    if (!preview.changed.length && !preview.removed.length) {
+    if (!preview.changed.length && !preview.removed.length && !preview.orphaned.length) {
       out.textContent = 'No dead references found.';
       $('#reconcileRun').disabled = true;
       return;

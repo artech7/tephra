@@ -702,14 +702,26 @@ def repair(dry_run: bool = False, _admin: None = Depends(require_admin)):
 
 @app.post("/api/study/import/reconcile")
 def reconcile_study_indexes(dry_run: bool = False, _admin: None = Depends(require_admin)):
-    """Drop dead [[links]] from importer-owned category index notes -- the
-    "Part of [[Guide]]" line and topic bullet list an import writes.
-    Neither is pruned by the import itself when a topic or a whole guide's
-    root note is later deleted by hand, so this is the way to clean up
-    that backlog without re-importing anything.
+    """Clean up both directions of index/topic drift that hand-deleting
+    notes leaves behind, without requiring a re-import:
+
+    - Dead [[links]] on importer-owned category index notes -- the "Part of
+      [[Guide]]" line and topic bullet list an import writes, left stale
+      when a topic or a whole guide's root note is deleted by hand.
+    - Topic notes whose organizing category index was itself deleted by
+      hand -- their own category field has no link back to it, so they'd
+      otherwise keep reporting a category Crucible has no index for and
+      stay in quiz rotation forever. See strip_orphaned_topics().
     """
     report = guide_import.reconcile_indexes(dry_run=dry_run)
-    if (report["changed"] or report["removed"]) and not dry_run:
+    orphans = guide_import.strip_orphaned_topics(dry_run=dry_run)
+    # Two different populations -- index pages vs. topic notes -- so each
+    # keeps its own scanned count rather than one silently clobbering the
+    # other under the same key.
+    report["index_pages_scanned"] = report.pop("scanned")
+    report["topics_scanned"] = orphans["scanned"]
+    report["orphaned"] = orphans["orphaned"]
+    if (report["changed"] or report["removed"] or report["orphaned"]) and not dry_run:
         idx.rebuild(db())
         st.ensure_fitted(st.all_items(), force=True)
     return report
@@ -1439,7 +1451,10 @@ def study_prefs(payload: PrefsIn):
 
 @app.post("/api/study/progress/reset")
 def study_reset(_admin: None = Depends(require_admin)):
-    st.save_progress({"answers": {}, "flagged": []})
+    # Wipes answer history and flags, not quiz_count/dismissed_seeds -- those
+    # are UI preferences, not stats, and shouldn't be collateral damage.
+    prog = st.load_progress()
+    st.save_progress({"answers": {}, "flagged": [], "settings": prog.get("settings", {})})
     return {"ok": True}
 
 

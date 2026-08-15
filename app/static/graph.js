@@ -504,6 +504,46 @@
     return row;
   }
 
+  // Wipes every answer and flag via POST /study/progress/reset -- destructive
+  // and vault-wide, so it uses the same arm-then-click-again pattern as the
+  // note editor's own Delete chip (see app.js renderDeleteButton) rather than
+  // firing on a single click.
+  function resetStatsButton() {
+    const row = document.createElement('div');
+    row.className = 'gv-stat-reset';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chipbtn danger admin-only';
+    btn.textContent = 'Reset quiz stats';
+    btn.title = 'Clears all answer history and flags. Cannot be undone.';
+    let armed = false, timer = null;
+    const disarm = () => {
+      armed = false; btn.textContent = 'Reset quiz stats'; btn.classList.remove('armed');
+    };
+    btn.onclick = async () => {
+      if (!armed) {
+        armed = true;
+        btn.textContent = 'Reset quiz stats — click again';
+        btn.classList.add('armed');
+        timer = setTimeout(disarm, 4000);
+        return;
+      }
+      clearTimeout(timer); disarm();
+      try {
+        await window.tephraApi('/study/progress/reset', { method: 'POST' });
+        studyStatsCache = null;
+        window.tephraToast?.('Quiz stats reset');
+        window.tephraRefreshFlags?.();
+        window.tephraStudy?.refresh();
+        renderStats();
+      } catch {
+        window.tephraToast?.('Could not reset quiz stats.');
+      }
+    };
+    row.appendChild(btn);
+    return row;
+  }
+
   // Clicking a category bar drills into a note list right here on the Stats
   // page rather than bouncing over to Crucible -- most vault notes are never
   // enabled for Crucible, so that's where the "Uncategorised" pile actually
@@ -899,6 +939,8 @@
         hint.textContent = 'No quiz answers yet.';
         cruc.appendChild(hint);
       }
+
+      if (answered || p.flagged) cruc.appendChild(resetStatsButton());
     } else {
       const hint = document.createElement('div');
       hint.className = 'gv-hint';
@@ -1307,6 +1349,11 @@
     ST.open = true;
     statsView.classList.add('on');
     statsDetail = null; // always land on the overview, not wherever it was left
+    // studyStatsCache survives across visits to this tab (see studyStats()
+    // above) so category moves don't re-fetch on every render, but that
+    // means a quiz answered since the last visit would otherwise never
+    // show up -- dropping it here makes each fresh open of Stats current.
+    studyStatsCache = null;
     await loadGraphData();
     await renderStats();
   }

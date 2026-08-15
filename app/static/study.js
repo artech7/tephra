@@ -88,6 +88,10 @@
     // "graded", since picking stops being instant the moment more than one
     // box can be checked.
     quiz: [], quizIx: 0, quizPicked: null, quizSubmitted: false, quizScore: 0, quizDone: false,
+    // One entry per question locked in this round -- {q, picked, correct} --
+    // built up by lockIn() so the post-quiz report can show what was missed
+    // without re-deriving it from S.quiz (which doesn't carry `picked`).
+    quizResults: [],
     // Rolled up by default -- a topic's quiz answers sit right under its
     // prose, and showing them open by default spoils the topic before the
     // reader gets to it.
@@ -753,7 +757,7 @@
   function resetBrowse() {
     S.item = null;
     S.quiz = []; S.quizIx = 0; S.quizPicked = null; S.quizSubmitted = false;
-    S.quizScore = 0; S.quizDone = false;
+    S.quizScore = 0; S.quizDone = false; S.quizResults = [];
   }
 
   const inCat = (it) => !S.category || it.category === S.category;
@@ -1089,12 +1093,13 @@
     const r = await api('/study/quiz?' + params);
     S.quiz = r.questions;
     S.quizIx = 0; S.quizPicked = null; S.quizSubmitted = false;
-    S.quizScore = 0; S.quizDone = false;
+    S.quizScore = 0; S.quizDone = false; S.quizResults = [];
     render();
   }
 
   function renderQuiz(main) {
-    if (!S.quiz.length || S.quizDone) return renderQuizIntro(main);
+    if (S.quizDone) return renderQuizReport(main);
+    if (!S.quiz.length) return renderQuizIntro(main);
     const q = S.quiz[S.quizIx];
 
     const wrap = el('div', 'sv-quiz');
@@ -1136,9 +1141,22 @@
 
     async function lockIn() {
       S.quizSubmitted = true;
-      const correct = sameSet(picked, q.answers);
+      // Read S.quizPicked fresh rather than closing over the `picked` local
+      // above: a single-choice click does `S.quizPicked = [i]` (a new array,
+      // not a mutation of `picked`) immediately before calling lockIn(), so
+      // `picked` here would still be the pre-click snapshot -- [] on a
+      // question's first answer -- and score every single-choice question
+      // as wrong regardless of what was clicked. Multi-choice never hit this
+      // because its handler mutates `picked` in place instead of replacing
+      // it, but reading S.quizPicked directly is correct either way.
+      const chosen = S.quizPicked || [];
+      const correct = sameSet(chosen, q.answers);
       if (correct) S.quizScore++;
       await api('/study/answer', { method: 'POST', body: JSON.stringify({ qid: q.id, correct }) });
+      // Keeps a reference to q itself, not a copy -- flagging it after
+      // answering (the flag button is still live on this same screen)
+      // mutates q.flagged in place, and the report should see that.
+      S.quizResults.push({ q, picked: [...chosen], correct });
       render();
     }
 
@@ -1191,14 +1209,128 @@
 
       const next = el('button', 'sv-btn primary',
         S.quizIx + 1 < S.quiz.length ? 'Next question →' : 'See results');
-      next.onclick = () => {
+      next.onclick = async () => {
         if (S.quizIx + 1 < S.quiz.length) {
           S.quizIx++; S.quizPicked = null; S.quizSubmitted = false;
-        } else S.quizDone = true;
+          render();
+          return;
+        }
+        S.quizDone = true;
+        // The last answer was just recorded server-side -- refetch so the
+        // header stats bar and category pools reflect this round without
+        // needing Crucible closed and reopened.
+        S.data = await api('/study');
+        renderCats(); renderStats();
         render();
       };
       wrap.appendChild(next);
     }
+    main.appendChild(wrap);
+  }
+
+  function svStatTile(value, label) {
+    const t = el('div', 'gv-stat-tile');
+    t.appendChild(el('b', null, value));
+    t.appendChild(el('span', null, label));
+    return t;
+  }
+
+  function reportOpenNote(slug) {
+    return async () => { S.item = await api('/study/item/' + slug); setMode('browse'); };
+  }
+
+  // Compact rows for Flagged/Correct -- same gv-p-row/gv-stat-list markup
+  // the Stats page's own "Most linked" list uses (see graph.js), so this
+  // reads as an extension of that view rather than a one-off design.
+  function reportRow(r) {
+    const row = el('button', 'gv-p-row');
+    row.appendChild(el('span', 'gv-p-dot'));
+    row.appendChild(el('span', 'gv-p-lbl', r.q.question));
+    row.appendChild(el('span', 'gv-stat-list-n', r.q.category || ''));
+    row.onclick = reportOpenNote(r.q.slug);
+    return row;
+  }
+
+  // Missed questions get the full breakdown -- the exact right/wrong option
+  // markup and Why box the live quiz screen just showed, so reviewing a miss
+  // here doesn't look like a different feature.
+  function reportCard(r) {
+    const q = r.q;
+    const card = el('div', 'sv-report-card');
+    const meta = el('div', 'sv-quiz-meta');
+    meta.appendChild(el('span', 'sv-c-cat', q.category || ''));
+    card.appendChild(meta);
+    card.appendChild(el('div', 'sv-quiz-q sv-report-q', q.question));
+
+    const opts = el('div', 'sv-opts');
+    q.options.forEach((text, i) => {
+      const b = el('button', 'sv-opt', text);
+      b.disabled = true;
+      if (q.answers.includes(i)) b.classList.add('right');
+      else if (r.picked.includes(i)) b.classList.add('wrong');
+      opts.appendChild(b);
+    });
+    card.appendChild(opts);
+
+    if (q.why) {
+      const why = el('div', 'sv-why');
+      why.appendChild(el('div', 'sv-why-h', 'Why'));
+      why.appendChild(el('div', null, q.why));
+      card.appendChild(why);
+    }
+
+    const jump = el('button', 'sv-back', `Read the full topic: ${q.title} →`);
+    jump.onclick = reportOpenNote(q.slug);
+    card.appendChild(jump);
+    return card;
+  }
+
+  function renderQuizReport(main) {
+    const results = S.quizResults;
+    const total = results.length;
+    const missed = results.filter((r) => !r.correct);
+    const correct = results.filter((r) => r.correct);
+    const flagged = results.filter((r) => r.q.flagged);
+    const pct = total ? Math.round((100 * correct.length) / total) : 0;
+
+    const wrap = el('div', 'sv-quiz-report');
+    wrap.appendChild(el('h2', null, S.category || 'All categories'));
+    wrap.appendChild(el('div', 'sv-score', `${correct.length} / ${total}`));
+    wrap.appendChild(el('div', 'sv-score-sub', `${pct}% on this round`));
+
+    const tiles = el('div', 'gv-stat-tiles');
+    tiles.appendChild(svStatTile(String(missed.length), 'Missed'));
+    tiles.appendChild(svStatTile(String(flagged.length), 'Flagged'));
+    tiles.appendChild(svStatTile(String(correct.length), 'Correct'));
+    wrap.appendChild(tiles);
+
+    if (missed.length) {
+      wrap.appendChild(el('div', 'gv-stat-subhead', 'Missed'));
+      const list = el('div', 'sv-report-cards');
+      missed.forEach((r) => list.appendChild(reportCard(r)));
+      wrap.appendChild(list);
+    }
+
+    if (flagged.length) {
+      wrap.appendChild(el('div', 'gv-stat-subhead', 'Flagged'));
+      const list = el('div', 'gv-p-list gv-stat-list');
+      flagged.forEach((r) => list.appendChild(reportRow(r)));
+      wrap.appendChild(list);
+    }
+
+    if (correct.length) {
+      wrap.appendChild(el('div', 'gv-stat-subhead', 'Correct'));
+      const list = el('div', 'gv-p-list gv-stat-list');
+      correct.forEach((r) => list.appendChild(reportRow(r)));
+      wrap.appendChild(list);
+    }
+
+    const nav = el('div', 'sv-nav');
+    const again = el('button', 'sv-btn primary', 'Start another round');
+    again.onclick = () => { S.quizDone = false; S.quiz = []; S.quizResults = []; render(); };
+    nav.appendChild(again);
+    wrap.appendChild(nav);
+
     main.appendChild(wrap);
   }
 
@@ -1225,15 +1357,9 @@
 
   function renderQuizIntro(main) {
     const wrap = el('div', 'sv-quiz-intro');
-    if (S.quizDone) {
-      const pct = Math.round((100 * S.quizScore) / S.quiz.length);
-      wrap.appendChild(el('div', 'sv-score', `${S.quizScore} / ${S.quiz.length}`));
-      wrap.appendChild(el('div', 'sv-score-sub', `${pct}% on this round`));
-    } else {
-      wrap.appendChild(el('h2', null, S.category || 'All categories'));
-      wrap.appendChild(el('p', 'sv-topic-q',
-        'Multiple choice. Flag anything you want to revisit — flagged questions can be drilled on their own.'));
-    }
+    wrap.appendChild(el('h2', null, S.category || 'All categories'));
+    wrap.appendChild(el('p', 'sv-topic-q',
+      'Multiple choice. Flag anything you want to revisit — flagged questions can be drilled on their own.'));
 
     const pool = poolFor('all');
     const flaggedPool = poolFor('flagged');

@@ -496,3 +496,42 @@ def reconcile_indexes(dry_run: bool = False) -> dict:
                 note.body = body
                 vault.write(note)
     return report
+
+
+def strip_orphaned_topics(dry_run: bool = False) -> dict:
+    """Un-study import-owned topic notes whose organizing category index has
+    been deleted by hand.
+
+    A topic note's own `category` field carries no link back to the index
+    note that once grouped it -- the link only ever ran the other way, as a
+    [[wikilink]] on the index page (see reconcile_indexes above). Deleting
+    that index (a pure navigation stub, study: false) never touches the
+    topics it pointed to, so they go on reporting a category Crucible has no
+    index for and stay in quiz rotation indefinitely.
+
+    Only category_source "import" topics are eligible. A category the user
+    typed in by hand (category_source "manual") never required an index note
+    to begin with, so applying this rule to it would strip notes that were
+    never part of an index in the first place -- exactly the "questions from
+    notes not in an index" this must leave alone.
+    """
+    notes = vault.all_notes()
+    live_categories = {n.title.strip().lower() for n in notes
+                       if n.meta.get("study_index") == "true"}
+    report = {"scanned": 0, "orphaned": [], "dry_run": dry_run}
+    for note in notes:
+        if (note.meta.get("category_source") or "").strip() != "import":
+            continue
+        if not study.is_study(note):
+            continue
+        category = (note.meta.get("category") or "").strip()
+        if not category:
+            continue
+        report["scanned"] += 1
+        if category.lower() in live_categories:
+            continue
+        report["orphaned"].append({"title": note.title, "slug": note.slug, "category": category})
+        if not dry_run:
+            note.meta["study"] = "false"
+            vault.write(note)
+    return report

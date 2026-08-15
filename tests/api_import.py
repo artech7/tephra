@@ -3,7 +3,7 @@ VAULT = os.environ.setdefault("TEPHRA_VAULT", "/tmp/tephra-test-import")
 shutil.rmtree(VAULT, ignore_errors=True)
 from fastapi.testclient import TestClient
 from app.main import app
-from app import guide_import
+from app import guide_import, study
 
 ok = fail = 0
 def check(label, cond, extra=""):
@@ -171,6 +171,50 @@ check("re-importing dropped the dead guide from Part of",
       "[[Heal Guide D]]" not in healed.body, healed.body)
 check("the surviving topic and guide are still there",
       "[[Heal Topic A]]" in healed.body and "[[Heal Guide C]]" in healed.body, healed.body)
+
+print("\n── deleting a category's index note un-studies its topics, not just the page ──")
+guide_e = json.dumps({"topics": [
+    {"title": "Orphan Topic A", "category": "Orphan Cat",
+     "answer": "Prose for a topic whose category index will be deleted by hand.",
+     "quiz": [{"question": "Orphaned but still a real question?", "options": ["Yes", "No"], "answers": [0]}]},
+    {"title": "Orphan Topic B", "category": "Orphan Cat",
+     "answer": "A second topic in the same soon-to-be-indexless category."},
+]})
+guide_import.run_import(guide_e, filename="Orphan Guide.json")
+orphan_cat = next(n for n in _vault.all_notes()
+                  if n.meta.get("study_index") == "true" and "Orphan Topic A" in n.body)
+_vault.delete(orphan_cat.slug)
+
+# A hand-categorized note sharing no index at all -- must never be touched,
+# even though it also has no matching study_index note.
+manual_note = next(n for n in _vault.all_notes() if n.title == "Orphan Topic B")
+manual_note.meta["category_source"] = "manual"
+_vault.write(manual_note)
+
+with TestClient(app) as c:
+    preview = c.post("/api/study/import/reconcile", params={"dry_run": "true"}).json()
+    orphaned_titles = {e["title"] for e in preview["orphaned"]}
+    check("the import-sourced topic under the deleted index is flagged",
+          "Orphan Topic A" in orphaned_titles, preview["orphaned"])
+    check("the now hand-categorized sibling is left alone",
+          "Orphan Topic B" not in orphaned_titles, preview["orphaned"])
+    check("dry run touched nothing on disk",
+          study.is_study(next(n for n in _vault.all_notes() if n.title == "Orphan Topic A")),
+          "still study:true before the real run")
+
+    r = c.post("/api/study/import/reconcile").json()
+    check("real run reports the same topic un-studied",
+          any(e["title"] == "Orphan Topic A" for e in r["orphaned"]), r["orphaned"])
+    a = next(n for n in _vault.all_notes() if n.title == "Orphan Topic A")
+    b = next(n for n in _vault.all_notes() if n.title == "Orphan Topic B")
+    check("Orphan Topic A is un-studied", not study.is_study(a), a.meta)
+    check("...but keeps its category and quiz content untouched",
+          a.meta.get("category") == "Orphan Cat" and "## Quiz" in a.body, a.body)
+    check("Orphan Topic B (manual category, never indexed) is still studyable", study.is_study(b), b.meta)
+
+    print("\n── running it again is a no-op (already un-studied is excluded from the scan) ──")
+    r2 = c.post("/api/study/import/reconcile").json()
+    check("nothing left to orphan", r2["orphaned"] == [], r2["orphaned"])
 
 print(f"\n  {ok} passed, {fail} failed")
 raise SystemExit(1 if fail else 0)
