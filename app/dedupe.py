@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import os
 import re
+import zlib
 from difflib import SequenceMatcher
+from heapq import nsmallest
 from multiprocessing import get_context
 from typing import Iterable
 
@@ -61,6 +63,58 @@ def _could_match(len_a: int, len_b: int, threshold: float) -> bool:
     return 2 * shorter / (shorter + longer) >= threshold
 
 
+# Character n-gram size and sketch size for _sketch()'s coarse pre-filter --
+# see its docstring for what these trade off.
+SHINGLE_K = 8
+SKETCH_SIZE = 48
+# Below this many characters there aren't SKETCH_SIZE distinct 8-grams to
+# begin with, so a sketch would be a near-total sample of the text rather
+# than a genuine estimate -- not wrong, just pointless -- and these lengths
+# are cheap for similarity() to just handle directly anyway.
+SKETCH_MIN_LEN = SHINGLE_K + SKETCH_SIZE
+
+
+def _sketch(text: str) -> frozenset[int]:
+    """A fixed-size fingerprint of `text`'s character 8-grams: the
+    SKETCH_SIZE smallest crc32 hashes among them (a bottom-k / MinHash-style
+    sketch, one hash function). crc32 (stdlib, in `zlib`) rather than the
+    builtin hash() specifically because str hashing is randomized per
+    process by default -- two worker processes would score the same text
+    differently.
+
+    The point of hashing contiguous 8-character runs, rather than words or
+    whole-text character frequency (quick_ratio's approach), is exactly the
+    failure mode the file docstring already calls out for cosine similarity:
+    two genuinely different notes on a shared topic use a lot of the same
+    *words*, which inflates any bag-of-words or character-frequency score.
+    They essentially never happen to share dozens of the same contiguous
+    8-character sequences landing on the same globally-smallest hashes --
+    that takes the same words in the same order, which is what "near-
+    duplicate" actually means here. Computed once per note (this function
+    is O(len(text))), not once per pair -- the reason this helps at all is
+    that comparing two sketches afterward is O(SKETCH_SIZE) regardless of
+    how long the original notes were, where similarity() itself is not.
+    """
+    if len(text) < SKETCH_MIN_LEN:
+        return frozenset()
+    shingles = {text[i:i + SHINGLE_K] for i in range(len(text) - SHINGLE_K + 1)}
+    return frozenset(nsmallest(SKETCH_SIZE, (zlib.crc32(s.encode("utf-8")) for s in shingles)))
+
+
+def _plausible(sketch_a: frozenset[int], sketch_b: frozenset[int]) -> bool:
+    """False only when the coarse sketch is about as sure as a hash sample
+    can be that two notes share no real text -- deliberately asymmetric.
+    An empty sketch (too short to sample, see SKETCH_MIN_LEN) always defers
+    rather than guessing. A false "plausible" here just costs one similarity()
+    call that turns out to score 0; a false "not plausible" would silently
+    drop a real duplicate from the report, which is a much worse trade, so
+    the bar for saying no is set high: any overlap at all counts as maybe.
+    """
+    if not sketch_a or not sketch_b:
+        return True
+    return not sketch_a.isdisjoint(sketch_b)
+
+
 def similarity(a: str, b: str) -> float:
     if not _could_match(len(a), len(b), REPORT_THRESHOLD):
         return 0.0
@@ -96,30 +150,41 @@ def best_match(text: str, corpus: Iterable[tuple[str, str]]) -> tuple[str, float
     return None
 
 
-def _scan_row(items: list[tuple[str, str, str, str]], i: int) -> list[dict]:
+def _scan_row(items: list[tuple[str, str, str, str, frozenset[int]]], i: int) -> list[dict]:
     """Every match for items[i] among the notes after it in length-sorted
     order -- one "row" of the comparison matrix. Pulled out to a plain,
     picklable module-level function so a worker process can run it: a
     closure or a method wouldn't survive being sent across the process
     boundary.
 
-    _could_match's bound (2*shorter/(shorter+longer)) is monotonically
-    non-increasing as the longer side grows, for a fixed shorter side. So
-    with items in ascending-length order, once items[i] can't match
-    items[j] it can't match anything after j either (all of them are even
-    longer) -- the loop breaks instead of paying an O(1) rejection, plus a
-    normalize()/content_text() call for a note the length gap already
-    ruled out, for every remaining note in the vault. What actually counts
-    as a match is unchanged: similarity() and REPORT_THRESHOLD are exactly
-    what they were, so this changes which candidates get *visited*, never
-    which pairs get *reported*.
+    Two filters run before the real (expensive) similarity() call, cheapest
+    first:
+
+    1. _could_match's bound (2*shorter/(shorter+longer)) is monotonically
+       non-increasing as the longer side grows, for a fixed shorter side.
+       So with items in ascending-length order, once items[i] can't match
+       items[j] it can't match anything after j either (all of them are
+       even longer) -- the loop breaks rather than continuing to check.
+    2. _plausible compares the two notes' precomputed shingle sketches --
+       O(SKETCH_SIZE) regardless of how long the notes are, unlike
+       similarity() itself. This is a `continue`, not a `break`: sketch
+       overlap isn't monotonic in length order the way the length bound is,
+       so a later (still length-compatible) note can still be plausible
+       even when a nearer one wasn't.
+
+    What actually counts as a match is unchanged: similarity() and
+    REPORT_THRESHOLD are exactly what they were, so both filters change
+    which candidates get *visited*, never which pairs get *reported* --
+    modulo _plausible's own documented (and deliberately one-sided) risk.
     """
-    slug_a, title_a, updated_a, text_a = items[i]
+    slug_a, title_a, updated_a, text_a, sketch_a = items[i]
     len_a = len(text_a)
     out = []
-    for slug_b, title_b, updated_b, text_b in items[i + 1:]:
+    for slug_b, title_b, updated_b, text_b, sketch_b in items[i + 1:]:
         if not _could_match(len_a, len(text_b), REPORT_THRESHOLD):
             break
+        if not _plausible(sketch_a, sketch_b):
+            continue
         r = similarity(text_a, text_b)
         if r >= REPORT_THRESHOLD:
             out.append({"a_slug": slug_a, "a_title": title_a, "a_updated": updated_a,
@@ -141,10 +206,10 @@ PARALLEL_MIN_NOTES = 40
 # using it, rather than re-pickling the full (sorted, length-heavy) items
 # list on every single task, is that each worker pays that cost once
 # instead of once per row.
-_worker_items: list[tuple[str, str, str, str]] = []
+_worker_items: list[tuple[str, str, str, str, frozenset[int]]] = []
 
 
-def _init_worker(items: list[tuple[str, str, str, str]]) -> None:
+def _init_worker(items: list[tuple[str, str, str, str, frozenset[int]]]) -> None:
     global _worker_items
     _worker_items = items
 
@@ -159,20 +224,28 @@ def scan_notes(notes: list) -> list[dict]:
 
     Sorted by length first (see _scan_row) so most vaults visit a small
     fraction of the n^2 pairs; a vault where every note happens to be
-    nearly the same length degrades back to the full scan. Past
-    PARALLEL_MIN_NOTES notes, rows are split across a worker pool sized to
-    the machine's own CPU count -- this is genuinely CPU-bound, pure-Python
-    work (SequenceMatcher, no I/O to overlap), so more cores is the only
-    lever left once the pruning above has already cut what there is to do.
+    nearly the same length degrades back to the full scan. Each note's
+    shingle sketch (_sketch()) is also computed once here, up front --
+    the length filter alone doesn't help when a vault's notes cluster in a
+    narrow length band (a real case: it still leaves every pair length-
+    compatible), but the sketch filter's cost has nothing to do with length
+    at all, so it keeps working exactly where the length filter runs out.
+
+    Past PARALLEL_MIN_NOTES notes, rows are split across a worker pool
+    sized to the machine's own CPU count -- this is genuinely CPU-bound,
+    pure-Python work (SequenceMatcher, no I/O to overlap), so more cores is
+    a further, independent lever on top of visiting fewer candidates.
     multiprocessing is stdlib, matching this module's existing stance (see
     the file docstring); if process creation fails for any reason -- a
     sandboxed environment that blocks fork/spawn, for instance -- this
     falls back to the sequential loop rather than turning a working scan
     into a broken one.
     """
-    items = [(n.slug, n.title, n.updated,
-              content_text(n.title, n.meta.get("question"), n.body))
-             for n in notes]
+    def build(n):
+        text = content_text(n.title, n.meta.get("question"), n.body)
+        return (n.slug, n.title, n.updated, text, _sketch(text))
+
+    items = [build(n) for n in notes]
     items.sort(key=lambda item: len(item[3]))
 
     n = len(items)
