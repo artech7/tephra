@@ -64,10 +64,20 @@ def _could_match(len_a: int, len_b: int, threshold: float) -> bool:
 
 
 # Character n-gram size and sketch size for _sketch()'s coarse pre-filter --
-# see its docstring for what these trade off.
-SHINGLE_K = 8
+# see its docstring for what these trade off. k=8 was the first value tried
+# and it's *safe* (the boundary sweep in tests/api_dedupe.py never found a
+# false negative at k=8 either) but not effective: on a real vault of
+# technical documentation, common short phrases and markdown furniture
+# ("configuration is", "the following", list/table syntax) are long enough
+# to alias between genuinely unrelated notes, so most length-compatible
+# pairs still shared at least one sketch element and fell through to the
+# real comparison anyway. Measured directly against a real 91-note vault
+# (see the commit that introduced this comment): k=8 left 375 of 412
+# length-compatible pairs "plausible"; k=20 left 61 -- roughly 6x fewer
+# calls to the actually-expensive similarity(), for the same recall.
+SHINGLE_K = 20
 SKETCH_SIZE = 48
-# Below this many characters there aren't SKETCH_SIZE distinct 8-grams to
+# Below this many characters there aren't SKETCH_SIZE distinct shingles to
 # begin with, so a sketch would be a near-total sample of the text rather
 # than a genuine estimate -- not wrong, just pointless -- and these lengths
 # are cheap for similarity() to just handle directly anyway.
@@ -75,25 +85,28 @@ SKETCH_MIN_LEN = SHINGLE_K + SKETCH_SIZE
 
 
 def _sketch(text: str) -> frozenset[int]:
-    """A fixed-size fingerprint of `text`'s character 8-grams: the
+    """A fixed-size fingerprint of `text`'s character SHINGLE_K-grams: the
     SKETCH_SIZE smallest crc32 hashes among them (a bottom-k / MinHash-style
     sketch, one hash function). crc32 (stdlib, in `zlib`) rather than the
     builtin hash() specifically because str hashing is randomized per
     process by default -- two worker processes would score the same text
     differently.
 
-    The point of hashing contiguous 8-character runs, rather than words or
-    whole-text character frequency (quick_ratio's approach), is exactly the
-    failure mode the file docstring already calls out for cosine similarity:
-    two genuinely different notes on a shared topic use a lot of the same
-    *words*, which inflates any bag-of-words or character-frequency score.
-    They essentially never happen to share dozens of the same contiguous
-    8-character sequences landing on the same globally-smallest hashes --
-    that takes the same words in the same order, which is what "near-
-    duplicate" actually means here. Computed once per note (this function
-    is O(len(text))), not once per pair -- the reason this helps at all is
-    that comparing two sketches afterward is O(SKETCH_SIZE) regardless of
-    how long the original notes were, where similarity() itself is not.
+    The point of hashing contiguous SHINGLE_K-character runs, rather than
+    words or whole-text character frequency (quick_ratio's approach), is
+    exactly the failure mode the file docstring already calls out for
+    cosine similarity: two genuinely different notes on a shared topic use
+    a lot of the same *words*, which inflates any bag-of-words or
+    character-frequency score. In practice this needed a longer run than
+    it might sound like it should: common short phrases and markdown
+    furniture ("configuration is", "the following", list/table syntax) are
+    exactly the kind of contiguous run that recurs across genuinely
+    unrelated real notes, which is why SHINGLE_K is 20 rather than
+    something shorter -- see its own comment for the numbers that drove
+    that. Computed once per note (this function is O(len(text))), not once
+    per pair -- the reason this helps at all is that comparing two sketches
+    afterward is O(SKETCH_SIZE) regardless of how long the original notes
+    were, where similarity() itself is not.
     """
     if len(text) < SKETCH_MIN_LEN:
         return frozenset()
