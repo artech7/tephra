@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import os
 import socket
 import sys
@@ -280,4 +281,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Required before anything else runs, on Windows specifically: a frozen
+    # PyInstaller build has no separate Python interpreter to fork, so
+    # multiprocessing (app/dedupe.py's vault-wide duplicate scan, past a
+    # note-count threshold) falls back to "spawn", which re-executes this
+    # same frozen entry point in each worker. Without this guard, that
+    # re-execution runs main() again -- launching another whole app window
+    # -- instead of just the worker payload. A no-op everywhere else
+    # (non-Windows, not frozen), so it's safe to always call.
+    multiprocessing.freeze_support()
     raise SystemExit(main())
