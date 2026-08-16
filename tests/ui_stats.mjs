@@ -99,8 +99,8 @@ ck('Vault Health -- formerly its own drawer -- is now a third section inside thi
 ck('...visible, not left hidden after being moved in',
    statsPanel().querySelector('#gvHealthSection').hidden === false);
 ck('...with its actual tools intact (same ids app.js already wires)',
-   !!statsPanel().querySelector('#dupRun') && !!statsPanel().querySelector('#reconcileCheck')
-   && !!statsPanel().querySelector('#auditRun') && !!statsPanel().querySelector('#btnReindex'));
+   !!statsPanel().querySelector('#healthScan') && !!statsPanel().querySelector('#repairRun')
+   && !!statsPanel().querySelector('#reconcileRun') && !!statsPanel().querySelector('#dupList'));
 ck('vault tile counts real notes, stubs excluded',
    statsPanel().textContent.includes('Notes') &&
    statsPanel().querySelector('.gv-stat-tile b').textContent === '4');

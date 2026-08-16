@@ -2856,34 +2856,6 @@ function describeRepair(r) {
 /* Vault Health, in the settings drawer: the auto-linker that produced nested
    links is fixed, but a vault it already damaged stays damaged until
    something rewrites it — so this has to be reachable, not just an endpoint. */
-$('#auditRun').onclick = async () => {
-  const out = $('#auditResult');
-  out.textContent = 'Checking…';
-  try {
-    const [a, preview] = await Promise.all([
-      api('/audit'),
-      api('/repair?dry_run=true', { method: 'POST' }),
-    ]);
-    if (a.clean) {
-      out.textContent = 'No malformed links found.';
-      $('#repairRun').disabled = true;
-      return;
-    }
-    const n = preview.changed;
-    out.innerHTML = `<b>${n} note${n === 1 ? '' : 's'}</b> would be rewritten.`;
-    const p = preview.notes.find((x) => x.preview && x.preview.before);
-    if (p) {
-      const box = document.createElement('div');
-      box.className = 'auditsample';
-      box.innerHTML = `<div class="abefore"></div><div class="aafter"></div>`;
-      box.querySelector('.abefore').textContent = p.preview.before;
-      box.querySelector('.aafter').textContent = p.preview.after;
-      out.appendChild(box);
-    }
-    $('#repairRun').disabled = false;
-  } catch { out.textContent = 'Could not run the check.'; }
-};
-
 $('#repairRun').onclick = async () => {
   const out = $('#auditResult');
   out.textContent = 'Repairing…';
@@ -2897,16 +2869,6 @@ $('#repairRun').onclick = async () => {
     if (state.slug) await openNote(state.slug, false);
     window.tephraStudy?.refresh();
   } catch { out.textContent = 'Repair failed.'; }
-};
-
-$('#btnReindex').onclick = async () => {
-  const out = $('#auditResult');
-  out.textContent = 'Rebuilding…';
-  try {
-    const r = await api('/reindex', { method: 'POST' });
-    await loadList(); await loadGraph(); await loadMedia();
-    out.textContent = `Reindexed ${r.notes} notes.`;
-  } catch { out.textContent = 'Reindex failed.'; }
 };
 
 // One note-line within a duplicate-pair card: title (click to open), how
@@ -2974,36 +2936,6 @@ $('#dupFilter').oninput = (e) => {
     card.style.display = !q || card.textContent.toLowerCase().includes(q) ? '' : 'none';
   }
   updateDupCount();
-};
-
-$('#dupRun').onclick = async () => {
-  const out = $('#dupResult'), list = $('#dupList');
-  // O(n^2) over every note's content -- on a vault of ~100 notes this is
-  // real seconds, not instant, and a static "Scanning…" is indistinguishable
-  // from hung. A running clock at least proves it's still alive.
-  const startedAt = Date.now();
-  list.innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
-  out.textContent = 'Scanning… 0s';
-  const tick = setInterval(() => {
-    out.textContent = `Scanning… ${Math.round((Date.now() - startedAt) / 1000)}s`;
-  }, 1000);
-  try {
-    const { pairs } = await api('/duplicates');
-    if (!pairs.length) { out.textContent = 'No near-duplicate notes found.'; return; }
-    for (const p of pairs) {
-      const card = document.createElement('div');
-      card.className = 'dup-pair';
-      const pct = document.createElement('div');
-      pct.className = 'dup-pct'; pct.textContent = Math.round(p.similarity * 100) + '% similar';
-      card.appendChild(pct);
-      const aNewer = (p.a_updated || '') > (p.b_updated || '');
-      card.appendChild(dupNoteRow(p.a_slug, p.a_title, p.a_updated, aNewer));
-      card.appendChild(dupNoteRow(p.b_slug, p.b_title, p.b_updated, !aNewer));
-      list.appendChild(card);
-    }
-    updateDupCount();
-  } catch { out.textContent = 'Could not scan for duplicates.'; }
-  finally { clearInterval(tick); }
 };
 
 /* Study guide index pages accumulate every topic and every guide that ever
@@ -3107,20 +3039,111 @@ function renderReconcileReport(r) {
   updateReconcileCount();
 }
 
-$('#reconcileCheck').onclick = async () => {
-  const out = $('#reconcileResult');
+/* Scan vault: runs the four Vault Health checks in one pass instead of
+   requiring four separate button clicks. Each step is its own try/catch --
+   if one fails (e.g. an admin-gated dry-run 401ing because notes are
+   locked, which pops the admin pane via api()'s own 401 handler) the rest
+   still run rather than the whole scan dying on the first problem, so a
+   locked vault still gets its read-only Duplicates check even though
+   Links/Index/Study-guide can't. */
+function healthSetScanning(on) {
+  const card = $('#healthCard');
+  card.classList.toggle('scanning', on);
+  $('#healthScan').disabled = on;
+  $('#healthStatus').querySelector('.pulse').hidden = !on;
+}
+
+$('#healthScan').onclick = async () => {
+  const statusText = $('#healthStatusText');
+  const results = $('#healthResults');
+  healthSetScanning(true);
+  results.hidden = false;
+  $('#repairRun').disabled = true;
+  $('#reconcileRun').disabled = true;
+  $('#dupList').innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
   $('#reconcileList').innerHTML = ''; $('#reconcileFilter').hidden = true; $('#reconcileFilter').value = '';
-  out.textContent = 'Checking…';
+
+  const startedAt = Date.now();
+  let step = 'Checking links';
+  const elapsed = () => Math.round((Date.now() - startedAt) / 1000);
+  const tick = setInterval(() => { statusText.textContent = `${step}… ${elapsed()}s`; }, 1000);
+  statusText.textContent = `${step}… 0s`;
+
+  const problems = [];
+
+  step = 'Checking links';
+  try {
+    const [a, preview] = await Promise.all([
+      api('/audit'),
+      api('/repair?dry_run=true', { method: 'POST' }),
+    ]);
+    if (a.clean) {
+      $('#auditResult').textContent = 'No malformed links found.';
+    } else {
+      const n = preview.changed;
+      $('#auditResult').innerHTML = `<b>${n} note${n === 1 ? '' : 's'}</b> would be rewritten.`;
+      const p = preview.notes.find((x) => x.preview && x.preview.before);
+      if (p) {
+        const box = document.createElement('div');
+        box.className = 'auditsample';
+        box.innerHTML = `<div class="abefore"></div><div class="aafter"></div>`;
+        box.querySelector('.abefore').textContent = p.preview.before;
+        box.querySelector('.aafter').textContent = p.preview.after;
+        $('#auditResult').appendChild(box);
+      }
+      $('#repairRun').disabled = false;
+      problems.push(`${n} link${n === 1 ? '' : 's'} to repair`);
+    }
+  } catch { $('#auditResult').textContent = 'Could not run the check.'; }
+
+  step = 'Rebuilding index';
+  try {
+    const r = await api('/reindex', { method: 'POST' });
+    await loadList(); await loadGraph(); await loadMedia();
+    $('#reindexResult').textContent = `Reindexed ${r.notes} notes.`;
+  } catch { $('#reindexResult').textContent = 'Reindex failed.'; }
+
+  step = 'Scanning for duplicates';
+  try {
+    const { pairs } = await api('/duplicates');
+    if (!pairs.length) {
+      $('#dupResult').textContent = 'No near-duplicate notes found.';
+    } else {
+      const list = $('#dupList');
+      for (const p of pairs) {
+        const card = document.createElement('div');
+        card.className = 'dup-pair';
+        const pct = document.createElement('div');
+        pct.className = 'dup-pct'; pct.textContent = Math.round(p.similarity * 100) + '% similar';
+        card.appendChild(pct);
+        const aNewer = (p.a_updated || '') > (p.b_updated || '');
+        card.appendChild(dupNoteRow(p.a_slug, p.a_title, p.a_updated, aNewer));
+        card.appendChild(dupNoteRow(p.b_slug, p.b_title, p.b_updated, !aNewer));
+        list.appendChild(card);
+      }
+      updateDupCount();
+      problems.push(`${pairs.length} possible duplicate${pairs.length === 1 ? '' : 's'}`);
+    }
+  } catch { $('#dupResult').textContent = 'Could not scan for duplicates.'; }
+
+  step = 'Checking study guide indexes';
   try {
     const preview = await api('/study/import/reconcile?dry_run=true', { method: 'POST' });
     if (!preview.changed.length && !preview.removed.length && !preview.orphaned.length) {
-      out.textContent = 'No dead references found.';
-      $('#reconcileRun').disabled = true;
-      return;
+      $('#reconcileResult').textContent = 'No dead references found.';
+    } else {
+      renderReconcileReport(preview);
+      $('#reconcileRun').disabled = false;
+      const n = preview.changed.length + preview.removed.length + (preview.orphaned?.length || 0);
+      problems.push(`${n} study guide reference${n === 1 ? '' : 's'} to clean up`);
     }
-    renderReconcileReport(preview);
-    $('#reconcileRun').disabled = false;
-  } catch { out.textContent = 'Could not run the check.'; }
+  } catch { $('#reconcileResult').textContent = 'Could not run the check.'; }
+
+  clearInterval(tick);
+  healthSetScanning(false);
+  statusText.textContent = problems.length
+    ? `Scan finished in ${elapsed()}s — ${problems.join(', ')}.`
+    : `Scan finished in ${elapsed()}s — nothing needs attention.`;
 };
 
 $('#reconcileRun').onclick = async () => {

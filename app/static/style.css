@@ -1438,17 +1438,47 @@ input.sv-select{cursor:text}
   .gv-stats-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:40px;align-items:start}
 }
 .gv-stat-section h4{font-size:13px;font-weight:600;letter-spacing:-.01em;margin-bottom:14px}
-/* Vault Health's four tools (#gvHealthSection, moved in by graph.js's
-   renderStats()) reuse .th-sect -- the same section shell every settings
-   drawer (Appearance, Vaults, Admin) still uses -- so this only overrides
-   it scoped to .gv-health-grid specifically, never the bare selector, or
-   those other drawers would lose their own bottom-border stacking. Here
-   it's a repeat(auto-fit) grid of small cards instead: a wide window fits
-   two or four side by side, the same "wrap to fit, not one long column"
-   fix the rest of this view already uses. */
-.gv-health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:4px}
-.gv-health-grid .th-sect{padding:14px 16px;border-bottom:0;border-radius:12px;
-  background:rgba(255,255,255,.03);border:1px solid var(--edge)}
+/* Vault Health (#gvHealthSection, moved in by graph.js's renderStats()) --
+   one card, one Scan button, results fill in below once it's done. The
+   scanning ring reuses the exact accent -> cruc-a -> cruc-b spotlight-mask
+   technique .node[aria-current]/.ctx-toggle already animate (node-holo-
+   drift), just sped up while .scanning is on so the ring itself reads as
+   "working" rather than a static decoration -- and a sweeping scan-line on
+   ::after (same three-color family, so it reads as one effect, not two)
+   for the "actively scanning" motion the ring's slow drift alone doesn't
+   give. overflow:hidden clips that sweep to the card's rounded corners;
+   the ring is unaffected since its own mask already confines it to inset:0.*/
+.gv-health-card{position:relative;overflow:hidden;border-radius:16px;padding:18px 20px;
+  background:rgba(255,255,255,.045);border:1px solid var(--edge);
+  box-shadow:0 1px 0 var(--edge-hi) inset}
+.gv-health-card>*{position:relative;z-index:1}
+.gv-health-card::before{content:'';position:absolute;inset:0;border-radius:inherit;z-index:0;pointer-events:none;
+  padding:1.5px;opacity:0;
+  background-image:radial-gradient(circle,var(--accent),var(--cruc-a) 35%,var(--cruc-b) 60%,transparent 75%);
+  background-size:220% 220%;background-position:20% 30%;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;
+  transition:opacity .3s var(--ease)}
+.gv-health-card.scanning::before{opacity:1;animation:node-holo-drift 1.1s ease-in-out infinite alternate}
+.gv-health-card.scanning::after{content:'';position:absolute;left:0;right:0;top:0;height:2px;z-index:0;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--accent) 20%,var(--cruc-a) 50%,var(--cruc-b) 80%,transparent);
+  box-shadow:0 0 14px 1px var(--accent);
+  animation:gv-scan-sweep 1.8s linear infinite}
+@keyframes gv-scan-sweep{
+  0%{top:0;opacity:0}
+  8%{opacity:1}
+  92%{opacity:1}
+  100%{top:100%;opacity:0}
+}
+@media (prefers-reduced-motion: reduce){
+  .gv-health-card.scanning::before{animation:none;background-position:50% 50%}
+  .gv-health-card.scanning::after{animation:none;display:none}
+}
+.gv-health-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+.gv-health-status{font-family:var(--mono);font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.gv-health-status .pulse{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.1s infinite}
+.gv-health-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px}
+.gv-health-item{padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid var(--edge)}
 .gv-stat-tiles{display:flex;flex-wrap:wrap;gap:1px;
   background:var(--edge);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
 .gv-stat-tile{background:rgba(0,0,0,.22);padding:14px 16px;display:flex;flex-direction:column;gap:4px;

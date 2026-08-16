@@ -45,6 +45,9 @@ window.fetch = async (u, o = {}) => {
   else if (p.includes('/api/notes')) b = notes;
   else if (p.includes('/api/duplicates')) b = { pairs: dupPairs };
   else if (p.includes('/api/study/import/reconcile')) b = reconcileReport;
+  else if (p.includes('/api/audit')) b = { clean: true };
+  else if (p.includes('/api/repair')) b = { changed: 0, notes: [] };
+  else if (p.includes('/api/reindex')) b = { notes: notes.length };
   else if (p.includes('/api/graph')) b = { nodes: [], links: [] };
   else if (p.includes('/api/media')) b = [];
   else if (p.includes('/api/study')) b = { known_categories: [] };
@@ -75,9 +78,9 @@ console.log('── every control app.js wires exists in the markup ──');
 // markup without an element the code then wired, throwing on null.
 const WIRED = ['#noteSort', '#tagClear', '#tephraBtn', '#crucibleBtn', '#vaultBtn',
                '#vaultClose', '#vaultGoOpen', '#vaultGoCreate', '#vaultOpenBack', '#vaultWizBack',
-               '#wizNext1', '#wizNext2', '#wizCreateBtn', '#auditRun', '#repairRun',
-               '#btnReindex', '#themeBtn', '#newNote',
-               '#openPalette', '#favBtn', '#dupRun', '#dupFilter'];
+               '#wizNext1', '#wizNext2', '#wizCreateBtn', '#healthScan', '#repairRun',
+               '#themeBtn', '#newNote',
+               '#openPalette', '#favBtn', '#dupFilter'];
 const absent = WIRED.filter(id => !doc.querySelector(id));
 ck('no wired control is missing', absent.length === 0, absent.join(',') || 'all present');
 
@@ -106,10 +109,12 @@ ck('trailing number relabels with sort',
    doc.querySelector('#noteList .node').title.includes('backlinks'));
 ck('type shown via dot class', !!doc.querySelector('.node.kind-index') && !!doc.querySelector('.node.kind-study'));
 
-console.log('\n── vault health: find duplicate notes ──');
-doc.querySelector('#dupRun').onclick();
+console.log('\n── vault health: scan runs all four checks from one button ──');
+doc.querySelector('#healthScan').onclick();
 await new Promise((r) => setTimeout(r, 20));
 ck('hit the duplicates endpoint', calls.some((c) => c.p.endsWith('/api/duplicates')));
+ck('checked with dry_run', calls.some((c) => c.p.includes('/api/study/import/reconcile') && c.p.includes('dry_run=true')));
+ck('rebuilt the index', calls.some((c) => c.p.endsWith('/api/reindex') && c.m === 'POST'));
 const dupResult = doc.querySelector('#dupResult');
 ck('reports the pair count', dupResult.textContent.includes('2'), dupResult.textContent);
 const dupList = doc.querySelector('#dupList');
@@ -143,9 +148,6 @@ ck('result count updates to reflect one pair left', dupResult.textContent.includ
 deleted.length = 0;
 
 console.log('\n── vault health: dead references, as a reviewable card list ──');
-doc.querySelector('#reconcileCheck').onclick();
-await new Promise((r) => setTimeout(r, 20));
-ck('checked with dry_run', calls.some((c) => c.p.includes('/api/study/import/reconcile') && c.p.includes('dry_run=true')));
 const reconList = doc.querySelector('#reconcileList');
 ck('one card per affected index page, not a bare count', reconList.querySelectorAll('.recon-card').length === 2);
 const changedCard = [...reconList.querySelectorAll('.recon-card')].find((c) => c.textContent.includes('Networking Index'));

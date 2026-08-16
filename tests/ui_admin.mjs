@@ -12,7 +12,7 @@ const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 console.log('── the elements this feature needs actually exist ──');
 ck('lock button in the topbar', !!$('#lockBtn'));
 ck('admin drawer', !!$('#admin'));
-for (const id of ['newNote', 'favBtn', 'quizAdd', 'repairRun', 'btnReindex', 'reconcileRun', 'renameSave', 'wizCreateBtn'])
+for (const id of ['newNote', 'favBtn', 'quizAdd', 'repairRun', 'reconcileRun', 'renameSave', 'wizCreateBtn'])
   ck(`#${id} is tagged admin-only`, $(`#${id}`)?.classList.contains('admin-only'), id);
 
 // ── a fake backend, stateful enough to test setup -> lock -> unlock ->

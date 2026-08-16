@@ -413,49 +413,57 @@
      section of the Overview view (see graph.js's renderStats(), which
      relocates this exact node into #gvStatsPanel on every render) rather
      than a separate place to go -- starts hidden and off in normal flow so
-     it isn't visible/reachable before that first happens. Every control
-     inside keeps the same id app.js already wires (#auditRun, #dupRun,
-     #reconcileCheck, ...), so none of that event-binding code changed,
-     only where this markup lives. -->
+     it isn't visible/reachable before that first happens.
+
+     Used to be four separate cards, each with its own "run this check"
+     button. Consolidated into one #healthScan button that runs all four in
+     sequence and fills in the same result areas (#auditResult, #dupList,
+     #reconcileList, ...) those cards already used -- so app.js's existing
+     rendering functions (renderReconcileReport, dupNoteRow, describeRepair,
+     ...) and ids didn't need to change, only how they're triggered. Repair
+     and Clean up stay as separate admin-only buttons because those are the
+     one destructive step a scan should never take on its own -- everything
+     upstream of them is read-only. -->
 <div id="gvHealthSection" class="gv-stat-section" hidden>
   <h4>Vault Health</h4>
-  <div class="gv-health-grid">
-    <div class="th-sect">
-      <div class="th-l"><span>Links</span></div>
-      <div id="auditResult" class="th-note">Not checked yet.</div>
-      <div class="th-row">
-        <button class="sv-btn" id="auditRun">Check links</button>
-        <button class="sv-btn primary admin-only" id="repairRun" disabled>Repair</button>
-      </div>
-      <div class="th-note">Scans every note for malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check previews; Repair rewrites the markdown.</div>
+  <div class="gv-health-card" id="healthCard">
+    <div class="gv-health-head">
+      <button class="sv-btn primary" id="healthScan">Scan vault</button>
+      <div class="gv-health-status" id="healthStatus"><span class="pulse" hidden></span><span id="healthStatusText">Not scanned yet.</span></div>
     </div>
-    <div class="th-sect">
-      <div class="th-l"><span>Index</span></div>
-      <div class="th-row">
-        <button class="sv-btn admin-only" id="btnReindex">Rebuild index</button>
+    <div class="th-note">Checks links, rebuilds the search index, and looks for duplicate notes and dead study-guide references — in one pass. Can take a while on larger vaults; leave the tab open until it finishes.</div>
+
+    <div class="gv-health-results" id="healthResults" hidden>
+      <div class="gv-health-item">
+        <div class="th-l"><span>Links</span></div>
+        <div id="auditResult" class="th-note">Not checked yet.</div>
+        <div class="th-row">
+          <button class="sv-btn primary admin-only" id="repairRun" disabled>Repair</button>
+        </div>
+        <div class="th-note">Malformed links — links nested inside links, links written into quiz blocks, and empty <code>[[]]</code> husks. Check the preview; Repair rewrites the markdown.</div>
       </div>
-      <div class="th-note">Rebuild if the note count ever looks wrong — the index is derived and disposable, nothing on disk depends on it.</div>
-    </div>
-    <div class="th-sect">
-      <div class="th-l"><span>Duplicates</span></div>
-      <div id="dupResult" class="th-note">Duplicates not checked yet.</div>
-      <div class="th-row">
-        <button class="sv-btn" id="dupRun">Find duplicate notes</button>
+      <div class="gv-health-item">
+        <div class="th-l"><span>Index</span></div>
+        <div id="reindexResult" class="th-note">Not checked yet.</div>
+        <div class="th-note">Rebuilt every scan — the index is derived and disposable, nothing on disk depends on it.</div>
       </div>
-      <input type="text" id="dupFilter" class="th-input" placeholder="Filter by title…" hidden>
-      <div id="dupList"></div>
-      <div class="th-note">Compares every note's content and lists pairs that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Delete either note right here; nothing happens automatically.</div>
-    </div>
-    <div class="th-sect">
-      <div class="th-l"><span>Study guide indexes</span></div>
-      <div id="reconcileResult" class="th-note">Not checked yet.</div>
-      <div class="th-row">
-        <button class="sv-btn" id="reconcileCheck">Check for dead references</button>
-        <button class="sv-btn primary admin-only" id="reconcileRun" disabled>Clean up</button>
+      <div class="gv-health-item">
+        <div class="th-l"><span>Duplicates</span></div>
+        <div id="dupResult" class="th-note">Not checked yet.</div>
+        <input type="text" id="dupFilter" class="th-input" placeholder="Filter by title…" hidden>
+        <div id="dupList"></div>
+        <div class="th-note">Pairs of notes that are ~90%+ the same text — useful after merging a study guide that already had some of these notes. Delete either note right here; nothing happens automatically.</div>
       </div>
-      <input type="text" id="reconcileFilter" class="th-input" placeholder="Filter by page title…" hidden>
-      <div id="reconcileList"></div>
-      <div class="th-note">A guide's category page keeps listing every topic and every guide that ever contributed to it, even after you delete the topic or the whole guide — deleting a duplicate leaves the surviving page still linking to it. This drops references to whatever no longer exists, and removes a category page left with no topics at all. It also catches the reverse: a topic note has no link back to the category page that once organized it, so deleting that page by hand leaves the topic still in Crucible under a category with no index anymore — this un-studies it (its content, category, and quiz section are untouched; re-enable it any time from the note itself). Only touches notes an import wrote — a category you typed in by hand, with no index page, is never affected.</div>
+      <div class="gv-health-item">
+        <div class="th-l"><span>Study guide indexes</span></div>
+        <div id="reconcileResult" class="th-note">Not checked yet.</div>
+        <div class="th-row">
+          <button class="sv-btn primary admin-only" id="reconcileRun" disabled>Clean up</button>
+        </div>
+        <input type="text" id="reconcileFilter" class="th-input" placeholder="Filter by page title…" hidden>
+        <div id="reconcileList"></div>
+        <div class="th-note">A guide's category page keeps listing every topic and every guide that ever contributed to it, even after you delete the topic or the whole guide — deleting a duplicate leaves the surviving page still linking to it. This finds references to whatever no longer exists, and category pages left with no topics at all. It also catches the reverse: a topic note whose organizing category page was deleted by hand, which un-studies it (its content, category, and quiz section are untouched; re-enable it any time from the note itself). Only touches notes an import wrote — a category you typed in by hand, with no index page, is never affected. Clean up rewrites the markdown.</div>
+      </div>
     </div>
   </div>
 </div>
