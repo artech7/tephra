@@ -1,6 +1,7 @@
 """Tephra — a self-hosted notes app that grows its own wiki."""
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import threading
@@ -20,6 +21,7 @@ from . import guide_import
 from . import importers
 from . import settings as cfg
 from . import index as idx
+from . import sessions as sess
 from . import study as st
 from . import render as rndr
 from . import vault
@@ -99,11 +101,23 @@ hour is a perfectly good backup strategy.
 ]
 
 
+def _seed_if_empty(path: Path, con: "idx.Conn") -> None:
+    """Passed as VaultRegistry's on_create hook: runs exactly once, the
+    first time any session opens a given vault path, right after the index
+    is initialised but before it's first built -- so seeded notes are
+    indexed on the same pass as everything else already on disk."""
+    if not any(vault.NOTES.glob("*.md")):
+        for title, tags, body in SEEDS:
+            vault.write(vault.Note(slug=vault.slugify(title), title=title,
+                                   tags=tags, body=body))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Recover a vault stranded by an interrupted rename before anything else.
     # It is dot-prefixed, so the user cannot see it in Finder to recover it
-    # themselves.
+    # themselves. Runs against the process-wide default context -- there is
+    # no session yet, this is before the first request.
     for probe in {vault.VAULT, Path(cfg.load().get("vault") or vault.VAULT)}:
         try:
             stranded = list(probe.parent.glob(".*.tephra-renaming"))
@@ -124,40 +138,52 @@ async def lifespan(app: FastAPI):
             except OSError:
                 pass
 
-    # A vault chosen in a previous session wins over the launch default.
+    # A vault chosen in a previous run wins over the launch default. This is
+    # only the *bootstrap* default a brand-new session lands on -- once any
+    # session is running, switching its vault never touches this.
     remembered = cfg.load().get("vault")
     if remembered and not os.environ.get("TEPHRA_VAULT") and vault.looks_like_vault(remembered):
         vault.use(remembered)
     vault.ensure_dirs()
-    con = idx.connect()
-    idx.init(con)
-    if not any(vault.NOTES.glob("*.md")):
-        for title, tags, body in SEEDS:
-            vault.write(vault.Note(slug=vault.slugify(title), title=title,
-                                   tags=tags, body=body))
-    n = idx.rebuild(con)
-    # Self-heal on open. The pass is idempotent and byte-identical on clean
-    # content, so there is no reason to make the user find a button for damage
-    # an older build wrote into their files.
-    fixed = idx.repair_links(con)
-    app.state.last_repair = fixed if fixed["changed"] else None
-    if fixed["changed"]:
-        print(f"[tephra] repaired malformed links in {fixed['changed']} note(s)")
-        n = idx.rebuild(con)
+
+    handle = sess.REGISTRY.get_or_create(vault.VAULT, on_create=_seed_if_empty)
+    n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
+    if handle.last_repair:
+        print(f"[tephra] repaired malformed links in {handle.last_repair['changed']} note(s)")
     # Record the vault on every start, so config always names what is open —
     # otherwise a first run leaves nothing for a rename or the recents list.
     cfg.remember_vault(vault.VAULT)
     print(f"[tephra] vault={vault.VAULT} notes={n}")
-    app.state.db = con
+
     yield
-    con.close()
+
+    for path_str in sess.REGISTRY.paths():
+        p = Path(path_str)
+        handle = sess.REGISTRY.existing(p)
+        if handle:
+            try:
+                handle.con.close()
+            except Exception:
+                pass
+            # Close AND drop -- closing alone left a stale, already-closed
+            # handle sitting in the registry, so the next lifespan to run in
+            # this same process (a second `with TestClient(app)` block, or
+            # any long-lived process that restarts the app in place) got
+            # get_or_create() handing back a dead connection instead of
+            # building a fresh one.
+            sess.REGISTRY.drop(p)
 
 
 app = FastAPI(title="Tephra", lifespan=lifespan)
+app.add_middleware(sess.SessionMiddleware)
 
 
 def db():
-    return app.state.db
+    """The SQLite connection for *the requesting session's* current vault --
+    set per-request by sessions.session_middleware. Every existing call
+    site (db().execute(...) etc.) is unchanged; only what it resolves to is
+    now session-scoped instead of one process-wide connection."""
+    return sess.current_con()
 
 
 def resolver():
@@ -676,13 +702,17 @@ def find_duplicates():
 
 @app.get("/api/repair/last")
 def last_repair():
-    """What the automatic pass fixed when this vault was opened.
+    """What the automatic pass fixed the first time this vault was opened
+    by any session.
 
-    Consumed on read: the client shows it once, and a page reload does not
-    re-announce work that already happened.
+    Consumed on read: whichever browser asks first shows it once, and a
+    page reload -- by that browser or any other sharing this vault -- does
+    not re-announce work that already happened.
     """
-    report = getattr(app.state, "last_repair", None)
-    app.state.last_repair = None
+    handle = sess.REGISTRY.existing(vault.VAULT)
+    report = handle.last_repair if handle else None
+    if handle:
+        handle.last_repair = None
     return report or {"changed": 0}
 
 
@@ -795,12 +825,18 @@ class VaultIn(BaseModel):
 
 
 def _open_vault(path: str, create: bool) -> dict:
-    """Repoint the app at another directory and rebuild from it.
+    """Point *this session* at another directory, joining or creating its
+    connection in the registry.
 
-    Loopback-only and single-user, but this still takes a filesystem path from
-    an HTTP request, so it validates rather than trusting: absolute after
+    Loopback-only, but this still takes a filesystem path from an HTTP
+    request, so it validates rather than trusting: absolute after
     expansion, not a file, and for an existing vault it must actually contain
     notes/ so a typo cannot scatter a vault across a home directory.
+
+    This only ever affects the requesting session. Another browser already
+    looking at some other vault -- or even this same one -- is untouched;
+    if this vault is new to the registry, it's indexed (and seeded, if
+    empty) once here, for whoever gets here first.
     """
     target = Path(path).expanduser()
     if not target.is_absolute():
@@ -822,33 +858,15 @@ def _open_vault(path: str, create: bool) -> dict:
     except OSError as exc:
         raise HTTPException(400, f"cannot use that folder: {exc}")
 
-    # Order matters: close the old index before the paths move, or the next
-    # write lands in the previous vault's database.
-    try:
-        db().close()
-    except Exception:
-        pass
-    vault.use(target)
-    con = idx.connect()
-    idx.init(con)
-    app.state.db = con
-
-    seeded = False
-    if not any(vault.NOTES.glob("*.md")):
-        for title, tags, body in SEEDS:
-            vault.write(vault.Note(slug=vault.slugify(title), title=title,
-                                   tags=tags, body=body))
-        seeded = True
-    n = idx.rebuild(con)
-    fixed = idx.repair_links(con)
-    app.state.last_repair = fixed if fixed["changed"] else None
-    if fixed["changed"]:
-        n = idx.rebuild(con)
+    resolved = target.resolve()
+    was_empty = not any((resolved / "notes").glob("*.md"))
+    handle = sess.switch_vault(resolved, on_create=_seed_if_empty)
+    n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
     st.ensure_fitted(st.all_items(), force=True)
-    cfg.remember_vault(target)
-    print(f"[tephra] vault switched -> {target} ({n} notes)")
-    return {"vault": str(target), "notes": n, "created": not existing,
-            "seeded": seeded}
+    cfg.remember_vault(resolved)
+    print(f"[tephra] session switched vault -> {resolved} ({n} notes)")
+    return {"vault": str(resolved), "notes": n, "created": not existing,
+            "seeded": was_empty}
 
 
 @app.get("/api/vault/list")
@@ -936,16 +954,39 @@ def vault_rename(payload: RenameIn, _admin: None = Depends(require_admin)):
     if target == current:
         return {"vault": str(current), "renamed": False}
 
+    # Renaming the folder out from under a connection some *other* session
+    # still has open is a much worse failure mode here than in the old
+    # single-process model: that session's registry entry would keep
+    # pointing at a path string that no longer resolves to anything by that
+    # name, while a fresh session opening the new name would spin up a
+    # second, independent connection onto the same on-disk files. Simplest
+    # safe rule: refuse unless the requester is the only one here.
+    other_sessions = sess.REGISTRY.sessions_using(current) - 1
+    if other_sessions > 0:
+        raise HTTPException(
+            409,
+            f"{other_sessions} other session(s) currently have this vault "
+            "open -- have them switch to a different vault first, then rename",
+        )
+
     # A case-only change is a no-op move on a case-insensitive filesystem, so
     # go via a temporary name. macOS makes this the common case, not an edge one.
     case_only = str(target).lower() == str(current).lower()
     if target.exists() and not case_only:
         raise HTTPException(409, f"{name} already exists alongside this vault")
 
-    try:
-        db().close()
-    except Exception:
-        pass
+    # Close and retire *this vault's* registry entry before the folder moves,
+    # or the next write lands via a connection pointed at a path that no
+    # longer exists. Only this one path's entry -- every other open vault's
+    # connection is untouched.
+    handle = sess.REGISTRY.existing(current)
+    if handle:
+        try:
+            handle.con.close()
+        except Exception:
+            pass
+        sess.REGISTRY.drop(current)
+
     # A case-only change needs two moves on a case-insensitive filesystem, and
     # the halfway state is a DOT-PREFIXED folder — invisible in Finder. If the
     # second move failed, the vault appeared to vanish. Track the temp name so
@@ -966,8 +1007,7 @@ def vault_rename(payload: RenameIn, _admin: None = Depends(require_admin)):
                 tmp.rename(current)           # undo the half-completed move
             except OSError:
                 landed = tmp                  # could not undo; at least serve it
-        vault.use(landed)
-        con = idx.connect(); idx.init(con); idx.rebuild(con); app.state.db = con
+        sess.switch_vault(landed)
         cfg.remember_vault(landed)
         detail = f"could not rename: {exc}"
         if landed != current:
@@ -975,11 +1015,8 @@ def vault_rename(payload: RenameIn, _admin: None = Depends(require_admin)):
                        "because the name starts with a dot")
         raise HTTPException(400, detail)
 
-    vault.use(target)
-    con = idx.connect()
-    idx.init(con)
-    n = idx.rebuild(con)
-    app.state.db = con
+    handle = sess.switch_vault(target)
+    n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
     st.ensure_fitted(st.all_items(), force=True)
     cfg.rename_vault(current, target)
     print(f"[tephra] vault renamed -> {target}")
@@ -1200,8 +1237,16 @@ async def study_import_upload(files: list[UploadFile] = File(...), dry_run: bool
     job_id = uuid.uuid4().hex
     with _import_jobs_lock:
         _import_jobs[job_id] = {"done": 0, "total": 0, "finished": False, "result": None, "error": None}
-    threading.Thread(target=_run_import_job,
-                     args=(job_id, source, dry_run, guide_name, title, image_bytes, dupes),
+    # Plain threading.Thread does NOT copy contextvars into the new thread
+    # the way asyncio/anyio do -- it starts genuinely fresh, so db()/vault.*
+    # inside _run_import_job would otherwise find no session in play at all.
+    # contextvars.copy_context() captures *this request's* session/vault
+    # context right now, while it's still current, and ctx.run(...) replays
+    # the job inside that same snapshot on the new thread.
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run,
+                     args=(_run_import_job, job_id, source, dry_run, guide_name,
+                           title, image_bytes, dupes),
                      daemon=True).start()
     return {"job_id": job_id}
 
@@ -1459,40 +1504,84 @@ def study_reset(_admin: None = Depends(require_admin)):
 
 
 # ── theme ──────────────────────────────────────────────────────────────────
+#
+# Split in two, where a single theme.json used to hold both:
+#
+# APPEARANCE_KEYS (colours, fonts, wallpaper) are genuinely a property of
+# the vault -- how it looks -- and stay in theme.json, shared by every
+# session that opens this vault, exactly as before.
+#
+# SESSION_PREF_KEYS (sort order, tag filter, which media panel is open)
+# are "what am I looking at right now" and used to live in that same
+# shared file -- which meant one browser's sort change, or simply editing
+# a note (bumping it to the top of the default "updated" sort), silently
+# changed what every *other* browser landed on after a refresh. Those now
+# live on the requesting session instead (sessions.SessionPrefs), so they
+# can no longer leak between browsers.
 
 def theme_file():
     """Same reason as index.db_path(): theme is per-vault, so this path has to
     be re-derived every call or switching vault writes into the old one."""
     return vault.VAULT / "theme.json"
-DEFAULT_THEME = {
+
+
+APPEARANCE_DEFAULTS = {
     "acc": "63,224,173", "wall": "aurora", "wallUrl": None,
     "blur": 30, "frost": 55, "sat": 200, "scrim": 26,
     "inset": 20, "contrast": 0, "auto": True,
     "radius": 28, "shine": 34,
     "font_display": "Bricolage Grotesque", "font_serif": "Newsreader", "font_mono": "JetBrains Mono",
-    # UI state that should follow the vault rather than the browser
-    "note_sort": "updated", "note_tag": "", "media_open": {},
 }
+SESSION_PREF_KEYS = ("note_sort", "note_tag", "media_open")
+# Kept for backward-compat response shape -- every key a client might send
+# or expect back, appearance and session prefs combined.
+DEFAULT_THEME = {**APPEARANCE_DEFAULTS, "note_sort": "updated", "note_tag": "", "media_open": {}}
 
 
 @app.get("/api/theme")
 def get_theme():
     f = theme_file()
+    appearance = dict(APPEARANCE_DEFAULTS)
     if f.is_file():
         try:
-            return {**DEFAULT_THEME, **json.loads(f.read_text())}
+            saved = json.loads(f.read_text())
+            appearance.update({k: v for k, v in saved.items() if k in APPEARANCE_DEFAULTS})
         except Exception:
             pass
-    return DEFAULT_THEME
+    prefs = sess.current_session().prefs
+    return {
+        **appearance,
+        "note_sort": prefs.note_sort,
+        "note_tag": prefs.note_tag,
+        "media_open": prefs.media_open,
+    }
 
 
 @app.put("/api/theme")
 def put_theme(payload: dict):
-    vault.ensure_dirs()
-    merged = {**DEFAULT_THEME, **{k: v for k, v in payload.items()
-                                  if k in DEFAULT_THEME}}
-    theme_file().write_text(json.dumps(merged, indent=2))
-    return merged
+    appearance_in = {k: v for k, v in payload.items() if k in APPEARANCE_DEFAULTS}
+    if appearance_in:
+        vault.ensure_dirs()
+        f = theme_file()
+        current = dict(APPEARANCE_DEFAULTS)
+        if f.is_file():
+            try:
+                current.update({k: v for k, v in json.loads(f.read_text()).items()
+                                if k in APPEARANCE_DEFAULTS})
+            except Exception:
+                pass
+        current.update(appearance_in)
+        f.write_text(json.dumps(current, indent=2))
+
+    prefs = sess.current_session().prefs
+    if "note_sort" in payload:
+        prefs.note_sort = payload["note_sort"]
+    if "note_tag" in payload:
+        prefs.note_tag = payload["note_tag"]
+    if "media_open" in payload and isinstance(payload["media_open"], dict):
+        prefs.media_open = payload["media_open"]
+
+    return get_theme()
 
 
 @app.get("/api/health")

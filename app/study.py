@@ -25,6 +25,7 @@ import math
 import re
 from collections import Counter, defaultdict
 
+from . import sessions as sess
 from . import vault
 
 PROGRESS = "study-progress.json"
@@ -378,9 +379,27 @@ def known_categories(items: list[dict]) -> list[str]:
 
 
 # ── progress ───────────────────────────────────────────────────────────────
+#
+# Quiz/flashcard progress -- answer history, flags, spaced-repetition stats --
+# used to be one shared study-progress.json per vault. Two people quizzing
+# the same vault at once were silently overwriting each other's answers and
+# weak-spot tracking. It's now namespaced per *session*, so each browser has
+# its own progress against a shared vault, same as everyone seeing the same
+# notes but keeping separate reading positions.
+#
+# A caller with no session in play at all (a test or tool calling into
+# study.py directly, with no HTTP request and thus no session_middleware
+# having run) falls back to the original single shared file -- same
+# behaviour this always had outside of a running server.
 
 def progress_path():
-    return vault.VAULT / PROGRESS
+    try:
+        current = sess.current_session()
+    except LookupError:
+        return vault.VAULT / PROGRESS
+    d = vault.VAULT / ".sessions"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{current.id}-{PROGRESS}"
 
 
 def load_progress() -> dict:

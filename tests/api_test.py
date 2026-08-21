@@ -4,6 +4,7 @@ shutil.rmtree(VAULT, ignore_errors=True)
 from fastapi.testclient import TestClient
 from app.main import app
 from app import study as st
+from app import sessions as sess, vault
 
 ok = fail = 0
 def check(label, cond, extra=""):
@@ -360,7 +361,10 @@ with TestClient(app) as c:
         sl = c.post("/api/notes", json={"title": f"Drift {i}"}).json()["slug"]
         c.put(f"/api/notes/{sl}", json={"body": f"Findings mention Coolant Loop clearly in note {i}."})
         drift_notes.append(sl)
-    con = app.state.db
+    # con used to be the single global app.state.db; the app now keeps one
+    # connection per open vault path in a registry instead (see
+    # app/sessions.py), so drift is simulated against that vault's entry.
+    con = sess.REGISTRY.existing(vault.VAULT).con
     for sl in drift_notes[1:]:
         con.execute("DELETE FROM notes WHERE slug=?", (sl,))
     con.commit()

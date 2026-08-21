@@ -7,6 +7,7 @@ still have a directory of markdown you can read, grep, and commit to git.
 """
 from __future__ import annotations
 
+import contextvars
 import os
 import re
 import shutil
@@ -24,27 +25,98 @@ from pathlib import Path
 # variable set for its default vault, so collapsing both into TEPHRA_VAULT
 # would permanently block "the last vault you had open wins" under any
 # deployment that sets one — which is exactly what happened here.
-VAULT = Path(os.environ.get("TEPHRA_VAULT") or os.environ.get("TEPHRA_DEFAULT_VAULT") or "/vault")
-NOTES = VAULT / "notes"
-MEDIA = VAULT / "media"
-INDEX_DIR = VAULT / ".index"
+#
+# --- concurrent sessions -----------------------------------------------
+# This used to be four plain module globals (VAULT/NOTES/MEDIA/INDEX_DIR),
+# rebound in place by use(). That was correct for one browser at a time,
+# but the moment two browsers hit the same running server, switching the
+# vault for one switched it for both — there was no notion of "whose"
+# vault a request was even asking about.
+#
+# It's now a contextvars.ContextVar holding one immutable VaultPaths per
+# logical context. sessions.session_middleware sets it once per incoming
+# request (resolved from that browser's session cookie) before the route
+# handler runs, so every vault.* call below sees the *requesting session's*
+# vault, not a single process-wide one. Anything with no request in play at
+# all — tools/ scripts, tests, the lifespan bootstrap before the first
+# request — falls back to the module-level default below, which is exactly
+# the old single-vault behaviour.
+#
+# `vault.VAULT`, `vault.NOTES`, `vault.MEDIA`, `vault.INDEX_DIR` still work
+# unchanged for every external caller (main.py, index.py, study.py, ...) via
+# the module __getattr__ near the bottom of this file (PEP 562) — only the
+# bare, unprefixed uses *inside this module's own functions* had to change,
+# since __getattr__ isn't consulted for a plain name lookup inside the
+# module that defines it.
+
+
+@dataclass(frozen=True)
+class VaultPaths:
+    vault: Path
+    notes: Path
+    media: Path
+    index_dir: Path
+
+
+def _paths_for(root: Path) -> VaultPaths:
+    return VaultPaths(root, root / "notes", root / "media", root / ".index")
+
+
+def _default_root() -> Path:
+    return Path(os.environ.get("TEPHRA_VAULT") or os.environ.get("TEPHRA_DEFAULT_VAULT") or "/vault")
+
+
+_ctx: contextvars.ContextVar[VaultPaths] = contextvars.ContextVar(
+    "tephra_vault_paths", default=_paths_for(_default_root())
+)
+
+
+def current() -> VaultPaths:
+    """The vault paths that apply right now -- per-request when a session
+    middleware has set them, or the single process-wide default otherwise."""
+    return _ctx.get()
+
+
+def set_current(path: str | Path) -> Path:
+    """Point *this* context (this request; or the whole process, for a
+    caller with no per-request context at all) at a different vault.
+    Never touches any other concurrently-running request's context --
+    that's the whole point of using a ContextVar instead of a plain global.
+    """
+    root = Path(path).expanduser().resolve()
+    _ctx.set(_paths_for(root))
+    ensure_dirs()
+    return root
 
 
 def use(path: str | Path) -> Path:
     """Point the whole module at a different vault.
 
-    These are module globals read all over the app, so switching has to rebind
-    them together — and every caller must re-derive paths from the module
-    rather than caching them. The index connection is owned by main.py and is
-    reopened there after this returns.
+    Kept for callers with no notion of a per-request session at all --
+    tools/ scripts, tests, and the lifespan bootstrap before the first
+    request ever arrives. Request-scoped code should go through a session
+    (see sessions.switch_vault) instead, so one browser's vault switch
+    doesn't leak into another's.
     """
-    global VAULT, NOTES, MEDIA, INDEX_DIR
-    VAULT = Path(path).expanduser().resolve()
-    NOTES = VAULT / "notes"
-    MEDIA = VAULT / "media"
-    INDEX_DIR = VAULT / ".index"
-    ensure_dirs()
-    return VAULT
+    return set_current(path)
+
+
+def __getattr__(name):
+    # PEP 562 module __getattr__: only reached when `name` isn't a real
+    # attribute of this module already. Lets every existing `vault.VAULT` /
+    # `vault.NOTES` / `vault.MEDIA` / `vault.INDEX_DIR` call site elsewhere
+    # in the app keep working completely unchanged, now resolving to the
+    # calling context's vault instead of one shared global.
+    paths = current()
+    if name == "VAULT":
+        return paths.vault
+    if name == "NOTES":
+        return paths.notes
+    if name == "MEDIA":
+        return paths.media
+    if name == "INDEX_DIR":
+        return paths.index_dir
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def looks_like_vault(path: str | Path) -> bool:
@@ -103,7 +175,7 @@ def browse_root() -> Path:
     override = os.environ.get(BROWSE_ROOT_ENV)
     if override:
         return Path(override).expanduser().resolve()
-    return VAULT.parent
+    return current().vault.parent
 
 
 def list_browsable(path: Path) -> list[dict]:
@@ -139,7 +211,8 @@ def now() -> str:
 
 
 def ensure_dirs() -> None:
-    for d in (NOTES, MEDIA, INDEX_DIR):
+    p = current()
+    for d in (p.notes, p.media, p.index_dir):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -161,7 +234,7 @@ def slugify(title: str) -> str:
 
 
 def unique_slug(title: str, taken: set[str] | None = None) -> str:
-    taken = taken if taken is not None else {p.stem for p in NOTES.glob("*.md")}
+    taken = taken if taken is not None else {p.stem for p in current().notes.glob("*.md")}
     base = slugify(title)
     if base not in taken:
         return base
@@ -230,7 +303,7 @@ class Note:
 
     @property
     def path(self) -> Path:
-        return NOTES / f"{self.slug}.md"
+        return current().notes / f"{self.slug}.md"
 
     def to_dict(self) -> dict:
         return {
@@ -245,7 +318,7 @@ class Note:
 
 
 def read(slug: str) -> Note | None:
-    p = NOTES / f"{slug}.md"
+    p = current().notes / f"{slug}.md"
     if not p.is_file():
         return None
     meta, body = parse(p.read_text(encoding="utf-8"))
@@ -286,7 +359,7 @@ def write(note: Note) -> Note:
         if k not in CORE_KEYS:
             header[k] = v
     payload = dump(header, note.body)
-    fd, tmp = tempfile.mkstemp(dir=NOTES, suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=current().notes, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(payload)
@@ -300,10 +373,10 @@ def write(note: Note) -> Note:
 
 
 def delete(slug: str) -> bool:
-    p = NOTES / f"{slug}.md"
+    p = current().notes / f"{slug}.md"
     if not p.is_file():
         return False
-    trash = VAULT / ".trash"
+    trash = current().vault / ".trash"
     trash.mkdir(exist_ok=True)
     shutil.move(str(p), str(trash / f"{slug}-{int(datetime.now().timestamp())}.md"))
     return True
@@ -312,7 +385,7 @@ def delete(slug: str) -> bool:
 def all_notes() -> list[Note]:
     ensure_dirs()
     out = []
-    for p in sorted(NOTES.glob("*.md")):
+    for p in sorted(current().notes.glob("*.md")):
         n = read(p.stem)
         if n:
             out.append(n)
@@ -327,7 +400,7 @@ def rename(slug: str, new_title: str) -> Note | None:
         return None
     old_title = note.title
     new_slug = slug if slugify(new_title) == slug else unique_slug(
-        new_title, {p.stem for p in NOTES.glob("*.md")} - {slug}
+        new_title, {p.stem for p in current().notes.glob("*.md")} - {slug}
     )
     note.title = new_title
     if new_slug != slug:
@@ -356,10 +429,11 @@ def save_media(filename: str, data: bytes) -> dict:
     ext = Path(filename).suffix.lower()
     name = f"{stem}{ext}"
     n = 2
-    while (MEDIA / name).exists():
+    media = current().media
+    while (media / name).exists():
         name = f"{stem}-{n}{ext}"
         n += 1
-    (MEDIA / name).write_bytes(data)
+    (media / name).write_bytes(data)
     return {
         "name": name,
         "url": f"/media/{name}",
@@ -379,7 +453,7 @@ def import_media(name: str, data: bytes) -> dict:
     copies on every run.
     """
     ensure_dirs()
-    (MEDIA / name).write_bytes(data)
+    (current().media / name).write_bytes(data)
     return {
         "name": name,
         "url": f"/media/{name}",
@@ -440,7 +514,7 @@ def find_images(root: Path, max_depth: int = IMAGE_SCAN_MAX_DEPTH) -> tuple[dict
 def media_list() -> list[dict]:
     ensure_dirs()
     out = []
-    for p in sorted(MEDIA.iterdir()):
+    for p in sorted(current().media.iterdir()):
         if p.is_file() and not p.name.startswith("."):
             out.append(
                 {
