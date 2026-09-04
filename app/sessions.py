@@ -328,6 +328,34 @@ def save(force: bool = False) -> None:
                 pass
 
 
+def _row_is_notable(sid: str, vault_path: Path, prefs: SessionPrefs,
+                     default_vault: Path) -> bool:
+    """Does this persisted row hold anything a fresh session would not?
+
+    Judged from content rather than from the fact that it was on disk. The
+    first cut trusted the file -- "it was persisted, so it earned its
+    place" -- which permanently grandfathered in every junk session written
+    before probes stopped creating them: they were restored as notable and
+    so written straight back out, immortal. Re-deciding here means one
+    restart cleans them out.
+
+    Dropping a row is safe exactly when it is indistinguishable from a
+    session we would mint for free: same vault, default prefs, and no quiz
+    progress filed under its id. Such a browser loses nothing by being
+    handed a new id, because there was nothing attached to the old one.
+    """
+    if vault_path != default_vault:
+        return True
+    if (prefs.note_sort, prefs.note_tag, prefs.media_open) != ("updated", "", {}):
+        return True
+    # Quiz progress is filed under the session id, so an id with a progress
+    # file behind it must survive or that file becomes unreachable.
+    try:
+        return (vault_path / ".sessions" / f"{sid}-study-progress.json").is_file()
+    except OSError:
+        return False
+
+
 def load() -> int:
     """Restore sessions from disk. Returns how many survived pruning."""
     f = _sessions_file()
@@ -337,6 +365,7 @@ def load() -> int:
         return 0
 
     now = time.time()
+    default_vault = _default_vault_path()
     restored: dict[str, Session] = {}
     for row in (data.get("sessions") if isinstance(data, dict) else None) or []:
         if not isinstance(row, dict):
@@ -362,17 +391,16 @@ def load() -> int:
         prefs_in = row.get("prefs")
         prefs_in = prefs_in if isinstance(prefs_in, dict) else {}
         media_open = prefs_in.get("media_open")
-        restored[sid] = Session(
-            id=sid,
-            vault_path=Path(raw_vault).expanduser().resolve(),
-            last_seen=last_seen,
-            prefs=SessionPrefs(
-                note_sort=str(prefs_in.get("note_sort") or "updated"),
-                note_tag=str(prefs_in.get("note_tag") or ""),
-                media_open=media_open if isinstance(media_open, dict) else {},
-            ),
-            notable=True,   # it was on disk, so it earned its place already
+        resolved = Path(raw_vault).expanduser().resolve()
+        prefs = SessionPrefs(
+            note_sort=str(prefs_in.get("note_sort") or "updated"),
+            note_tag=str(prefs_in.get("note_tag") or ""),
+            media_open=media_open if isinstance(media_open, dict) else {},
         )
+        if not _row_is_notable(sid, resolved, prefs, default_vault):
+            continue
+        restored[sid] = Session(id=sid, vault_path=resolved, last_seen=last_seen,
+                                 prefs=prefs, notable=True)
 
     with _sessions_lock:
         _sessions.update(restored)

@@ -215,6 +215,44 @@ with TestClient(app) as cq3:
     ck("...because the progress file is only findable by that id",
        next(iter(S._sessions.values())).notable is True)
 
+print("\n── junk already on disk is cleaned out, not grandfathered in ──")
+# The first cut trusted the file: a restored row was marked notable because
+# it had been persisted, so every junk session written before probes stopped
+# creating them was restored and written straight back out -- immortal.
+# Observed live: 161 restored, 160 of them at the default vault with default
+# prefs, and the file grew rather than shrank across the fix's own deploy.
+restart()
+SFILE.unlink(missing_ok=True)
+with TestClient(app) as cd:
+    cd.put("/api/theme", json={"note_tag": "real-user"})
+    keeper = cd.cookies.get(S.SESSION_COOKIE)
+# Hand-write the shape the old bug produced: many default rows beside it.
+existing = rows()
+junk = [{"id": f"junkjunkjunk{i:04d}", "vault": A, "last_seen": time.time(),
+         "prefs": {"note_sort": "updated", "note_tag": "", "media_open": {}}}
+        for i in range(40)]
+SFILE.write_text(json.dumps({"sessions": existing + junk}))
+restart()
+n = S.load()
+ck("the default-vault, default-pref rows are dropped on load", n == 1, n)
+ck("...and the real session is the one kept", keeper in S._sessions, list(S._sessions))
+S.flush()
+ck("...so one restart shrinks the file instead of preserving the junk",
+   len(rows()) == 1, len(rows()))
+
+# ...but not if something is actually attached to that id.
+prog = Path(A, ".sessions")
+prog.mkdir(parents=True, exist_ok=True)
+(prog / "junkjunkjunk0007-study-progress.json").write_text(
+    json.dumps({"answers": {"q1": {"seen": 1, "right": 1}}, "flagged": [], "settings": {}}))
+SFILE.write_text(json.dumps({"sessions": existing + junk}))
+restart()
+S.load()
+ck("a default-looking session with quiz progress behind it is kept",
+   "junkjunkjunk0007" in S._sessions, sorted(S._sessions))
+ck("...because dropping the id would orphan that progress file",
+   (prog / "junkjunkjunk0007-study-progress.json").is_file())
+
 print("\n── probe traffic cannot evict a real session ──")
 restart()
 SFILE.unlink(missing_ok=True)
