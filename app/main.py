@@ -1299,13 +1299,20 @@ def study_import_status(job_id: str):
     while a large guide's topics are written. One-shot: a finished job's
     entry is dropped as soon as this hands it back, since the frontend only
     ever needs to observe `finished: true` once."""
+    # Snapshot inside the lock, and decide the drop from that same snapshot.
+    # Returning the live dict broke the one-shot guarantee: it is serialised
+    # after the lock is released, so the worker thread could set
+    # finished=True in between. The caller then read finished:true from a
+    # call that had already decided not to delete, believed it had collected
+    # the job, and the next poll got 200 instead of 404.
     with _import_jobs_lock:
         job = _import_jobs.get(job_id)
-        if job is not None and job["finished"]:
+        if job is None:
+            raise HTTPException(404, "unknown or already-collected import job")
+        snapshot = dict(job)
+        if snapshot["finished"]:
             del _import_jobs[job_id]
-    if job is None:
-        raise HTTPException(404, "unknown or already-collected import job")
-    return job
+    return snapshot
 
 
 @app.get("/api/study/item/{slug}")

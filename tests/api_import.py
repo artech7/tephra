@@ -60,6 +60,43 @@ with TestClient(app) as c:
     r2 = c.get(f"/api/study/import/status/{job_id}")
     check("404 once already collected", r2.status_code == 404, r2.status_code)
 
+    print("\n── one-shot holds even if the job finishes mid-request ──")
+    # This raced in the wild and showed up as an intermittent 200 here. The
+    # endpoint used to return the live job dict, which FastAPI serialises
+    # *after* the lock is released -- so the worker could set finished=True
+    # in between, and the caller read finished:true from a call that had
+    # already decided not to delete. It thought it had collected the job;
+    # the entry was still there.
+    #
+    # Reproduced deterministically with a dict that reports finished=False
+    # to the endpoint's check and True to the serialiser afterwards, which
+    # is exactly the interleaving the lock could not prevent.
+    from app.main import _import_jobs, _import_jobs_lock
+
+    class FlipsAfterCheck(dict):
+        """finished=False while the endpoint holds the lock and checks it,
+        then True by the time the response is serialised -- the serialiser
+        reaches a dict through items(), the endpoint's check through
+        __getitem__, so flipping in items() lands precisely in the window
+        the lock could not cover."""
+        def items(self):
+            self["finished"] = True        # the worker thread, mid-request
+            return super().items()
+
+    racy_id = "race-probe"
+    racy = FlipsAfterCheck({"done": 1, "total": 1, "finished": False,
+                             "result": {"created": 0}, "error": None})
+    with _import_jobs_lock:
+        _import_jobs[racy_id] = racy
+    r3 = c.get(f"/api/study/import/status/{racy_id}")
+    finished_reported = r3.status_code == 200 and r3.json()["finished"]
+    still_there = racy_id in _import_jobs
+    check("a request that reports finished must also have dropped the job",
+          not (finished_reported and still_there),
+          f"reported_finished={finished_reported} still_in_table={still_there}")
+    with _import_jobs_lock:
+        _import_jobs.pop(racy_id, None)
+
     print("\n── an unknown job id 404s ──")
     r3 = c.get("/api/study/import/status/does-not-exist")
     check("404", r3.status_code == 404, r3.status_code)
