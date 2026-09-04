@@ -15,6 +15,13 @@
   --ink:.36;
   --frost:.055;
   --blur:30px;
+  /* Tab windows (Overview, Links, Crucible and its Formats reference) sit on
+     top of notes, not beside them -- unlike --blur, which the theme drawer
+     can drag down to 0 and is meant to, they need to stay legible against
+     whatever note text is underneath regardless of that setting. Pinned to
+     the drawer's own max (#rBlur's max="70") rather than given independent
+     theming for now; that's future work. */
+  --blur-fixed:70px;
   --sat:200%;
   --scrim:.26;
   --inset:20px;
@@ -889,8 +896,8 @@ h4.h-collapsed>.h-fold,h5.h-collapsed>.h-fold,h6.h-collapsed>.h-fold{transform:r
   display:grid;grid-template-rows:auto 1fr;
   background:linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),
              rgba(255,255,255,var(--frost));
-  backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
-  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+  backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
 }
 #svFormats.on{opacity:1;pointer-events:auto}
 /* Columns, not a grid: a grid's row-major flow forces every card sharing a
@@ -1162,8 +1169,8 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
   background:
     linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),
     rgba(255,255,255,var(--frost));
-  backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
-  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+  backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
 }
 body.crucible #studyview{left:0;right:0;pointer-events:auto}
 .sv-head{display:flex;align-items:center;gap:20px;padding:18px 22px;border-bottom:1px solid var(--edge)}
@@ -1502,8 +1509,8 @@ input.sv-select{cursor:text}
   display:grid;grid-template-rows:auto 1fr;
   background:linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),
              rgba(255,255,255,var(--frost));
-  backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
-  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+  backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
 }
 #statsview.on{opacity:1;pointer-events:auto}
 .stv-head{display:flex;align-items:center;gap:20px;padding:18px 26px;border-bottom:1px solid var(--edge)}
@@ -1935,8 +1942,8 @@ input.sv-select{cursor:text}
   display:grid;grid-template-rows:auto 1fr;
   background:linear-gradient(rgba(0,0,0,calc(var(--ink) + .05)),rgba(0,0,0,calc(var(--ink) + .05))),
              rgba(255,255,255,var(--frost));
-  backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
-  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat)) brightness(1.06);
+  backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
 }
 #linksview.on{opacity:1;pointer-events:auto}
 .lv-head{display:flex;align-items:center;gap:20px;padding:18px 26px;border-bottom:1px solid var(--edge)}
