@@ -241,12 +241,18 @@ def _record_login_attempt(ip: str) -> None:
     _login_attempts.setdefault(ip, []).append(time.time())
 
 
-def require_admin(request: Request) -> None:
+def is_unlocked(request: Request) -> bool:
+    """Non-raising counterpart to require_admin, for endpoints that stay
+    open when locked but must behave read-only until unlocked."""
     admin = cfg.get_admin()
     if not admin:
-        return
+        return True          # no password ever set: nothing is locked
     token = request.cookies.get(ADMIN_COOKIE)
-    if not token or not auth.verify_session_token(token, admin["secret"], admin["hash"]):
+    return bool(token) and auth.verify_session_token(token, admin["secret"], admin["hash"])
+
+
+def require_admin(request: Request) -> None:
+    if not is_unlocked(request):
         raise HTTPException(401, "locked -- unlock with the admin password to edit")
 
 
@@ -262,10 +268,10 @@ class AdminPasswordIn(BaseModel):
 @app.get("/api/admin/status")
 def admin_status(request: Request):
     admin = cfg.get_admin()
-    token = request.cookies.get(ADMIN_COOKIE)
-    unlocked = bool(admin) and bool(token) \
-        and auth.verify_session_token(token, admin["secret"], admin["hash"])
-    return {"configured": bool(admin), "unlocked": unlocked}
+    # "unlocked" here means "a password exists and this browser has cleared
+    # it", which is why it is not just is_unlocked() -- that reports True
+    # when nothing is configured, and the UI needs those two apart.
+    return {"configured": bool(admin), "unlocked": bool(admin) and is_unlocked(request)}
 
 
 @app.post("/api/admin/login")
@@ -841,7 +847,7 @@ class VaultIn(BaseModel):
     create: bool = False
 
 
-def _open_vault(path: str, create: bool) -> dict:
+def _open_vault(path: str, create: bool, writable: bool = True) -> dict:
     """Point *this session* at another directory, joining or creating its
     connection in the registry.
 
@@ -854,6 +860,14 @@ def _open_vault(path: str, create: bool) -> dict:
     looking at some other vault -- or even this same one -- is untouched;
     if this vault is new to the registry, it's indexed (and seeded, if
     empty) once here, for whoever gets here first.
+
+    `writable=False` is the locked, read-only case: switching vaults is
+    navigation and stays open to everyone, but the three things opening a
+    vault would otherwise *write* are skipped -- seeding example notes into
+    an empty one, rewriting markdown via the link repair, and moving the
+    install-wide default vault and recents list that new sessions inherit.
+    Building .index/ is still allowed: it is derived and disposable by
+    design, and there is no reading the vault without it.
     """
     target = Path(path).expanduser()
     if not target.is_absolute():
@@ -869,21 +883,26 @@ def _open_vault(path: str, create: bool) -> dict:
     if existing and create:
         raise HTTPException(409, f"a vault already exists at {target}")
 
-    try:
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "notes").mkdir(exist_ok=True)
-    except OSError as exc:
-        raise HTTPException(400, f"cannot use that folder: {exc}")
+    if writable:
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "notes").mkdir(exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(400, f"cannot use that folder: {exc}")
 
     resolved = target.resolve()
     was_empty = not any((resolved / "notes").glob("*.md"))
-    handle = sess.switch_vault(resolved, on_create=_seed_if_empty)
+    handle = sess.switch_vault(resolved,
+                               on_create=_seed_if_empty if writable else None,
+                               repair=writable)
     n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
     st.ensure_fitted(st.all_items(), force=True)
-    cfg.remember_vault(resolved)
-    print(f"[tephra] session switched vault -> {resolved} ({n} notes)")
+    if writable:
+        cfg.remember_vault(resolved)
+    print(f"[tephra] session switched vault -> {resolved} ({n} notes)"
+          + ("" if writable else " [read-only]"))
     return {"vault": str(resolved), "notes": n, "created": not existing,
-            "seeded": was_empty}
+            "seeded": was_empty and writable}
 
 
 @app.get("/api/vault/list")
@@ -1041,8 +1060,13 @@ def vault_rename(payload: RenameIn, _admin: None = Depends(require_admin)):
 
 
 @app.post("/api/vault/open")
-def vault_open(payload: VaultIn, _admin: None = Depends(require_admin)):
-    return _open_vault(payload.path, create=False)
+def vault_open(payload: VaultIn, request: Request):
+    # Deliberately not behind require_admin. Opening an existing vault only
+    # repoints the requesting session -- it is how you reach the notes and
+    # quizzes, which are readable when locked, so gating it left a locked
+    # install able to read exactly one vault. Everything it would otherwise
+    # write is skipped while locked; see _open_vault.
+    return _open_vault(payload.path, create=False, writable=is_unlocked(request))
 
 
 @app.post("/api/vault/create")

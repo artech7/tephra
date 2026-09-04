@@ -7,8 +7,10 @@ shutil.rmtree(ROOT, ignore_errors=True)
 shutil.rmtree(os.environ["TEPHRA_CONFIG_DIR"], ignore_errors=True)
 os.makedirs(ROOT, exist_ok=True)
 os.environ.setdefault("TEPHRA_VAULT", ROOT)
+from pathlib import Path
 from fastapi.testclient import TestClient
 from app.main import app
+from app import sessions as sess
 
 ok = fail = 0
 def ck(l, c, x=""):
@@ -108,6 +110,67 @@ with TestClient(app) as c:
     ck("quiz prefs still writable while locked (left ungated on purpose)",
        r.status_code == 200, r.text[:120])
     c.post("/api/admin/login", json={"password": "third correct horse"})
+
+    print("\n── locked: switching vaults is allowed, but writes nothing ──")
+    # Reading notes and taking quizzes is open while locked, so gating
+    # /api/vault/open left a locked install able to read exactly one vault.
+    # It is navigation -- it repoints only the requesting session.
+    import json as _json
+    OTHER = ROOT + "-other"
+    shutil.rmtree(OTHER, ignore_errors=True)
+    os.makedirs(OTHER + "/notes", exist_ok=True)
+    with open(OTHER + "/notes/only-note.md", "w") as fh:
+        fh.write("---\ntitle: Only Note\ntags: []\n---\n\nBody.\n")
+    cfg_before = _json.load(open(os.environ["TEPHRA_CONFIG_DIR"] + "/config.json"))
+
+    c.post("/api/admin/logout")
+    ck("confirmed locked for this check", c.get("/api/admin/status").json()["unlocked"] is False)
+    r = c.post("/api/vault/open", json={"path": OTHER})
+    ck("a locked session may switch vaults", r.status_code == 200, r.text[:160])
+    ck("and actually lands there", c.get("/api/vault/info").json()["vault"] == OTHER,
+       c.get("/api/vault/info").json()["vault"])
+    ck("...and can read its notes", any(n["slug"] == "only-note"
+                                       for n in c.get("/api/notes").json()))
+    ck("...and can take its quiz", c.get("/api/study/quiz").status_code == 200)
+
+    # The three writes opening a vault would otherwise perform.
+    ck("no example notes were seeded into it",
+       sorted(os.listdir(OTHER + "/notes")) == ["only-note.md"],
+       sorted(os.listdir(OTHER + "/notes")))
+    ck("the install-wide default vault was not moved",
+       _json.load(open(os.environ["TEPHRA_CONFIG_DIR"] + "/config.json"))["vault"]
+       == cfg_before["vault"])
+    ck("and it was not added to the shared recents list",
+       OTHER not in _json.load(open(os.environ["TEPHRA_CONFIG_DIR"]
+                                    + "/config.json"))["recent"])
+    # Still pending after several later requests: the session middleware
+    # resolves this vault on every one of them, and must not settle the
+    # repair on a locked session's behalf.
+    c.get("/api/notes"); c.get("/api/vault/info")
+    ck("the repair was deferred, not silently skipped forever",
+       sess.REGISTRY.existing(Path(OTHER)).repair_pending is True)
+
+    print("\n── locked: creating, renaming and forgetting vaults stay gated ──")
+    ck("create is refused", c.post("/api/vault/create",
+                                   json={"path": ROOT + "-nope"}).status_code == 401)
+    ck("...and created nothing on disk", not os.path.exists(ROOT + "-nope"))
+    ck("rename is refused", c.post("/api/vault/rename",
+                                   json={"name": "Renamed"}).status_code == 401)
+    ck("forget is refused", c.post("/api/vault/forget",
+                                   json={"path": ROOT}).status_code == 401)
+    ck("editing a note in the opened vault is still refused",
+       c.post("/api/notes", json={"title": "Nope"}).status_code == 401)
+
+    print("\n── unlocking then reopening settles the deferred repair ──")
+    c.post("/api/admin/login", json={"password": "third correct horse"})
+    r = c.post("/api/vault/open", json={"path": OTHER})
+    ck("reopen succeeds while unlocked", r.status_code == 200, r.text[:120])
+    ck("the deferred repair has now run",
+       sess.REGISTRY.existing(Path(OTHER)).repair_pending is False)
+    ck("and an unlocked open does record it in recents",
+       OTHER in _json.load(open(os.environ["TEPHRA_CONFIG_DIR"]
+                                + "/config.json"))["recent"])
+    c.post("/api/vault/open", json={"path": ROOT})
 
     print("\n── login throttling: a burst of wrong guesses gets rate-limited ──")
     # TestClient's requests all share the same synthetic client host, so the

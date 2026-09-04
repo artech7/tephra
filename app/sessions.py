@@ -87,6 +87,14 @@ class VaultHandle:
     # vault handle rather than per-session: the repair happens once for the
     # vault, not once per browser that happens to look at it.
     last_repair: dict | None = None
+    # Set when this vault was first opened by a caller not allowed to write
+    # to it (a locked, read-only session). The link repair is a *markdown
+    # rewrite*, so a viewer must not trigger one -- but get_or_create only
+    # runs its body once per path, so skipping it outright would mean the
+    # vault silently never got repaired for the rest of the process, just
+    # because a viewer happened to look at it first. Remember instead, and
+    # let the first writable caller do it.
+    repair_pending: bool = False
 
 
 class VaultRegistry:
@@ -98,12 +106,21 @@ class VaultRegistry:
         self._lock = threading.Lock()
 
     def get_or_create(self, path: Path,
-                       on_create: Callable[[Path, "idx.Conn"], None] | None = None
+                       on_create: Callable[[Path, "idx.Conn"], None] | None = None,
+                       repair: bool = True,
                        ) -> VaultHandle:
         key = str(path)
         with self._lock:
             handle = self._by_path.get(key)
             if handle is not None:
+                # A writable caller arriving after a read-only one settles
+                # the repair that was deferred above.
+                if repair and handle.repair_pending:
+                    fixed = idx.repair_links(handle.con)
+                    if fixed["changed"]:
+                        idx.rebuild(handle.con)
+                        handle.last_repair = fixed
+                    handle.repair_pending = False
                 return handle
             # Only the thread that finds nothing builds the connection --
             # ensure_dirs/connect/init/seed/rebuild/repair all happen once
@@ -114,11 +131,14 @@ class VaultRegistry:
             if on_create:
                 on_create(path, con)          # e.g. seed example notes if empty
             idx.rebuild(con)
-            fixed = idx.repair_links(con)
-            if fixed["changed"]:
-                idx.rebuild(con)
+            fixed = {"changed": 0}
+            if repair:
+                fixed = idx.repair_links(con)
+                if fixed["changed"]:
+                    idx.rebuild(con)
             handle = VaultHandle(path=path, con=con,
-                                  last_repair=fixed if fixed["changed"] else None)
+                                  last_repair=fixed if fixed["changed"] else None,
+                                  repair_pending=not repair)
             self._by_path[key] = handle
             return handle
 
@@ -405,14 +425,16 @@ def get_or_create_session(request: Request) -> tuple[Session, bool]:
     return _new_session(request), True
 
 
-def switch_vault(path: str | Path, on_create: Callable[[Path, "idx.Conn"], None] | None = None
+def switch_vault(path: str | Path,
+                  on_create: Callable[[Path, "idx.Conn"], None] | None = None,
+                  repair: bool = True,
                   ) -> VaultHandle:
     """Point the *current session only* at a different vault. Creates or
     joins that vault's connection in the registry; every other session
     keeps whatever it already had open, untouched."""
     sess = current_session()
     resolved = Path(path).expanduser().resolve()
-    handle = REGISTRY.get_or_create(resolved, on_create=on_create)
+    handle = REGISTRY.get_or_create(resolved, on_create=on_create, repair=repair)
     sess.vault_path = resolved
     vault.set_current(resolved)
     _current_con.set(handle.con)
@@ -453,7 +475,14 @@ class SessionMiddleware:
             # "still here", so it rides the throttle.
             this_session.last_seen = time.time()
             save()
-        handle = REGISTRY.get_or_create(this_session.vault_path)
+        # repair=False: resolving which vault a request belongs to is not
+        # someone asking for a repair. The link repair rewrites markdown, so
+        # letting the middleware trigger it would hand every locked,
+        # read-only session a note-rewriting side effect on its next
+        # request -- which is exactly what vault_open is careful not to do.
+        # An explicit unlocked open settles it (see VaultHandle.
+        # repair_pending); boot still repairs the default vault.
+        handle = REGISTRY.get_or_create(this_session.vault_path, repair=False)
 
         tok_sess = _current_session.set(this_session)
         tok_con = _current_con.set(handle.con)
