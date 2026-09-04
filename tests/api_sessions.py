@@ -181,6 +181,27 @@ with TestClient(app) as c5:
     ck("no .tmp file is left behind",
        not list(CFG.glob("sessions.json.tmp")), list(CFG.glob("*.tmp")))
 
+print("\n── an unwritable config dir complains instead of failing quietly ──")
+ck("a writable config dir has nothing to say", S.check_writable() is None)
+ro = Path(BASE, "readonly-cfg")
+ro.mkdir(parents=True, exist_ok=True)
+ro.chmod(0o500)                     # r-x: can traverse, cannot create
+_saved_cfg = os.environ["TEPHRA_CONFIG_DIR"]
+os.environ["TEPHRA_CONFIG_DIR"] = str(ro / "Tephra")
+try:
+    msg = S.check_writable()
+    ck("an unwritable config dir is reported", bool(msg), msg)
+    ck("the message names the reset symptom, not just errno",
+       msg and "reset on every restart" in msg, msg)
+    # The point of the probe: this is what stays silent without it.
+    S.save(force=True)
+    ck("save() on an unwritable dir still does not raise", True)
+    ck("and leaves no .tmp turd behind",
+       not list(ro.rglob("*.tmp")), list(ro.rglob("*")))
+finally:
+    os.environ["TEPHRA_CONFIG_DIR"] = _saved_cfg
+    ro.chmod(0o700)
+
 print("\n── unknown prefs are a caller error, not a silent no-op ──")
 restart()
 with TestClient(app) as c6:

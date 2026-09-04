@@ -151,6 +151,10 @@ async def lifespan(app: FastAPI):
     # Deliberately does not open a connection per restored vault: the
     # middleware builds those lazily, so a restart stays as cheap as the
     # vaults people actually hit.
+    complaint = sess.check_writable()
+    if complaint:
+        print(f"[tephra] WARNING: {complaint}")
+
     restored = sess.load()
     if restored:
         print(f"[tephra] restored {restored} session(s)")

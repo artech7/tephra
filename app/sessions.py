@@ -226,6 +226,35 @@ def _sessions_file() -> Path:
     return cfg.config_dir() / SESSIONS_FILE
 
 
+def check_writable() -> str | None:
+    """Probe the config dir once at startup. Returns a complaint, or None.
+
+    save() and settings.save() both swallow OSError on purpose -- a config
+    dir we cannot write must not fail requests. The cost is that the whole
+    persistence layer degrades *silently*, and its failure mode (everyone
+    back on the default vault after a restart) is indistinguishable from
+    the bug persisting sessions was meant to fix.
+
+    The realistic trigger is a container: if the host side of the
+    ./config:/config bind mount does not exist yet, Docker creates it
+    root-owned, and the non-root image user cannot write it. Same story if
+    the image was built without matching UID/GID. Both deserve a line in
+    the log rather than months of quietly forgotten preferences.
+    """
+    d = cfg.config_dir()
+    probe = d / ".write-probe"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        probe.write_text("")
+        probe.unlink()
+        return None
+    except OSError as e:
+        return (f"config dir {d} is not writable ({e.strerror}) -- vault "
+                f"choice and sessions will reset on every restart. If this "
+                f"is Docker, check the ./config mount exists and is owned "
+                f"by the image's UID.")
+
+
 def save(force: bool = False) -> None:
     """Write every live session to disk.
 
