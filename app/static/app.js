@@ -96,7 +96,21 @@ const WALLS = {
   slate: 'linear-gradient(150deg,#0E1C26 0%,#22384A 38%,#415C6E 72%,#16242E 100%)',
   ember: 'linear-gradient(150deg,#180B07 0%,#4E2317 40%,#9A4E2C 74%,#251009 100%)',
   bloom: 'linear-gradient(150deg,#1E0B26 0%,#4C1D46 40%,#8E3A62 72%,#25102A 100%)',
-  night: 'linear-gradient(160deg,#03050C 0%,#0A1130 35%,#161A45 65%,#050614 100%)',
+  // A soft diagonal band of overlapping ellipses standing in for the Milky
+  // Way, painted on top of the same wash the old solid gradient used
+  // (last in the list = bottom layer). Screen-blended (see the
+  // background-blend-mode next to #wall in style.css) so they read as glow
+  // added onto the sky rather than flat colored patches, which is what
+  // actually survives being seen mostly through blurred glass rather than
+  // head-on -- soft edges and additive light hold up under blur; a hard
+  // shape just turns into a muddy smear.
+  night: `radial-gradient(46% 12% at 16% 18%,rgba(214,222,255,.11),transparent 70%),
+          radial-gradient(52% 14% at 31% 30%,rgba(220,202,255,.12),transparent 70%),
+          radial-gradient(58% 16% at 48% 42%,rgba(204,218,255,.14),transparent 70%),
+          radial-gradient(54% 15% at 65% 54%,rgba(214,198,255,.12),transparent 70%),
+          radial-gradient(48% 13% at 81% 66%,rgba(196,214,255,.10),transparent 70%),
+          radial-gradient(40% 11% at 94% 76%,rgba(190,208,255,.07),transparent 70%),
+          linear-gradient(160deg,#03050C 0%,#0A1130 35%,#161A45 65%,#050614 100%)`,
 };
 
 const hex = (r) => '#' + r.split(',').map((n) => (+n).toString(16).padStart(2, '0')).join('');
