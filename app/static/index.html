@@ -314,7 +314,11 @@
 
 <aside id="theme">
   <div class="th-head"><h4>Appearance</h4><button class="mini" id="themeClose">×</button></div>
-  <div class="th-body">
+  <!-- admin-only on the body, not the panel: appearance is stored per vault
+       and therefore shared, so changing it is an edit (put_theme ignores it
+       while locked). The head stays live so a viewer can still open and
+       close the panel to see the current settings. -->
+  <div class="th-body admin-only">
     <div class="th-sect">
       <div class="th-l"><span>Wallpaper</span></div>
       <div class="wallgrid">

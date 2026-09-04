@@ -45,8 +45,23 @@ with TestClient(app) as c:
     ck("note is not actually on disk",
        not os.path.isfile(f"{ROOT}/notes/should-fail.md"))
     ck("reading notes still works locked", c.get("/api/notes").status_code == 200)
-    ck("theme PUT still open while locked (left ungated on purpose)",
-       c.put("/api/theme", json={"acc": "1,1,1"}).status_code == 200)
+    # Appearance is stored per vault, so it is shared -- one browser setting
+    # the accent repaints it for everyone else on that vault. It is an edit.
+    # The request is still accepted rather than 401'd, because the frontend
+    # debounces appearance and the private session prefs into a single PUT;
+    # rejecting it would drop a viewer's sort order too.
+    was = c.get("/api/theme").json()["acc"]
+    r = c.put("/api/theme", json={"acc": "1,1,1", "note_sort": "title"})
+    ck("theme PUT is still accepted while locked", r.status_code == 200, r.status_code)
+    ck("but the shared appearance is ignored", r.json()["acc"] == was,
+       (r.json()["acc"], was))
+    ck("...and never reaches the vault's theme.json",
+       "1,1,1" not in (open(f"{ROOT}/theme.json").read()
+                       if os.path.isfile(f"{ROOT}/theme.json") else ""))
+    ck("...while the caller's own session prefs in the same PUT do apply",
+       r.json()["note_sort"] == "title", r.json()["note_sort"])
+    ck("...which a reread confirms, so nothing silently reverts",
+       c.get("/api/theme").json() == {**r.json()}, c.get("/api/theme").json()["acc"])
     ck("vault list still open while locked",
        c.get("/api/vault/list").status_code == 200)
 
@@ -110,6 +125,13 @@ with TestClient(app) as c:
     ck("quiz prefs still writable while locked (left ungated on purpose)",
        r.status_code == 200, r.text[:120])
     c.post("/api/admin/login", json={"password": "third correct horse"})
+
+    print("\n── unlocked: appearance writes through to the shared theme.json ──")
+    c.post("/api/admin/login", json={"password": "correct horse battery"})
+    r = c.put("/api/theme", json={"acc": "2,2,2"})
+    ck("accepted while unlocked", r.status_code == 200, r.status_code)
+    ck("and applied", r.json()["acc"] == "2,2,2", r.json()["acc"])
+    ck("and on disk in the vault", "2,2,2" in open(f"{ROOT}/theme.json").read())
 
     print("\n── locked: switching vaults is allowed, but writes nothing ──")
     # Reading notes and taking quizzes is open while locked, so gating

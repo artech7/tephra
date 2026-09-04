@@ -1599,8 +1599,21 @@ def get_theme():
 
 
 @app.put("/api/theme")
-def put_theme(payload: dict):
-    appearance_in = {k: v for k, v in payload.items() if k in APPEARANCE_DEFAULTS}
+def put_theme(payload: dict, request: Request):
+    # Appearance is stored per *vault*, so it is shared: one browser setting
+    # the accent or wallpaper repaints it for everyone else on that vault.
+    # That makes it an edit, and it stays behind the lock -- while the
+    # session prefs below (sort, tag, media panel) are private to the
+    # caller and stay open, because taking a quiz is open.
+    #
+    # Ignored rather than 401: the frontend's saveTheme() debounces the
+    # whole T object into one PUT, appearance and session prefs together,
+    # so rejecting the request would also drop a locked viewer's sort order
+    # -- and api()'s 401 handler would pop the unlock pane at them for
+    # changing a sort. The response is get_theme(), so the client is told
+    # the appearance that actually stuck.
+    appearance_in = ({k: v for k, v in payload.items() if k in APPEARANCE_DEFAULTS}
+                     if is_unlocked(request) else {})
     if appearance_in:
         vault.ensure_dirs()
         f = theme_file()

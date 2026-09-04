@@ -38,7 +38,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 47 suites; 605 backend assertions, 962 UI
+    ./run-tests.sh        all 47 suites; 629 backend assertions, 966 UI
 
 Run it before every commit. How the runner invokes things is not incidental:
 

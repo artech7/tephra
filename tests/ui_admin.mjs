@@ -4,6 +4,7 @@ const ROOT = new URL('../app/static', import.meta.url).pathname;
 const dom = new JSDOM(fs.readFileSync(`${ROOT}/index.html`, 'utf8'),
   { runScripts: 'outside-only', url: 'http://127.0.0.1:8400/', pretendToBeVisual: true });
 const { window } = dom; const doc = window.document;
+const css = fs.readFileSync(`${ROOT}/style.css`, 'utf8');
 let ok = 0, fail = 0;
 const ck = (l, c, x = '') => { c ? (ok++, console.log(`  PASS  ${l} ${x}`)) : (fail++, console.log(`  FAIL  ${l} ${x}`)); };
 const $ = (s) => doc.querySelector(s);
@@ -14,6 +15,23 @@ ck('lock button in the topbar', !!$('#lockBtn'));
 ck('admin drawer', !!$('#admin'));
 for (const id of ['newNote', 'favBtn', 'quizAdd', 'repairRun', 'reconcileRun', 'renameSave', 'wizCreateBtn'])
   ck(`#${id} is tagged admin-only`, $(`#${id}`)?.classList.contains('admin-only'), id);
+
+// Appearance is stored per vault, so it is shared: one browser changing the
+// accent repaints it for everyone else on that vault. put_theme ignores it
+// while locked, and the controls are disabled to match -- a slider that
+// visibly moves but silently does not stick is worse than one that is
+// plainly unavailable.
+ck('the Appearance body is tagged admin-only',
+   doc.querySelector('#theme .th-body')?.classList.contains('admin-only'));
+ck('...but not the Appearance panel itself, so it still opens while locked',
+   !doc.querySelector('#theme')?.classList.contains('admin-only'));
+ck('...and its close button stays reachable',
+   !$('#themeClose')?.closest('.admin-only'));
+// The rule that does the disabling. Asserted here rather than assumed,
+// because .admin-only is inert without it.
+ck('html.locked disables admin-only controls',
+   /html\.locked\s+\.admin-only\s*\{[^}]*pointer-events:\s*none/.test(css),
+   'html.locked .admin-only { pointer-events: none }');
 
 // ── a fake backend, stateful enough to test setup -> lock -> unlock ->
 // change-password as one continuous session, the same way a real browser
