@@ -421,6 +421,14 @@ def load_progress() -> dict:
 def save_progress(data: dict) -> None:
     vault.ensure_dirs()
     progress_path().write_text(json.dumps(data, indent=2))
+    # Progress is filed under the session id, so the file is only findable
+    # again if that id survives a restart. Recording an answer is therefore
+    # what makes a session worth persisting, even one that never switched
+    # vault or touched a pref.
+    try:
+        sess.mark_notable()
+    except LookupError:
+        pass          # no session in play (a tool or test calling directly)
 
 
 def record_answer(qid: str, correct: bool) -> dict:

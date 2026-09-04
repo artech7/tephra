@@ -75,6 +75,16 @@ TOUCH_THROTTLE = 3600
 # would otherwise grow this file without limit.
 MAX_SESSIONS = 500
 
+# Requests that must never mint a session. The container healthcheck hits
+# /api/health every 30s with no cookie jar, so before this each probe was a
+# brand-new session, force-written to disk: ~2,880 a day, which filled
+# MAX_SESSIONS in about four hours and then began *evicting real people*,
+# since save() keeps the most-recently-seen. Someone away for an afternoon
+# would come back to a fresh default session -- precisely the data loss
+# persisting sessions was meant to prevent. These still get a working vault
+# context (health calls db()); they just stay anonymous and unrecorded.
+NO_SESSION_PATHS = frozenset({"/api/health"})
+
 
 # ── vault registry ──────────────────────────────────────────────────────────
 
@@ -201,6 +211,12 @@ class Session:
     # what to prune on load -- never shown, never compared between
     # sessions, so clock skew across a restart is harmless.
     last_seen: float = field(default_factory=time.time)
+    # Whether this session holds anything a restart would actually lose:
+    # a vault it switched to, prefs it set, quiz progress it recorded.
+    # Until then it is identical to one we would mint for free on the next
+    # request, so persisting it is pure noise -- and worse than noise once
+    # MAX_SESSIONS starts evicting real sessions to make room for probes.
+    notable: bool = False
 
     def as_row(self) -> dict:
         return {
@@ -288,7 +304,8 @@ def save(force: bool = False) -> None:
         if not force and now - _last_write < TOUCH_THROTTLE:
             return
         with _sessions_lock:
-            live = sorted(_sessions.values(), key=lambda x: x.last_seen, reverse=True)
+            live = sorted((x for x in _sessions.values() if x.notable),
+                          key=lambda x: x.last_seen, reverse=True)
         rows = [x.as_row() for x in live[:MAX_SESSIONS]]
         f = _sessions_file()
         tmp = f.parent / (f.name + ".tmp")
@@ -354,11 +371,20 @@ def load() -> int:
                 note_tag=str(prefs_in.get("note_tag") or ""),
                 media_open=media_open if isinstance(media_open, dict) else {},
             ),
+            notable=True,   # it was on disk, so it earned its place already
         )
 
     with _sessions_lock:
         _sessions.update(restored)
     return len(restored)
+
+
+def mark_notable(sess: "Session | None" = None) -> None:
+    """Record that this session now holds something worth restoring, and
+    persist it. Called on vault switch, pref change, and quiz progress."""
+    sess = sess if sess is not None else current_session()
+    sess.notable = True
+    save(force=True)
 
 
 def flush() -> None:
@@ -387,7 +413,7 @@ def update_prefs(**changes) -> SessionPrefs:
         prefs.note_tag = str(note_tag)
     if isinstance(media_open, dict):
         prefs.media_open = media_open
-    save(force=True)
+    mark_notable(sess)
     return prefs
 
 
@@ -409,7 +435,9 @@ def _new_session(request: Request) -> Session:
     sess = Session(id=sid, vault_path=_default_vault_path())
     with _sessions_lock:
         _sessions[sid] = sess
-    save(force=True)   # a session the cookie outlives must outlive a restart
+    # Deliberately no save() here: a fresh session is indistinguishable from
+    # one we would mint on the next request, so there is nothing to lose yet.
+    # mark_notable() is what commits it, once it holds something real.
     return sess
 
 
@@ -438,7 +466,7 @@ def switch_vault(path: str | Path,
     sess.vault_path = resolved
     vault.set_current(resolved)
     _current_con.set(handle.con)
-    save(force=True)   # the whole point: come back to the vault I had open
+    mark_notable(sess)   # the whole point: come back to the vault I had open
     return handle
 
 
@@ -468,8 +496,13 @@ class SessionMiddleware:
             return
 
         request = Request(scope, receive=receive)
-        this_session, is_new = get_or_create_session(request)
-        if not is_new:
+        if (scope.get("path") in NO_SESSION_PATHS
+                and not request.cookies.get(SESSION_COOKIE)):
+            # Ephemeral: never registered, never persisted, no cookie set.
+            this_session, is_new = Session(id="", vault_path=_default_vault_path()), False
+        else:
+            this_session, is_new = get_or_create_session(request)
+        if not is_new and this_session.notable:
             # A brand-new session was already force-saved by _new_session;
             # this is the returning-browser case, where all that changed is
             # "still here", so it rides the throttle.

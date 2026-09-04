@@ -51,20 +51,25 @@ def rows():
     return json.loads(SFILE.read_text())["sessions"]
 
 
-print("── a session is written to disk as soon as it exists ──")
+print("── a session is written to disk once it holds something ──")
 with TestClient(app) as c:
     c.get("/api/vault/info")
     sid = c.cookies.get(S.SESSION_COOKIE)
     ck("a cookie was issued", bool(sid), sid)
-    ck("sessions.json lives in the config dir, not in a vault",
-       SFILE.is_file() and not Path(A, "sessions.json").exists(), str(SFILE))
-    ck("the new session is in the file", any(r["id"] == sid for r in rows()), rows())
+    # Not on disk yet, on purpose: an untouched session is identical to one
+    # minted free on the next request. See "a session with nothing in it is
+    # never persisted" below for why writing them was actively harmful.
+    ck("a bare session is not written yet", not SFILE.exists(), SFILE.exists())
 
     print("\n── vault switch and prefs are persisted ──")
     r = c.post("/api/vault/open", json={"path": B})
     ck("opened vault B", r.status_code == 200, r.text[:120])
     c.put("/api/theme", json={"note_sort": "title", "note_tag": "fabric",
                               "media_open": {"x": True}})
+    ck("sessions.json lives in the config dir, not in a vault",
+       SFILE.is_file() and not Path(A, "sessions.json").exists(), str(SFILE))
+    ck("the session is now in the file", any(r["id"] == sid for r in rows()),
+       [r["id"][:6] for r in rows()])
     row = next(r for r in rows() if r["id"] == sid)
     ck("file records vault B", row["vault"] == B, row["vault"])
     ck("file records note_sort", row["prefs"]["note_sort"] == "title", row["prefs"])
@@ -144,6 +149,9 @@ SFILE.write_text("{ this is not json")
 ck("load() reports nothing restored rather than raising", S.load() == 0)
 with TestClient(app) as c4:
     ck("the app still boots and serves", c4.get("/api/health").json()["ok"] is True)
+    # Not /api/health for the cookie check: that path deliberately issues
+    # none (NO_SESSION_PATHS). Any normal endpoint still does.
+    c4.get("/api/vault/info")
     ck("and issues a fresh session", bool(c4.cookies.get(S.SESSION_COOKIE)))
 
 print("\n── two browsers on different vaults persist independently ──")
@@ -164,6 +172,66 @@ with TestClient(app) as one, TestClient(app) as two:
        (by_id[sid1]["prefs"]["note_sort"], by_id[sid2]["prefs"]["note_sort"])
        == ("title", "created"),
        (by_id[sid1]["prefs"], by_id[sid2]["prefs"]))
+
+print("\n── a session with nothing in it is never persisted ──")
+# The regression this missed. The container healthcheck hits /api/health
+# every 30s with no cookie jar; each probe used to mint a session and force
+# a write, ~2,880 a day. That filled MAX_SESSIONS in about four hours and
+# then evicted *real* sessions, since save() keeps the most-recently-seen --
+# so someone away for an afternoon lost the vault and quiz progress that
+# persisting sessions exists to protect.
+restart()
+SFILE.unlink(missing_ok=True)
+with TestClient(app) as cp:
+    for _ in range(25):
+        cp.cookies.clear()                      # a fresh cookieless probe
+        ck_status = cp.get("/api/health").status_code
+    ck("health probes still answer", ck_status == 200, ck_status)
+    ck("...and are not even given a session cookie",
+       not cp.cookies.get(S.SESSION_COOKIE), dict(cp.cookies))
+    ck("...and never reach the session table", not S._sessions, len(S._sessions))
+    ck("...so sessions.json is never even created", not SFILE.exists())
+
+restart()
+with TestClient(app) as cb:
+    cb.get("/api/vault/info")                   # a real browser: gets a cookie
+    ck("a real request does get a session", len(S._sessions) == 1, len(S._sessions))
+    ck("...but an untouched one is still not written to disk",
+       not SFILE.exists() or not rows(), SFILE.exists())
+    ck("...and is not yet notable",
+       next(iter(S._sessions.values())).notable is False)
+    # Any one of the three things worth restoring commits it.
+    cb.put("/api/theme", json={"note_sort": "title"})
+    ck("setting a pref commits it", bool(rows()), rows())
+    ck("...and marks it notable", next(iter(S._sessions.values())).notable is True)
+
+restart()
+SFILE.unlink(missing_ok=True)
+with TestClient(app) as cq3:
+    cq3.get("/api/vault/info")
+    ck("still not persisted before any quiz activity", not SFILE.exists())
+    cq3.post("/api/study/flag", json={"qid": "notable-probe", "flagged": True})
+    ck("recording quiz progress commits the session too", bool(rows()), rows())
+    ck("...because the progress file is only findable by that id",
+       next(iter(S._sessions.values())).notable is True)
+
+print("\n── probe traffic cannot evict a real session ──")
+restart()
+SFILE.unlink(missing_ok=True)
+with TestClient(app) as real:
+    real.put("/api/theme", json={"note_tag": "keepme"})
+    keeper = real.cookies.get(S.SESSION_COOKIE)
+    ck("the real session is on disk", any(r["id"] == keeper for r in rows()))
+    with TestClient(app) as probe:
+        for _ in range(S.MAX_SESSIONS + 50):
+            probe.cookies.clear()
+            probe.get("/api/health")
+    ck("far more probes than MAX_SESSIONS did not grow the file",
+       len(rows()) == 1, len(rows()))
+    ck("...and the real session is still there",
+       any(r["id"] == keeper for r in rows()), [r["id"][:6] for r in rows()])
+    ck("...with its pref intact",
+       next(r for r in rows() if r["id"] == keeper)["prefs"]["note_tag"] == "keepme")
 
 print("\n── writes are throttled for a touch, immediate for a change ──")
 restart()
