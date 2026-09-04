@@ -159,6 +159,22 @@ async def lifespan(app: FastAPI):
     if restored:
         print(f"[tephra] restored {restored} session(s)")
 
+    # Quiz progress is filed under a session id, so a lost session record
+    # strands it. Reconcile across the vaults this install actually knows
+    # about -- recents plus whatever the restored sessions point at -- since
+    # there is no other way to enumerate "vaults someone might return to".
+    known = {vault.VAULT, *(s.vault_path for s in sess.all_sessions())}
+    for r in (cfg.load().get("recent") or []):
+        try:
+            known.add(Path(r).expanduser().resolve())
+        except OSError:
+            pass
+    recon = sess.reconcile_progress(known)
+    if recon["adopted"]:
+        print(f"[tephra] recovered {recon['adopted']} stranded quiz progress file(s)")
+    if recon["reaped"]:
+        print(f"[tephra] removed {recon['reaped']} expired quiz progress file(s)")
+
     handle = sess.REGISTRY.get_or_create(vault.VAULT, on_create=_seed_if_empty)
     n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
     if handle.last_repair:

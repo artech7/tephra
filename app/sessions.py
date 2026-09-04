@@ -246,6 +246,11 @@ def current_session() -> Session:
     return _current_session.get()
 
 
+def all_sessions() -> list[Session]:
+    with _sessions_lock:
+        return list(_sessions.values())
+
+
 def current_con() -> "idx.Conn":
     return _current_con.get()
 
@@ -413,6 +418,79 @@ def mark_notable(sess: "Session | None" = None) -> None:
     sess = sess if sess is not None else current_session()
     sess.notable = True
     save(force=True)
+
+
+# ── orphaned quiz progress ──────────────────────────────────────────────────
+
+PROGRESS_SUFFIX = "-study-progress.json"
+
+
+def _progress_files(vault_path: Path):
+    try:
+        return sorted((vault_path / ".sessions").glob("*" + PROGRESS_SUFFIX))
+    except OSError:
+        return []
+
+
+def reconcile_progress(vault_paths) -> dict:
+    """Reunite or retire quiz progress that has no session pointing at it.
+
+    study.py files progress at <vault>/.sessions/<session-id>-study-progress
+    .json. Nothing ever removed those, and before sessions were persisted
+    at all, every restart stranded a fresh batch: the file stayed on disk
+    while the id needed to find it was lost, so a returning browser was
+    handed a new id and read an empty history with its answers sitting
+    right there beside it.
+
+    So the file is treated as what it actually is -- evidence that a
+    session existed. An orphan holding real progress is *adopted* back into
+    the session table under its original id, which is what makes a still-
+    held cookie resolve again. Only files past the cookie's own Max-Age are
+    deleted, and those are unreachable by construction: no browser can
+    still present an id that expired everywhere.
+
+    Deliberately conservative about deleting, because this is the one place
+    the app holds something a user typed that is not a markdown file.
+    """
+    live = set(_sessions)
+    adopted = reaped = 0
+    now = time.time()
+    for vault_path in {Path(v) for v in vault_paths}:
+        for f in _progress_files(vault_path):
+            sid = f.name[:-len(PROGRESS_SUFFIX)]
+            if sid in live:
+                continue
+            try:
+                age = now - f.stat().st_mtime
+            except OSError:
+                continue
+            if age > SESSION_MAX_AGE:
+                # The cookie naming this expired in every browser long ago.
+                try:
+                    f.unlink()
+                    reaped += 1
+                except OSError:
+                    pass
+                continue
+            try:
+                data = json.loads(f.read_text())
+            except (OSError, ValueError):
+                continue
+            # An id with answers or flags behind it has to keep resolving.
+            # A file holding only a quiz_count is not worth a session row;
+            # left alone, it ages out by the rule above.
+            if not (data.get("answers") or data.get("flagged")):
+                continue
+            with _sessions_lock:
+                if sid in _sessions:
+                    continue
+                _sessions[sid] = Session(id=sid, vault_path=vault_path,
+                                          last_seen=f.stat().st_mtime, notable=True)
+            live.add(sid)
+            adopted += 1
+    if adopted:
+        save(force=True)
+    return {"adopted": adopted, "reaped": reaped}
 
 
 def flush() -> None:

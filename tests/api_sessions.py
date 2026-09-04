@@ -50,6 +50,20 @@ def restart():
 def rows():
     return json.loads(SFILE.read_text())["sessions"]
 
+def clear_progress():
+    """Wipe every vault's .sessions/ dir.
+
+    Needed by any section asserting an exact session count, because the
+    lifespan reconciles stranded progress on startup: a progress file an
+    earlier section left behind is correctly *adopted* as a session, which
+    is right for the app and fatal for a count assertion here.
+    """
+    for v in (A, B):
+        d = Path(v, ".sessions")
+        if d.is_dir():
+            for f in d.glob("*"):
+                f.unlink()
+
 
 print("── a session is written to disk once it holds something ──")
 with TestClient(app) as c:
@@ -181,6 +195,7 @@ print("\n── a session with nothing in it is never persisted ──")
 # so someone away for an afternoon lost the vault and quiz progress that
 # persisting sessions exists to protect.
 restart()
+clear_progress()
 SFILE.unlink(missing_ok=True)
 with TestClient(app) as cp:
     for _ in range(25):
@@ -222,6 +237,7 @@ print("\n── junk already on disk is cleaned out, not grandfathered in ──
 # Observed live: 161 restored, 160 of them at the default vault with default
 # prefs, and the file grew rather than shrank across the fix's own deploy.
 restart()
+clear_progress()
 SFILE.unlink(missing_ok=True)
 with TestClient(app) as cd:
     cd.put("/api/theme", json={"note_tag": "real-user"})
@@ -255,6 +271,7 @@ ck("...because dropping the id would orphan that progress file",
 
 print("\n── probe traffic cannot evict a real session ──")
 restart()
+clear_progress()
 SFILE.unlink(missing_ok=True)
 with TestClient(app) as real:
     real.put("/api/theme", json={"note_tag": "keepme"})
@@ -270,6 +287,79 @@ with TestClient(app) as real:
        any(r["id"] == keeper for r in rows()), [r["id"][:6] for r in rows()])
     ck("...with its pref intact",
        next(r for r in rows() if r["id"] == keeper)["prefs"]["note_tag"] == "keepme")
+
+print("\n── quiz progress with no session pointing at it ──")
+# Found in a real vault: a progress file with 13 answers and 3 flagged
+# questions, four days old, and no session in sessions.json naming it --
+# stranded because sessions only started persisting after it was written.
+# The browser holding that cookie would be handed a fresh id and read an
+# empty history with its own answers sitting right beside it.
+restart()
+SFILE.unlink(missing_ok=True)
+sdir = Path(B, ".sessions")
+sdir.mkdir(parents=True, exist_ok=True)
+for f in sdir.glob("*"):
+    f.unlink()
+
+real = sdir / ("stranded000000000000000000000001" + S.PROGRESS_SUFFIX)
+real.write_text(json.dumps({"answers": {"q1": {"seen": 3, "right": 2}},
+                            "flagged": ["q7"], "settings": {"quiz_count": 50}}))
+bare = sdir / ("emptyprogress00000000000000000002" + S.PROGRESS_SUFFIX)
+bare.write_text(json.dumps({"answers": {}, "flagged": [], "settings": {"quiz_count": 1}}))
+stale = sdir / ("longexpired000000000000000000003" + S.PROGRESS_SUFFIX)
+stale.write_text(json.dumps({"answers": {"old": {"seen": 1, "right": 1}}, "flagged": []}))
+old_mtime = time.time() - (S.SESSION_MAX_AGE + 86400)
+os.utime(stale, (old_mtime, old_mtime))
+
+r = S.reconcile_progress([B])
+ck("the file with real progress is adopted back", r["adopted"] == 1, r)
+ck("...under its original id, which is what makes the cookie resolve",
+   "stranded000000000000000000000001" in S._sessions, sorted(S._sessions))
+ck("...pointing at the vault it was found in",
+   str(S._sessions["stranded000000000000000000000001"].vault_path) == B)
+ck("...and is persisted, so the next restart keeps it",
+   any(x["id"] == "stranded000000000000000000000001" for x in rows()))
+ck("the expired file is deleted -- no cookie can name it any more",
+   r["reaped"] == 1 and not stale.exists(), (r, stale.exists()))
+ck("a file holding only a quiz_count is neither adopted nor deleted",
+   bare.exists() and "emptyprogress00000000000000000002" not in S._sessions)
+ck("the adopted file itself is never touched",
+   json.loads(real.read_text())["answers"] == {"q1": {"seen": 3, "right": 2}})
+
+print("\n── an adopted session actually reconnects a returning browser ──")
+with TestClient(app) as cr:
+    cr.cookies.set(S.SESSION_COOKIE, "stranded000000000000000000000001")
+    cr.post("/api/vault/open", json={"path": B})
+    ck("the returning cookie was not replaced with a fresh id",
+       cr.cookies.get(S.SESSION_COOKIE) == "stranded000000000000000000000001",
+       cr.cookies.get(S.SESSION_COOKIE))
+    # The real proof: a write from this browser has to land in the *same*
+    # file, not a new one beside it. Reading it back through the API would
+    # pass even if study.py had silently started a fresh history.
+    cr.post("/api/study/flag", json={"qid": "q9", "flagged": True})
+    after = json.loads(real.read_text())
+    ck("...and a new answer lands in that same file",
+       after["flagged"] == ["q7", "q9"], after["flagged"])
+    ck("...with the pre-existing history still intact",
+       after["answers"] == {"q1": {"seen": 3, "right": 2}}, after["answers"])
+    ck("...and no second progress file was started for it",
+       len(list(sdir.glob("stranded*"))) == 1,
+       [f.name for f in sdir.glob("stranded*")])
+
+print("\n── reconciling twice adopts nothing new ──")
+r2 = S.reconcile_progress([B])
+ck("idempotent", r2 == {"adopted": 0, "reaped": 0}, r2)
+
+print("\n── a live session's progress is never reaped or re-adopted ──")
+restart()
+with TestClient(app) as cl:
+    cl.post("/api/vault/open", json={"path": B})
+    cl.post("/api/study/flag", json={"qid": "live-one", "flagged": True})
+    sid_live = cl.cookies.get(S.SESSION_COOKIE)
+    r3 = S.reconcile_progress([B])
+    ck("the live session is left alone", r3["adopted"] == 0, r3)
+    ck("...and its file survives",
+       (sdir / (sid_live + S.PROGRESS_SUFFIX)).is_file())
 
 print("\n── writes are throttled for a touch, immediate for a change ──")
 restart()
