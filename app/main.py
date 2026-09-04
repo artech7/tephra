@@ -146,6 +146,15 @@ async def lifespan(app: FastAPI):
         vault.use(remembered)
     vault.ensure_dirs()
 
+    # Before the first request, so a returning browser's cookie resolves to
+    # the vault it left off in rather than minting a fresh default session.
+    # Deliberately does not open a connection per restored vault: the
+    # middleware builds those lazily, so a restart stays as cheap as the
+    # vaults people actually hit.
+    restored = sess.load()
+    if restored:
+        print(f"[tephra] restored {restored} session(s)")
+
     handle = sess.REGISTRY.get_or_create(vault.VAULT, on_create=_seed_if_empty)
     n = handle.con.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
     if handle.last_repair:
@@ -156,6 +165,10 @@ async def lifespan(app: FastAPI):
     print(f"[tephra] vault={vault.VAULT} notes={n}")
 
     yield
+
+    # Before closing anything: the last_seen touches since the most recent
+    # throttled write are still only in memory.
+    sess.flush()
 
     for path_str in sess.REGISTRY.paths():
         p = Path(path_str)
@@ -1573,13 +1586,13 @@ def put_theme(payload: dict):
         current.update(appearance_in)
         f.write_text(json.dumps(current, indent=2))
 
-    prefs = sess.current_session().prefs
-    if "note_sort" in payload:
-        prefs.note_sort = payload["note_sort"]
-    if "note_tag" in payload:
-        prefs.note_tag = payload["note_tag"]
-    if "media_open" in payload and isinstance(payload["media_open"], dict):
-        prefs.media_open = payload["media_open"]
+    # Only forward the keys actually present -- update_prefs treats None as
+    # "leave alone", which is what lets note_tag be *cleared* to "" here
+    # rather than read as absent.
+    changes = {k: payload[k] for k in ("note_sort", "note_tag", "media_open")
+               if k in payload}
+    if changes:
+        sess.update_prefs(**changes)
 
     return get_theme()
 

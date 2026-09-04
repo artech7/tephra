@@ -37,8 +37,11 @@ each get their own, fully independent connection.
 from __future__ import annotations
 
 import contextvars
+import json
+import os
 import secrets
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -46,6 +49,7 @@ from typing import Callable
 from fastapi import Request
 
 from . import index as idx
+from . import settings as cfg
 from . import vault
 
 SESSION_COOKIE = "tephra_sid"
@@ -53,6 +57,23 @@ SESSION_COOKIE = "tephra_sid"
 # browsers, so "keep coming back to the vault I had open" survives a
 # browser restart, not just a tab refresh.
 SESSION_MAX_AGE = 400 * 24 * 3600
+
+# Sessions live in the platform config dir, next to config.json, for the
+# same reason config.json does: a session says *which vault* it is pointed
+# at, so it cannot live inside a vault without becoming unreadable the
+# moment someone switches away from that vault.
+SESSIONS_FILE = "sessions.json"
+
+# Every request touches its session's last_seen. Rewriting the file for a
+# timestamp bump on every request would be a write per request forever, so
+# a plain touch is throttled to this; anything that actually *changes* what
+# a session is (born, vault switched, prefs edited) writes immediately.
+TOUCH_THROTTLE = 3600
+
+# Ceiling on what we keep, most-recently-seen first. Pruning on load only
+# bounds a process that restarts; a container that stays up for months
+# would otherwise grow this file without limit.
+MAX_SESSIONS = 500
 
 
 # ── vault registry ──────────────────────────────────────────────────────────
@@ -135,10 +156,17 @@ REGISTRY = VaultRegistry()
 
 @dataclass
 class SessionPrefs:
-    """UI view-state that used to live in a shared theme.json -- kept in
-    memory per session instead. Lost on a server restart, same as the app
-    already resets to defaults on restart today; not worth a file per
-    session for state this disposable."""
+    """UI view-state that used to live in a shared theme.json -- per
+    session now, and persisted (see save()/load() below) rather than held
+    only in memory.
+
+    In-memory was the original call here, on the grounds that this state is
+    disposable. That reasoning came from the laptop case, where a restart
+    is something you did to yourself and the vault you land back on is the
+    only one you had. Under Docker a restart is someone else's deploy: it
+    silently moved every browser back to the default vault, which for a
+    person whose own vault was not the default read as their notes being
+    gone."""
     note_sort: str = "updated"
     note_tag: str = ""
     media_open: dict = field(default_factory=dict)
@@ -149,6 +177,22 @@ class Session:
     id: str
     vault_path: Path
     prefs: SessionPrefs = field(default_factory=SessionPrefs)
+    # Wall-clock of the last request on this session. Only used to decide
+    # what to prune on load -- never shown, never compared between
+    # sessions, so clock skew across a restart is harmless.
+    last_seen: float = field(default_factory=time.time)
+
+    def as_row(self) -> dict:
+        return {
+            "id": self.id,
+            "vault": str(self.vault_path),
+            "last_seen": self.last_seen,
+            "prefs": {
+                "note_sort": self.prefs.note_sort,
+                "note_tag": self.prefs.note_tag,
+                "media_open": self.prefs.media_open,
+            },
+        }
 
 
 _sessions: dict[str, Session] = {}
@@ -170,6 +214,134 @@ def current_con() -> "idx.Conn":
     return _current_con.get()
 
 
+# ── persistence ─────────────────────────────────────────────────────────────
+
+_last_write = 0.0
+_write_lock = threading.Lock()
+
+
+def _sessions_file() -> Path:
+    # Resolved per call, not cached: tests point TEPHRA_CONFIG_DIR somewhere
+    # throwaway, and config_dir() already reads that env var every time.
+    return cfg.config_dir() / SESSIONS_FILE
+
+
+def save(force: bool = False) -> None:
+    """Write every live session to disk.
+
+    `force` for anything that changed what a session *is*; the default
+    throttles, so the last_seen touch every request performs does not turn
+    into a file write every request.
+    """
+    global _last_write
+    now = time.time()
+    with _write_lock:
+        if not force and now - _last_write < TOUCH_THROTTLE:
+            return
+        with _sessions_lock:
+            live = sorted(_sessions.values(), key=lambda x: x.last_seen, reverse=True)
+        rows = [x.as_row() for x in live[:MAX_SESSIONS]]
+        f = _sessions_file()
+        tmp = f.parent / (f.name + ".tmp")
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps({"sessions": rows}, indent=2))
+            # Atomic swap. A half-written sessions.json is worse than none:
+            # it would parse as garbage on the next boot and drop everyone
+            # to the default vault, which is the exact failure persisting
+            # this was meant to remove.
+            os.replace(tmp, f)
+            _last_write = now
+        except OSError:
+            # Same posture as settings.save(): a read-only or full config
+            # dir degrades to "sessions don't survive restart", which is
+            # where we started. It must never fail a request.
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def load() -> int:
+    """Restore sessions from disk. Returns how many survived pruning."""
+    f = _sessions_file()
+    try:
+        data = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return 0
+
+    now = time.time()
+    restored: dict[str, Session] = {}
+    for row in (data.get("sessions") if isinstance(data, dict) else None) or []:
+        if not isinstance(row, dict):
+            continue
+        sid = row.get("id")
+        raw_vault = row.get("vault")
+        if not isinstance(sid, str) or not isinstance(raw_vault, str):
+            continue
+        try:
+            last_seen = float(row.get("last_seen") or 0)
+        except (TypeError, ValueError):
+            continue
+        # Past the cookie's own Max-Age no browser can still present this
+        # id, so the record is unreachable by definition.
+        if now - last_seen > SESSION_MAX_AGE:
+            continue
+        # The vault moved, was deleted, or (under Docker) its volume is not
+        # mounted this time. Dropping the session lands that browser on the
+        # default vault -- the old behaviour -- instead of pointing it at a
+        # path that would fail on every request.
+        if not vault.looks_like_vault(raw_vault):
+            continue
+        prefs_in = row.get("prefs")
+        prefs_in = prefs_in if isinstance(prefs_in, dict) else {}
+        media_open = prefs_in.get("media_open")
+        restored[sid] = Session(
+            id=sid,
+            vault_path=Path(raw_vault).expanduser().resolve(),
+            last_seen=last_seen,
+            prefs=SessionPrefs(
+                note_sort=str(prefs_in.get("note_sort") or "updated"),
+                note_tag=str(prefs_in.get("note_tag") or ""),
+                media_open=media_open if isinstance(media_open, dict) else {},
+            ),
+        )
+
+    with _sessions_lock:
+        _sessions.update(restored)
+    return len(restored)
+
+
+def flush() -> None:
+    """Persist unconditionally -- called on shutdown, where the throttle
+    would otherwise discard up to an hour of last_seen touches."""
+    save(force=True)
+
+
+def update_prefs(**changes) -> SessionPrefs:
+    """Apply view-pref changes to the current session and persist at once.
+
+    Keyword-per-pref with a None sentinel rather than a dict merge, so
+    clearing a pref (note_tag="") is expressible and an unknown key is a
+    TypeError here instead of a silently ignored no-op at the caller.
+    """
+    sess = current_session()
+    prefs = sess.prefs
+    note_sort = changes.pop("note_sort", None)
+    note_tag = changes.pop("note_tag", None)
+    media_open = changes.pop("media_open", None)
+    if changes:
+        raise TypeError(f"unknown pref(s): {', '.join(sorted(changes))}")
+    if note_sort is not None:
+        prefs.note_sort = str(note_sort)
+    if note_tag is not None:
+        prefs.note_tag = str(note_tag)
+    if isinstance(media_open, dict):
+        prefs.media_open = media_open
+    save(force=True)
+    return prefs
+
+
 def _default_vault_path() -> Path:
     """Where a brand-new session lands: whatever vault was last remembered
     process-wide (the same "last vault wins" default the app has always
@@ -188,6 +360,7 @@ def _new_session(request: Request) -> Session:
     sess = Session(id=sid, vault_path=_default_vault_path())
     with _sessions_lock:
         _sessions[sid] = sess
+    save(force=True)   # a session the cookie outlives must outlive a restart
     return sess
 
 
@@ -214,6 +387,7 @@ def switch_vault(path: str | Path, on_create: Callable[[Path, "idx.Conn"], None]
     sess.vault_path = resolved
     vault.set_current(resolved)
     _current_con.set(handle.con)
+    save(force=True)   # the whole point: come back to the vault I had open
     return handle
 
 
@@ -244,6 +418,12 @@ class SessionMiddleware:
 
         request = Request(scope, receive=receive)
         this_session, is_new = get_or_create_session(request)
+        if not is_new:
+            # A brand-new session was already force-saved by _new_session;
+            # this is the returning-browser case, where all that changed is
+            # "still here", so it rides the throttle.
+            this_session.last_seen = time.time()
+            save()
         handle = REGISTRY.get_or_create(this_session.vault_path)
 
         tok_sess = _current_session.set(this_session)
