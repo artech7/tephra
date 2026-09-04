@@ -26,6 +26,16 @@ jobs:
           - runner: macos-13
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    # `secrets` is not a valid context in an `if:` expression -- it is only
+    # available in env/with/run. Referencing it there does not evaluate to
+    # empty, it makes the whole file unparseable ("Unrecognized named-value:
+    # 'secrets'"), which GitHub reports against every push, not just tag
+    # builds. Hoisting the gates to job-level env keeps the "skip
+    # automatically when the secrets aren't set" behaviour for forks and
+    # first-time builds, since env *is* allowed in `if:`.
+    env:
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,7 +48,7 @@ jobs:
       - name: Import signing certificate
         # Skipped automatically when the secrets aren't set, so forks and
         # first-time builds still produce a working (unsigned) dmg.
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: env.HAS_MACOS_CERT == 'true'
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASS: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -55,7 +65,7 @@ jobs:
           rm /tmp/cert.p12
 
       - name: Store notarisation credentials
-        if: ${{ secrets.APPLE_ID != '' }}
+        if: env.HAS_APPLE_ID == 'true'
         run: |
           xcrun notarytool store-credentials tephra \
             --apple-id "${{ secrets.APPLE_ID }}" \
@@ -76,6 +86,9 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    # Same reason as the macos job above.
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,7 +99,7 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       - name: Decode signing certificate
-        if: ${{ secrets.WINDOWS_CERT_PFX != '' }}
+        if: env.HAS_WINDOWS_CERT == 'true'
         shell: pwsh
         run: |
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx",
