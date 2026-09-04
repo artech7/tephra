@@ -818,6 +818,17 @@
   async function renderStats() {
     const panel = $('#gvStatsPanel');
     if (!panel) return;
+
+    // #gvHealthSection gets moved into this panel below (see the comment
+    // by its other use), so a naive panel.innerHTML = '' on the *next*
+    // render would delete it for good -- getElementById can't find a
+    // detached node, so every scan result (and the button/listeners) was
+    // gone the moment you left Overview and came back. Stash it back on
+    // <body>, hidden, before wiping the panel; that keeps it alive and
+    // findable no matter which branch below runs.
+    const health = document.getElementById('gvHealthSection');
+    if (health) { health.hidden = true; document.body.appendChild(health); }
+
     panel.innerHTML = '';
 
     // Vault shape ignores the Stubs/Leaves show-toggles -- those control
@@ -957,10 +968,9 @@
     // rebuilt: #gvHealthSection is real static markup in index.html (see
     // its own comment there) with every control's id already wired by
     // app.js at load time, appendChild() on an existing node relocates it
-    // without touching any of those listeners. Un-hide it now that it's
-    // actually inside the panel -- it starts `hidden` in the static
-    // markup so it's neither visible nor reachable before this ever runs.
-    const health = document.getElementById('gvHealthSection');
+    // without touching any of those listeners -- and without touching its
+    // current contents, so scan results already sitting inside it (see the
+    // stash at the top of this function) survive the move.
     if (health) { health.hidden = false; panel.appendChild(health); }
   }
 

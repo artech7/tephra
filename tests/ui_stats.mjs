@@ -118,6 +118,33 @@ ck('and the .on class', !window.document.querySelector('#statsview').classList.c
 await window.tephraStats.open();
 ck('reopens cleanly', window.tephraStats.isOpen());
 
+// The regression this section did not previously reach. #gvHealthSection is
+// static markup in index.html that renderStats() *relocates* into the panel
+// with appendChild, so it is a detached node the moment the panel is wiped.
+// renderStats() opens with panel.innerHTML = '', which on the second open
+// destroyed it outright -- getElementById cannot find a detached node, so
+// the section, its scan results, and every listener app.js wired at load
+// time were gone for good. Asserting it after one open (above) passes
+// either way; only a reopen tells them apart.
+ck('Vault Health survived a close/reopen, not destroyed by the panel wipe',
+   !!statsPanel().querySelector('#gvHealthSection'));
+// Optional-chained: without the fix this node is null, and a hard throw
+// here would abort the remaining ~30 assertions in this file instead of
+// reporting one failure.
+ck('...and is visible again rather than left stashed-and-hidden',
+   statsPanel().querySelector('#gvHealthSection')?.hidden === false);
+ck('...with its controls still the same wired nodes',
+   !!statsPanel().querySelector('#healthScan') && !!statsPanel().querySelector('#repairRun')
+   && !!statsPanel().querySelector('#reconcileRun') && !!statsPanel().querySelector('#dupList'));
+
+// Third open: the stash-to-<body> path has to be re-entrant, not a one-shot.
+window.tephraStats.close();
+await window.tephraStats.open();
+ck('...and survives a third open too', !!statsPanel().querySelector('#gvHealthSection'));
+ck('...exactly once, never duplicated by the relocation',
+   window.document.querySelectorAll('#gvHealthSection').length === 1,
+   window.document.querySelectorAll('#gvHealthSection').length);
+
 opened = null;
 mostLinkedRow.onclick();
 ck('clicking a most-linked row opens the note', opened === 'fb-study-guide');
