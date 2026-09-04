@@ -1,0 +1,75 @@
+# Runs the suites CONTRIBUTING.md tells every contributor to run before
+# every commit. Until this existed the only workflow here was the tag-driven
+# installer build, so 47 suites' worth of assertions ran on developer
+# machines and nowhere else.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    # A full local run is ~6 minutes, and api_dedupe.py alone is ~3.5 of
+    # them. Runners are slower than a dev machine, so this is generous
+    # rather than tight -- its job is to kill a hung suite long before
+    # GitHub's own 6-hour default would.
+    timeout-minutes: 30
+    strategy:
+      # Don't let one interpreter's failure cancel the others -- when a
+      # version-specific break happens, knowing which versions are affected
+      # is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor CONTRIBUTING.md claims and nothing enforced;
+        # 3.12 is what the Dockerfile actually ships, so it's the deployed
+        # runtime; 3.13 is what development happens on.
+        python: ["3.10", "3.12", "3.13"]
+    name: python ${{ matrix.python }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          # jsdom 29 declares node ^20.19 || ^22.13 || >=24, and 20 is what
+          # the UI suites are developed against. Those suites assert
+          # numbers -- tick counts, edge crossings, decay curves -- so the
+          # runtime they run on is not an implementation detail.
+          node-version: "20"
+          cache: npm
+
+      - name: Build .venv
+        # run-tests.sh requires .venv/bin/python specifically and refuses to
+        # fall back to whatever `python3` resolves to, because system Python
+        # has no fastapi. Built by hand rather than via `python3 run.py`:
+        # run.py bootstraps from requirements-run.txt, which pulls pywebview
+        # and its GTK stack for a window no test ever opens, and it re-execs
+        # into the venv it just made.
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Install jsdom
+        # ci, not install: package-lock.json is tracked, and the UI suites'
+        # numeric contracts deserve the exact tree they were written against.
+        run: npm ci
+
+      - name: Run all suites
+        # The whole runner, not a reimplementation of its loop. run-tests.sh
+        # hands each api_*.py suite its own throwaway TEPHRA_CONFIG_DIR --
+        # a detail those suites depend on and that took a bug to arrive at.
+        # A second copy of that setup living in CI would drift from it.
+        run: ./run-tests.sh
