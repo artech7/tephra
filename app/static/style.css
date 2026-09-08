@@ -1883,10 +1883,25 @@ input.sv-select{cursor:text}
   box-shadow:0 -2px 0 rgb(var(--acc)) inset}
 .body .sheets .sheet-body{padding:14px 14px 2px}
 .body .sheets .sheet-pane{display:none}
-.body .sheets .sheet-pane.on{display:block}
-/* The card supplies the outer frame, so the table inside drops its own
-   bottom margin and outer border rather than double-framing it. */
-.body .sheets table{margin-bottom:12px}
+/* The pane, not the note column, is the scroll container -- so a wide sheet
+   scrolls sideways inside its card instead of either overflowing the note or
+   (worse) being crammed into the column width, which is what `width:100%` on
+   a plain .body table does: 14 columns squeezed to 40px each, every cell
+   wrapping to four lines. --sheet-h caps the height so a 200-row sheet is a
+   scrollable box rather than a page you have to scroll past to reach the
+   rest of the note; the Expand button raises it (see .sheets-full). */
+.body .sheets .sheet-pane.on{display:block;overflow:auto;max-height:var(--sheet-h,58vh)}
+/* width:auto + min-width:100% is the pair that makes the above work: narrow
+   tables still fill the card, wide ones grow to their natural width and
+   scroll rather than compressing. */
+.body .sheets table{width:auto;min-width:100%;margin-bottom:0}
+.body .sheets td,.body .sheets th{white-space:nowrap}
+/* Header stays put while scrolling down -- a long sheet is unreadable
+   without it, since by row 30 you've lost track of which column is which.
+   Needs an opaque background (the card's own glass is translucent, so rows
+   would show through it) and a z-index above the cells it scrolls over. */
+.body .sheets thead th{position:sticky;top:0;z-index:2;
+  background:rgba(22,26,28,.96);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .body .sheets .sheets-hint{padding:16px;color:var(--faint);font-size:13.5px}
 /* Edit button: hidden until hover, same affordance the netdiagram card
    and embed handles use -- present when wanted, invisible when reading. */
@@ -1894,8 +1909,44 @@ input.sv-select{cursor:text}
   font-family:var(--display);padding:4px 11px;border-radius:7px;background:rgba(0,0,0,.45);
   border:1px solid var(--edge);color:var(--muted);cursor:pointer;opacity:0;
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:.2s var(--ease)}
-.body .sheets:hover .sheet-edit{opacity:1}
+.body .sheets:hover .sheet-edit,.body .sheets:hover .sheet-expand{opacity:1}
 .body .sheets .sheet-edit:hover{color:var(--paper);border-color:var(--edge-hi)}
+/* Expand sits left of Edit, same hover-to-reveal treatment. */
+.body .sheets .sheet-expand{position:absolute;top:9px;right:56px;font:inherit;font-size:11.5px;
+  font-family:var(--display);padding:4px 9px;border-radius:7px;background:rgba(0,0,0,.45);
+  border:1px solid var(--edge);color:var(--muted);cursor:pointer;opacity:0;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:.2s var(--ease)}
+.body .sheets .sheet-expand:hover{color:var(--paper);border-color:var(--edge-hi)}
+
+/* ── fullscreen reading view ──
+   The real card is *moved* into this overlay rather than cloned, so its
+   already-wired tab buttons keep working and there's no second copy of the
+   DOM to keep in sync; closing puts it back where it was. */
+#shtViewOverlay{position:fixed;inset:0;z-index:58;display:flex;flex-direction:column;
+  padding:22px;gap:12px;background:rgba(0,0,0,.72);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+#shtViewOverlay[hidden]{display:none}
+#shtViewBar{display:flex;align-items:center;gap:10px;flex:none}
+#shtViewBar .sht-title{font-family:var(--display);font-weight:600;font-size:14px;color:var(--paper)}
+#shtViewBar .sht-spacer{margin-left:auto}
+#shtViewBody{flex:1;min-height:0;display:flex}
+#shtViewBody .sheets{flex:1;min-width:0;display:flex;flex-direction:column;margin:0}
+/* In fullscreen the pane takes whatever height is left instead of the 58vh
+   cap, which is the whole point of expanding. */
+#shtViewBody .sheets .sheet-body{flex:1;min-height:0;display:flex;padding:14px}
+#shtViewBody .sheets .sheet-pane.on{flex:1;min-height:0;max-height:none;width:100%}
+/* No hover buttons in here -- the overlay has its own toolbar. */
+#shtViewBody .sheets .sheet-expand{display:none}
+
+/* Freeze the first column: pins the leftmost cell of every row while
+   scrolling sideways, so a wide sheet keeps its row labels ("Mon", a
+   person's name) visible instead of scrolling them out of view. Toggled
+   per card, not persisted -- it's a reading aid for the moment you need it,
+   and a wrong guess baked into the file would be worse than a click. */
+.body .sheets.freeze-col tbody td:first-child,
+.body .sheets.freeze-col thead th:first-child{position:sticky;left:0;z-index:1;
+  background:rgba(22,26,28,.96);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.body .sheets.freeze-col thead th:first-child{z-index:3}
 
 /* ── the grid editor overlay ── */
 #shtOverlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
@@ -1939,3 +1990,4 @@ input.sv-select{cursor:text}
 .sht-tab.on{background:rgba(var(--acc),.16);border-color:rgba(var(--acc),.45);color:rgb(var(--acc))}
 .sht-tab-add{color:var(--faint);border-style:dashed;padding:6px 11px}
 .sht-hint{margin-left:auto;padding-left:12px;color:var(--faint);font-size:11.5px;white-space:nowrap}
+.sht-btn.on{background:rgba(var(--acc),.16);border-color:rgba(var(--acc),.45);color:rgb(var(--acc))}

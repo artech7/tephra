@@ -137,6 +137,10 @@
       const on = Number(t.dataset.sheet) === n;
       t.classList.toggle('on', on);
       t.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on && viewing && viewing.card === card) {
+        const title = $('#shtViewTitle');
+        if (title) title.textContent = t.textContent;
+      }
     }
     for (const p of card.querySelectorAll('.sheet-pane')) {
       p.classList.toggle('on', Number(p.dataset.sheet) === n);
@@ -144,6 +148,16 @@
   }
 
   function enhanceSheets() {
+    // A note re-render replaces #noteBody's innerHTML, which destroys the
+    // placeholder marking where an expanded card came from -- leaving that
+    // card orphaned inside the overlay with nowhere to return to. Drop it
+    // rather than restoring a card that belongs to a note no longer shown.
+    if (viewing && !viewing.placeholder.isConnected) {
+      const ov = $('#shtViewOverlay');
+      if (ov) ov.hidden = true;
+      viewing.card.remove();
+      viewing = null;
+    }
     for (const card of document.querySelectorAll('#noteBody .sheets:not([data-processed])')) {
       card.setAttribute('data-processed', 'true');
 
@@ -160,6 +174,14 @@
         if (e.target.closest('.sheet-tab, .sheet-edit')) e.stopPropagation();
       });
 
+      const exp = document.createElement('button');
+      exp.type = 'button';
+      exp.className = 'sheet-expand';
+      exp.title = 'Expand to full screen';
+      exp.textContent = '⤢';
+      exp.addEventListener('click', (e) => { e.stopPropagation(); openViewer(card); });
+      card.appendChild(exp);
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'sheet-edit';
@@ -169,6 +191,69 @@
       card.appendChild(btn);
     }
   }
+
+  /* ── fullscreen reading view ──────────────────────────────────
+     Moves the real card into the overlay rather than cloning it: its tab
+     buttons are already wired, and one live copy means there's no second
+     DOM tree to keep in sync. A placeholder marks where it came from so
+     closing can put it back in the right place in the note. ─────────── */
+
+  let viewing = null;     // { card, placeholder }
+
+  function openViewer(card) {
+    const ov = $('#shtViewOverlay');
+    const host = $('#shtViewBody');
+    if (!ov || !host || viewing) return;
+    const placeholder = document.createElement('div');
+    placeholder.className = 'sheets-placeholder';
+    card.parentNode.insertBefore(placeholder, card);
+    host.appendChild(card);
+    viewing = { card, placeholder };
+    const first = card.querySelector('.sheet-tab');
+    $('#shtViewTitle').textContent = first ? first.textContent : 'Sheets';
+    syncFreezeLabel();
+    ov.hidden = false;
+  }
+
+  function closeViewer() {
+    const ov = $('#shtViewOverlay');
+    if (ov) ov.hidden = true;
+    if (viewing) {
+      viewing.placeholder.replaceWith(viewing.card);
+      viewing = null;
+    }
+  }
+
+  function syncFreezeLabel() {
+    const b = $('#shtFreeze');
+    if (!b || !viewing) return;
+    const on = viewing.card.classList.contains('freeze-col');
+    b.textContent = on ? 'Unfreeze first column' : 'Freeze first column';
+    b.classList.toggle('on', on);
+  }
+
+  $('#shtViewClose')?.addEventListener('click', closeViewer);
+  $('#shtFreeze')?.addEventListener('click', () => {
+    if (!viewing) return;
+    viewing.card.classList.toggle('freeze-col');
+    syncFreezeLabel();
+  });
+  $('#shtViewEdit')?.addEventListener('click', () => {
+    if (!viewing) return;
+    const card = viewing.card;
+    // Put the card back in the note first: the grid editor reads the note
+    // source, not the DOM, but leaving the card parked in a hidden overlay
+    // would strand it there if the note re-rendered underneath.
+    closeViewer();
+    openEditor(card);
+  });
+  $('#shtViewOverlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'shtViewOverlay') closeViewer();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (viewing) { e.stopPropagation(); closeViewer(); }
+  }, true);
 
   /* ── the grid editor ─────────────────────────────────────────
      One shared overlay (like #lens / the netdiagram editor), editing
