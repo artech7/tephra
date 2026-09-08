@@ -566,7 +566,14 @@
     <button type="button" class="sht-btn" id="shtViewEdit">Edit as grid</button>
     <button type="button" class="sht-btn" id="shtViewClose">Close</button>
   </div>
-  <div id="shtViewBody"></div>
+  <!-- class="body" is load-bearing, not decoration. openViewer() *moves* the
+       real card in here, and every rule that styles a sheet -- the tables,
+       the tabs, the sticky header, and crucially `.sheet-pane{display:none}`
+       -- is scoped under `.body`, because that's where a rendered note
+       lives. Without this the relocated card matches none of them: it loses
+       its borders and fonts, and every pane shows at once, which makes the
+       tabs look broken when they were working the whole time. -->
+  <div id="shtViewBody" class="body"></div>
 </div>
 
 <div id="shtOverlay" hidden>

@@ -2077,7 +2077,18 @@ input.sv-select{cursor:text}
 #shtViewBody .sheets .sheet-body{flex:1;min-height:0;display:flex;padding:14px}
 #shtViewBody .sheets .sheet-pane.on{flex:1;min-height:0;max-height:none;width:100%}
 /* No hover buttons in here -- the overlay has its own toolbar. */
-#shtViewBody .sheets .sheet-expand{display:none}
+/* Both of the card's own hover buttons are redundant in here: you're
+   already expanded, and the bar above has its own "Edit as grid". Left
+   visible they float over the table as a second set of controls that do
+   the same two things. */
+#shtViewBody .sheets .sheet-expand,
+#shtViewBody .sheets .sheet-edit{display:none}
+/* .body sets a serif reading font and a text-shadow tuned for prose over
+   the wallpaper. A full-screen grid is not prose -- the shadow smears cell
+   text at this density, and the table wants the UI font it already uses
+   in the note. */
+#shtViewBody{text-shadow:none}
+#shtViewBody .sheets table{font-family:var(--display)}
 
 /* Freeze the first column: pins the leftmost cell of every row while
    scrolling sideways, so a wide sheet keeps its row labels ("Mon", a

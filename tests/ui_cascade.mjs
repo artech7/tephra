@@ -106,5 +106,71 @@ ck('Crucible header renders with no icon slot',
    !!doc.querySelector('#studyview h3') && !doc.querySelector('#studyview .sv-mark'));
 ck('title still reads Crucible', doc.querySelector('#studyview h3').textContent === 'Crucible');
 
+/* The sheets fullscreen viewer *moves* the real card out of #noteBody and
+   into #shtViewBody. Every rule that styles a sheet is scoped under `.body`,
+   because that's where a rendered note lives -- so if the viewer's host
+   isn't a `.body` context, the relocated card matches none of them. It
+   shipped that way: unstyled tables, and `.sheet-pane{display:none}` not
+   applying, so every pane showed at once and the tabs looked broken while
+   working perfectly. This is a cascade question, which is why it's checked
+   here rather than by asserting a class name somewhere. */
+console.log('\n── a sheet moved into the fullscreen viewer keeps its styling ──');
+{
+  const host = doc.querySelector('#shtViewBody');
+  ck('the viewer host exists', !!host);
+  ck('the viewer host is a .body context, or every sheet rule stops matching',
+     !!host && host.matches('.body'), host && host.className);
+
+  // Build the same card shape render.py emits, once in the note and once in
+  // the viewer, and resolve the properties that actually broke.
+  const mk = (parent) => {
+    parent.innerHTML = `
+      <div class="sheets g2" data-sheets-index="0">
+        <div class="sheet-tabs"><button class="sheet-tab on" data-sheet="0">A</button></div>
+        <div class="sheet-body">
+          <div class="sheet-pane on" data-sheet="0"><table><thead><tr><th>H</th></tr></thead>
+            <tbody><tr><td>c</td></tr></tbody></table></div>
+          <div class="sheet-pane" data-sheet="1"><table><tbody><tr><td>d</td></tr></tbody></table></div>
+        </div>
+      </div>`;
+    return parent.querySelector('.sheets');
+  };
+  const inNote = mk(doc.querySelector('#noteBody'));
+  const inView = mk(host);
+
+  const winner = (el, prop) => rulesFor(el, prop).pop();
+  const off = (card) => card.querySelectorAll('.sheet-pane')[1];
+  const cell = (card) => card.querySelector('td');
+
+  ck('an inactive pane resolves display:none inside the note',
+     winner(off(inNote), 'display')?.value === 'none', winner(off(inNote), 'display')?.sel);
+  ck('...and still does inside the viewer -- the tab-switching bug',
+     winner(off(inView), 'display')?.value === 'none', winner(off(inView), 'display')?.sel);
+
+  ck('a cell resolves a border inside the note', !!winner(cell(inNote), 'border'));
+  ck('...and the viewer resolves the same border rule -- the theming bug',
+     winner(cell(inView), 'border')?.sel === winner(cell(inNote), 'border')?.sel,
+     winner(cell(inView), 'border')?.sel);
+
+  ck('cells wrap in the viewer too, not just in the note',
+     winner(cell(inView), 'white-space')?.value === 'normal',
+     winner(cell(inView), 'white-space')?.sel);
+
+  ck('the tab is styled in the viewer, not a bare button',
+     !!winner(inView.querySelector('.sheet-tab'), 'border-radius'));
+
+  // The viewer's own overrides must still beat the .body rules they exist to
+  // override -- an id selector outranks a class chain, but only if it's
+  // actually there.
+  const expand = doc.createElement('button');
+  expand.className = 'sheet-expand';
+  inView.appendChild(expand);
+  ck('the card\u2019s own Expand button is hidden in the viewer',
+     winner(expand, 'display')?.value === 'none', winner(expand, 'display')?.sel);
+
+  doc.querySelector('#noteBody').innerHTML = '';
+  host.innerHTML = '';
+}
+
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
