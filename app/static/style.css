@@ -2014,7 +2014,29 @@ input.sv-select{cursor:text}
    tables still fill the card, wide ones grow to their natural width and
    scroll rather than compressing. */
 .body .sheets table{width:auto;min-width:100%;margin-bottom:0}
-.body .sheets td,.body .sheets th{white-space:nowrap}
+/* Cells wrap. They used to be white-space:nowrap, which meant one long cell
+   set the width of its whole column and a sheet with a mix of short and
+   long cells -- which is most of them -- scrolled sideways for the sake of
+   a handful of cells. Wrapping trades that horizontal scroll for a taller
+   row, which is the cheaper direction to grow: the note already scrolls
+   vertically. vertical-align:top so a two-line cell doesn't leave its
+   short neighbours floating in the middle of the row. */
+.body .sheets td,.body .sheets th{white-space:normal;overflow-wrap:break-word;
+  vertical-align:top;min-width:5ch}
+/* Auto layout sizes a column to its longest cell and only wraps once it
+   runs out of room, so without a cap one 400-character cell still gets a
+   400-character column. This is the cap for columns nobody has resized;
+   a dragged column overrides it through the <colgroup> below. max-width on
+   a table cell is a grey area in the spec, but Blink and WebKit both clamp
+   the preferred width with it, which is the two engines this app runs in
+   (Chrome and WKWebView). */
+.body .sheets .sheet-pane:not(.sheet-fixed) td{max-width:44ch}
+/* Once any column has an explicit width, the whole table switches to fixed
+   layout -- under auto layout a <col> width is only a suggestion and a long
+   cell will still blow past it, which makes a drag look like it did
+   nothing. Fixed layout also stops one edit to a cell from silently
+   re-sizing every other column. */
+.body .sheets .sheet-pane.sheet-fixed table{table-layout:fixed}
 /* Header stays put while scrolling down -- a long sheet is unreadable
    without it, since by row 30 you've lost track of which column is which.
    Needs an opaque background (the card's own glass is translucent, so rows
@@ -2110,3 +2132,25 @@ input.sv-select{cursor:text}
 .sht-tab-add{color:var(--faint);border-style:dashed;padding:6px 11px}
 .sht-hint{margin-left:auto;padding-left:12px;color:var(--faint);font-size:11.5px;white-space:nowrap}
 .sht-btn.on{background:rgba(var(--acc),.16);border-color:rgba(var(--acc),.45);color:rgb(var(--acc))}
+
+/* ── column resize handles ──
+   A grab strip on the right edge of each header cell. Sits inside the
+   sticky <th> so it rides along when the header stays put on scroll, and
+   is 9px wide with a 1px visible line -- the same "bigger target than it
+   looks" trick the image and mermaid resize handles use, because a 1px
+   hit area is unusable with a trackpad. */
+.body .sheets th{position:relative}
+.body .sheets .sheet-grip{position:absolute;top:0;right:-5px;width:9px;height:100%;
+  cursor:col-resize;z-index:3;background:transparent;border:0;padding:0;
+  touch-action:none;-webkit-user-select:none;user-select:none}
+.body .sheets .sheet-grip::after{content:'';position:absolute;top:15%;bottom:15%;left:4px;width:1px;
+  background:var(--edge);opacity:0;transition:.16s var(--ease)}
+.body .sheets:hover .sheet-grip::after{opacity:1}
+.body .sheets .sheet-grip:hover::after,
+.body .sheets .sheet-grip.dragging::after{opacity:1;background:rgb(var(--acc));
+  top:0;bottom:0;left:4px;width:2px}
+/* While dragging, the whole document gets col-resize and text selection is
+   off -- otherwise sweeping across the table selects cell text instead of
+   resizing, and the cursor flickers back to a caret between cells. */
+body.sheet-resizing{cursor:col-resize!important;-webkit-user-select:none;user-select:none}
+body.sheet-resizing .sheet-grip::after{opacity:1}

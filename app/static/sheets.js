@@ -39,6 +39,27 @@
   // A separator row: only dashes and optional alignment colons.
   const SEP_CELL_RE = /^:?-+:?$/;
 
+  // A column's width is its dash count in the delimiter row -- see the long
+  // note next to _sheet_widths in render.py, which is the authority on the
+  // format and must agree with these three numbers. 3 or fewer means unset.
+  const W_UNSET = 3, W_MIN = 6, W_MAX = 60;
+
+  function widthFromCell(cell) {
+    const n = (String(cell).match(/-/g) || []).length;
+    return n <= W_UNSET ? null : Math.max(W_MIN, Math.min(W_MAX, n));
+  }
+
+  // Rebuild one delimiter cell at the given width, keeping whatever
+  // alignment colons it already had -- a resize must not silently
+  // re-align a column that was deliberately centred or right-aligned.
+  function widthToCell(width, prev) {
+    const p = String(prev || '');
+    const left = p.startsWith(':') ? ':' : '';
+    const right = p.endsWith(':') ? ':' : '';
+    const n = width == null ? 3 : Math.max(W_MIN, Math.min(W_MAX, width));
+    return left + '-'.repeat(n) + right;
+  }
+
   // Split one `| a | b |` row into cells, honouring GFM's `\|` escape so a
   // cell containing a literal pipe (most usefully [[Note|shown]]) survives
   // as one cell instead of splitting in two.
@@ -73,7 +94,13 @@
       // fence) still gets a sheet, matching render.py's own fallback.
       if (!cur) { cur = { name: 'Sheet 1', rows: [] }; groups.push(cur); }
       const cells = splitRow(line);
-      if (isSeparatorRow(cells)) continue;
+      // The delimiter row carries the column widths, so it's kept rather
+      // than skipped -- but only the first one per sheet, which is the one
+      // belonging to the sheet's own table.
+      if (isSeparatorRow(cells)) {
+        if (!cur.sep) cur.sep = cells;
+        continue;
+      }
       cur.rows.push(cells);
     }
     return groups.map((g) => {
@@ -87,7 +114,12 @@
         while (row.length < width) row.push('');
         return row;
       });
-      return { name: g.name, headers, body };
+      const sep = g.sep || [];
+      // One entry per header, so a column added by hand to the header row
+      // without a matching delimiter cell still has a slot to be resized.
+      const widths = headers.map((_, i) => widthFromCell(sep[i] || ''));
+      const align = headers.map((_, i) => sep[i] || '---');
+      return { name: g.name, headers, body, widths, align };
     });
   }
 
@@ -106,7 +138,12 @@
       out.push('## ' + String(s.name || 'Sheet').replace(/\r?\n/g, ' ').trim());
       out.push('');
       out.push('| ' + s.headers.map(escapeCell).join(' | ') + ' |');
-      out.push('| ' + s.headers.map(() => '---').join(' | ') + ' |');
+      // Widths (and any alignment colons) survive a grid edit: writing a
+      // bare '---' here would quietly reset every column the moment
+      // someone typed in a cell.
+      out.push('| ' + s.headers.map((_, i) =>
+        widthToCell(s.widths ? s.widths[i] : null,
+                    s.align ? s.align[i] : '---')).join(' | ') + ' |');
       for (const row of s.body) {
         out.push('| ' + s.headers.map((_, i) => escapeCell(row[i])).join(' | ') + ' |');
       }
@@ -128,6 +165,146 @@
       if (i !== index) return whole;
       return '```sheets\n' + newInnerText + '\n```';
     });
+  }
+
+  /* ── persisting a column resize ────────────────────────────────
+     Deliberately not a serializeSheets() round-trip. Re-emitting the whole
+     group to change a column width would rewrite every cell in it, and a
+     resize has no business touching cell text at all -- one bug in the
+     `\|` escaping and dragging a column border would corrupt a wikilink.
+     This rewrites exactly one line: the target sheet's delimiter row.
+     ─────────────────────────────────────────────────────────────────── */
+
+  function setSheetWidths(body, fenceIndex, sheetIndex, widths) {
+    let f = -1;
+    return body.replace(SHEETS_FENCE_RE_G, (whole) => {
+      f++;
+      if (f !== fenceIndex) return whole;
+      const open = whole.match(/^```sheets[ \t]*\n/)[0];
+      const inner = whole.replace(/^```sheets[ \t]*\n/, '').replace(/\n?```[ \t]*$/, '');
+      let sheet = -1, done = false;
+      const lines = inner.split('\n').map((line) => {
+        if (done) return line;
+        if (SHEET_HEAD_RE.test(line)) { sheet++; return line; }
+        if (!/^\s*\|/.test(line)) return line;
+        // A table with no `##` heading above it is sheet 0, matching
+        // parseSheets and render.py's shared fallback.
+        if (sheet === -1) sheet = 0;
+        if (sheet !== sheetIndex) return line;
+        const cells = splitRow(line);
+        if (!isSeparatorRow(cells)) return line;
+        done = true;
+        return '| ' + cells.map((c, i) => widthToCell(widths[i], c)).join(' | ') + ' |';
+      });
+      return open + lines.join('\n') + '\n```';
+    });
+  }
+
+  /* ── reading view: column resizing ─────────────────────────────
+     The stored unit is characters, so a drag in pixels has to be converted
+     -- measured off the table's own font rather than assumed, because the
+     appearance panel can change the note font size underneath us and a
+     hardcoded px-per-char would drift from what the delimiter row means.
+     ─────────────────────────────────────────────────────────────────── */
+
+  function charPx(table) {
+    const probe = document.createElement('span');
+    probe.textContent = '0'.repeat(20);
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    table.appendChild(probe);
+    const w = probe.getBoundingClientRect().width / 20;
+    probe.remove();
+    return w || 8;
+  }
+
+  function colsOf(table) {
+    let cg = table.querySelector('colgroup');
+    const headers = table.querySelectorAll('thead th');
+    if (!cg) {
+      cg = document.createElement('colgroup');
+      for (let i = 0; i < headers.length; i++) cg.appendChild(document.createElement('col'));
+      table.insertBefore(cg, table.firstChild);
+    }
+    // A table whose delimiter row had fewer cells than its header row comes
+    // back with a short colgroup; pad it so every header has a col to size.
+    while (cg.children.length < headers.length) cg.appendChild(document.createElement('col'));
+    return [...cg.children];
+  }
+
+  function widthsOf(cols) {
+    return cols.map((c) => {
+      const m = /([\d.]+)ch/.exec(c.style.width || '');
+      return m ? Math.round(Number(m[1])) : null;
+    });
+  }
+
+  function attachGrips(card) {
+    for (const pane of card.querySelectorAll('.sheet-pane')) {
+      const table = pane.querySelector('table');
+      if (!table) continue;
+      const sheetIndex = Number(pane.dataset.sheet);
+      table.querySelectorAll('thead th').forEach((th, c) => {
+        if (th.querySelector('.sheet-grip')) return;
+        const grip = document.createElement('span');
+        grip.className = 'sheet-grip';
+        grip.title = 'Drag to resize; double-click to reset';
+        th.appendChild(grip);
+
+        grip.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const cols = colsOf(table);
+          const unit = charPx(table);
+          const startX = e.clientX;
+          const startCh = widthsOf(cols)[c] ?? Math.round(th.getBoundingClientRect().width / unit);
+          grip.classList.add('dragging');
+          document.body.classList.add('sheet-resizing');
+          // Fixed layout has to go on *now*, not on release: under auto
+          // layout the <col> width is only a hint, so the column wouldn't
+          // visibly follow the pointer and the drag would feel broken.
+          pane.classList.add('sheet-fixed');
+          grip.setPointerCapture?.(e.pointerId);
+
+          const onMove = (ev) => {
+            const ch = Math.max(W_MIN, Math.min(W_MAX,
+              Math.round(startCh + (ev.clientX - startX) / unit)));
+            cols[c].style.width = ch + 'ch';
+          };
+          const onUp = () => {
+            grip.removeEventListener('pointermove', onMove);
+            grip.removeEventListener('pointerup', onUp);
+            grip.removeEventListener('pointercancel', onUp);
+            grip.classList.remove('dragging');
+            document.body.classList.remove('sheet-resizing');
+            saveWidths(card, sheetIndex, widthsOf(colsOf(table)));
+          };
+          grip.addEventListener('pointermove', onMove);
+          grip.addEventListener('pointerup', onUp);
+          grip.addEventListener('pointercancel', onUp);
+        });
+
+        // Double-click a grip to hand the column back to auto sizing --
+        // otherwise the only way out of a width you regret is the source
+        // editor, since there's no width you can drag to that means "auto".
+        grip.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const cols = colsOf(table);
+          cols[c].style.width = '';
+          const w = widthsOf(cols);
+          if (!w.some((x) => x != null)) pane.classList.remove('sheet-fixed');
+          saveWidths(card, sheetIndex, w);
+        });
+      });
+    }
+  }
+
+  function saveWidths(card, sheetIndex, widths) {
+    const fenceIndex = Number(card.dataset.sheetsIndex);
+    const slug = window.tephraCurrentSlug?.();
+    if (!slug || Number.isNaN(fenceIndex)) return;
+    window.tephraSaveNoteBody?.(slug, (body) =>
+      setSheetWidths(body, fenceIndex, sheetIndex, widths));
   }
 
   /* ── reading view: tab switching ──────────────────────────── */
@@ -173,6 +350,8 @@
       card.addEventListener('dblclick', (e) => {
         if (e.target.closest('.sheet-tab, .sheet-edit')) e.stopPropagation();
       });
+
+      attachGrips(card);
 
       const exp = document.createElement('button');
       exp.type = 'button';
@@ -301,7 +480,7 @@
       return whole;
     });
     const model = parseSheets(raw);
-    if (!model.length) model.push({ name: 'Sheet 1', headers: ['Column 1'], body: [['']] });
+    if (!model.length) model.push({ name: 'Sheet 1', headers: ['Column 1'], body: [['']], widths: [null], align: ['---'] });
     ed = { card, index, slug: window.tephraCurrentSlug?.(), model, active: 0 };
     overlay.hidden = false;
     renderGrid();
@@ -347,7 +526,7 @@
     add.textContent = '+';
     add.title = 'Add a sheet';
     add.addEventListener('click', () => mutate(() => {
-      ed.model.push({ name: 'Sheet ' + (ed.model.length + 1), headers: ['Column 1'], body: [['']] });
+      ed.model.push({ name: 'Sheet ' + (ed.model.length + 1), headers: ['Column 1'], body: [['']], widths: [null], align: ['---'] });
       ed.active = ed.model.length - 1;
     }));
     tabsHost.appendChild(add);
@@ -380,6 +559,11 @@
       del.disabled = sheet.headers.length <= 1;
       del.addEventListener('click', () => mutate(() => {
         sheet.headers.splice(c, 1);
+        // Widths and alignment are per-column too, so they shift with the
+        // columns -- leaving them behind would slide every width one
+        // column to the left.
+        sheet.widths?.splice(c, 1);
+        sheet.align?.splice(c, 1);
         for (const row of sheet.body) row.splice(c, 1);
       }));
       th.appendChild(del);
@@ -475,6 +659,8 @@
     const s = currentSheet();
     if (!s) return;
     s.headers.push('Column ' + (s.headers.length + 1));
+    (s.widths ||= []).push(null);      // a new column starts at auto width
+    (s.align ||= []).push('---');
     for (const row of s.body) row.push('');
   }));
   $('#shtDelSheet')?.addEventListener('click', () => {
@@ -492,6 +678,8 @@
   window.tephraSheets = {
     parse: parseSheets,
     serialize: serializeSheets,
+    widths: { parse: widthFromCell, cell: widthToCell, set: setSheetWidths,
+              MIN: W_MIN, MAX: W_MAX, UNSET: W_UNSET },
     setBody: setSheetsBody,
     enhance: enhanceSheets,
   };

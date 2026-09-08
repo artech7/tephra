@@ -431,6 +431,88 @@ def _callout_sub(body: str, stash, on_wiki, used: list) -> str:
 SHEETS_RE = re.compile(r"^```sheets[ \t]*\n(?P<content>.*?)^```[ \t]*$", re.M | re.S)
 _SHEET_HEAD_RE = re.compile(r"^##[ \t]+(?P<name>.+?)[ \t]*$", re.M)
 
+# ── column widths ──
+#
+# A column's width is the number of dashes in its cell of the table's
+# delimiter row: `| --- | ------------------------- |` is a narrow column
+# next to a wide one. That row is already the place GFM keeps per-column
+# metadata (it's where alignment colons live), so this needs no new syntax
+# and stays a completely ordinary markdown table everywhere else -- GitHub
+# and Obsidian render it exactly as before, because dash *count* has no
+# meaning in the spec beyond "at least one".
+#
+# It also reads the way it renders: a hand-aligned table already has long
+# delimiters under wide columns, so the raw file looks like the grid it
+# produces. The cost is resolution -- one dash per character -- and that a
+# markdown formatter which normalises tables will reset widths to auto,
+# which is a graceful loss rather than a corruption.
+#
+# 3 or fewer dashes means "unset": `| --- |` is the canonical minimal form
+# nobody types deliberately as a width, and every table written before this
+# existed uses it. Explicit widths clamp to _SHEET_W_MIN.._SHEET_W_MAX so a
+# table someone aligned to a 200-character cell can't reintroduce exactly
+# the horizontal scrolling that wrapping is here to remove.
+_SHEET_W_UNSET = 3
+_SHEET_W_MIN = 6
+_SHEET_W_MAX = 60
+_SEP_CELL_RE = re.compile(r"^:?-+:?$")
+
+
+def _split_row(line: str) -> list[str]:
+    r"""One `| a | b |` row into cells, honouring GFM's `\|` escape."""
+    t = line.strip()
+    if t.startswith("|"):
+        t = t[1:]
+    if t.endswith("|") and not t.endswith("\\|"):
+        t = t[:-1]
+    cells, cur, i = [], "", 0
+    while i < len(t):
+        if t[i] == "\\" and i + 1 < len(t) and t[i + 1] == "|":
+            cur += "|"
+            i += 2
+            continue
+        if t[i] == "|":
+            cells.append(cur.strip())
+            cur = ""
+            i += 1
+            continue
+        cur += t[i]
+        i += 1
+    cells.append(cur.strip())
+    return cells
+
+
+def _sheet_widths(table_md: str) -> list[int | None]:
+    """Per-column widths in characters from the first delimiter row found,
+    None for any column left at the default. [] if there's no table."""
+    for line in table_md.split("\n"):
+        if "|" not in line:
+            continue
+        cells = _split_row(line)
+        if not cells or not all(_SEP_CELL_RE.match(c) for c in cells if c):
+            continue
+        if not any(c for c in cells):
+            continue
+        out: list[int | None] = []
+        for c in cells:
+            n = c.count("-")
+            out.append(None if n <= _SHEET_W_UNSET
+                       else max(_SHEET_W_MIN, min(_SHEET_W_MAX, n)))
+        return out
+    return []
+
+
+def _colgroup(widths: list[int | None]) -> str:
+    """A <colgroup> for the widths, or '' if every column is default. ch
+    rather than px because the unit the dash count actually means is
+    characters -- and it keeps a width honest across theme font sizes."""
+    if not any(w for w in widths):
+        return ""
+    cols = "".join(
+        f'<col style="width:{w}ch">' if w else "<col>" for w in widths
+    )
+    return f"<colgroup>{cols}</colgroup>"
+
 
 def _parse_sheets(content: str) -> list[tuple[str, str]]:
     """[(sheet name, that sheet's markdown), ...] in document order."""
@@ -469,7 +551,20 @@ def _sheets_html(content: str, stash, on_wiki, used: list, index: int) -> str:
         used.extend(embed_used)
         inner_text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), inner_text)
         inner = _unwrap_placeholder_p(md.render(inner_text))
-        panes.append(f'<div class="sheet-pane{on}" data-sheet="{i}" '
+        # Widths come from the delimiter row, which markdown-it drops (it
+        # keeps only the alignment it encodes), so they're read off the raw
+        # markdown and injected as a <colgroup>. Only the first table in a
+        # sheet gets them -- a sheet is one table by design, and a second
+        # one has no delimiter row of its own to have been dragged.
+        widths = _sheet_widths(table_md)
+        cg = _colgroup(widths)
+        if cg and "<table>" in inner:
+            inner = inner.replace("<table>", f"<table>{cg}", 1)
+        # table-layout:fixed is what makes an explicit width actually hold
+        # and force a wrap; auto layout treats it as a hint and will still
+        # stretch a column to fit its longest cell.
+        fixed = " sheet-fixed" if cg else ""
+        panes.append(f'<div class="sheet-pane{on}{fixed}" data-sheet="{i}" '
                      f'role="tabpanel">{inner}</div>')
     return (f'<div class="sheets g2" data-sheets-index="{index}">'
             f'<div class="sheet-tabs" role="tablist">{"".join(tabs)}</div>'
