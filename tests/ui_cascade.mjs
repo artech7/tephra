@@ -172,5 +172,66 @@ console.log('\n── a sheet moved into the fullscreen viewer keeps its styling
   host.innerHTML = '';
 }
 
+/* The four tab windows -- Overview, Links, Crucible, and Crucible's
+   Formatting & Uploads reference -- are full-bleed panels that sit on top of
+   a note rather than beside it. What's behind them is text you're trying to
+   stop reading, not wallpaper you're trying to see, so neither their blur nor
+   their tint may come from the theme sliders: both bottom out at values that
+   leave the note underneath legible straight through the panel.
+
+   This is checked rather than trusted because it has now regressed twice --
+   once when a stale style.css was copied over the fix, and once when a
+   restore picked the commit immediately before it. Both times the symptom
+   was the same and neither was caught by anything. */
+console.log('\n── panels that sit on top of notes never take blur from the slider ──');
+{
+  const veiled = ['#svFormats', '#studyview', '#statsview', '#linksview'];
+  const chrome = ['.topbar', '.sidebar', '.editor', '.context'];
+
+  // Read the declarations straight out of the stylesheet: these are the
+  // values that matter and they're set on the rule, not resolved per-element.
+  const declFor = (sel, prop) => {
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m, found = null;
+    while ((m = re.exec(css))) {
+      const sels = m[1].split(',').map((x) => x.trim());
+      if (!sels.includes(sel)) continue;
+      const pm = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(m[2]);
+      if (pm) found = pm[1].trim();
+    }
+    return found;
+  };
+
+  for (const sel of veiled) {
+    const bf = declFor(sel, 'backdrop-filter');
+    ck(`${sel} declares a backdrop blur`, !!bf, bf);
+    ck(`${sel} does not take its blur from the --blur slider`,
+       !!bf && !/blur\(var\(--blur\)\)/.test(bf), bf);
+    ck(`${sel} pins it to --blur-fixed instead`,
+       !!bf && bf.includes('--blur-fixed'), bf);
+    const bg = declFor(sel, 'background');
+    ck(`${sel} floors its tint with --veil-ink rather than raw --ink`,
+       !!bg && bg.includes('--veil-ink') && !bg.includes('calc(var(--ink)'),
+       bg && bg.slice(0, 54));
+  }
+
+  // The counterpart: the frosted chrome beside a note is exactly what the
+  // slider is for, so pinning it too would be the opposite bug.
+  const chromeBf = declFor('.topbar', 'backdrop-filter');
+  ck('the chrome beside a note still follows the slider',
+     !!chromeBf && chromeBf.includes('var(--blur)') && !chromeBf.includes('--blur-fixed'),
+     chromeBf);
+
+  // Both floors have to actually be floors, not aliases of the slider.
+  const root = /:root\{([\s\S]*?)\}/.exec(css);
+  const fixed = /--blur-fixed\s*:\s*([^;]+)/.exec(root[1]);
+  const veil = /--veil-ink\s*:\s*([^;]+)/.exec(root[1]);
+  ck('--blur-fixed is a constant, not derived from --blur',
+     !!fixed && !fixed[1].includes('var(--blur)'), fixed && fixed[1].trim());
+  ck('--veil-ink is a max() floor over --ink, so the theme can raise but not lower it',
+     !!veil && veil[1].includes('max(') && veil[1].includes('var(--ink)'),
+     veil && veil[1].trim());
+}
+
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
