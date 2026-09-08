@@ -38,10 +38,6 @@ function toast(msg, ms = 2600) {
 const state = { slug: null, note: null, notes: [], editing: false, dirty: false,
                 sort: 'updated', tag: '', media: [], mediaOpen: {} };
 
-// Set by showVaultName(), read by the Vault Health cache so a scan saved
-// under one vault never gets replayed as if it described a different one.
-let currentVaultPath = null;
-
 // study.js is a separate file so this one stays readable; these three are the
 // only things it needs from here.
 window.tephraApi = api;
@@ -96,21 +92,7 @@ const WALLS = {
   slate: 'linear-gradient(150deg,#0E1C26 0%,#22384A 38%,#415C6E 72%,#16242E 100%)',
   ember: 'linear-gradient(150deg,#180B07 0%,#4E2317 40%,#9A4E2C 74%,#251009 100%)',
   bloom: 'linear-gradient(150deg,#1E0B26 0%,#4C1D46 40%,#8E3A62 72%,#25102A 100%)',
-  // A soft diagonal band of overlapping ellipses standing in for the Milky
-  // Way, painted on top of the same wash the old solid gradient used
-  // (last in the list = bottom layer). Screen-blended (see the
-  // background-blend-mode next to #wall in style.css) so they read as glow
-  // added onto the sky rather than flat colored patches, which is what
-  // actually survives being seen mostly through blurred glass rather than
-  // head-on -- soft edges and additive light hold up under blur; a hard
-  // shape just turns into a muddy smear.
-  night: `radial-gradient(46% 12% at 16% 18%,rgba(214,222,255,.11),transparent 70%),
-          radial-gradient(52% 14% at 31% 30%,rgba(220,202,255,.12),transparent 70%),
-          radial-gradient(58% 16% at 48% 42%,rgba(204,218,255,.14),transparent 70%),
-          radial-gradient(54% 15% at 65% 54%,rgba(214,198,255,.12),transparent 70%),
-          radial-gradient(48% 13% at 81% 66%,rgba(196,214,255,.10),transparent 70%),
-          radial-gradient(40% 11% at 94% 76%,rgba(190,208,255,.07),transparent 70%),
-          linear-gradient(160deg,#03050C 0%,#0A1130 35%,#161A45 65%,#050614 100%)`,
+  night: 'linear-gradient(160deg,#03050C 0%,#0A1130 35%,#161A45 65%,#050614 100%)',
 };
 
 const hex = (r) => '#' + r.split(',').map((n) => (+n).toString(16).padStart(2, '0')).join('');
@@ -537,6 +519,7 @@ async function openNote(slug, push = true) {
   enhanceCodeBlocks();
   enhanceMermaid();
   window.tephraNetDiagram?.enhance();
+  window.tephraSheets?.enhance();
   $('#noteSrc').value = note.body;
   $('#noteSrc').hidden = true;
   $('#noteBody').hidden = false;
@@ -1194,6 +1177,7 @@ async function setEditing(on) {
     enhanceCodeBlocks();
     enhanceMermaid();
     window.tephraNetDiagram?.enhance();
+    window.tephraSheets?.enhance();
     $('#metaWords').textContent = note.words + ' words';
     $('#metaLinks').textContent = note.links_out + ' links out';
     $('#metaBack').textContent = note.backlinks.length + ' backlinks';
@@ -1689,6 +1673,7 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
   enhanceCodeBlocks();
   enhanceMermaid();
   window.tephraNetDiagram?.enhance();
+  window.tephraSheets?.enhance();
 }
 
 // The default cap on a rendered code block's height (see .body pre in
@@ -2564,7 +2549,6 @@ const vaultsEl = () => $('#vaults');
 async function showVaultName() {
   try {
     const v = await api('/vault/info');
-    currentVaultPath = v.vault;
     const name = String(v.vault).split('/').filter(Boolean).pop() || v.vault;
     $('#crumbTitle').textContent = name;
     $('#vaultCrumb').title = v.vault + ' — click to switch vaults';
@@ -2647,7 +2631,6 @@ async function refreshAfterVaultSwitch() {
   if (state.notes[0]) await openNote(state.notes[0].slug, false);
   await renderVaults();
   await showVaultName();
-  hydrateHealthScan();
   window.tephraLinks?.poll();
   window.tephraStudy?.refresh();
 }
@@ -2876,6 +2859,34 @@ function describeRepair(r) {
 /* Vault Health, in the settings drawer: the auto-linker that produced nested
    links is fixed, but a vault it already damaged stays damaged until
    something rewrites it — so this has to be reachable, not just an endpoint. */
+$('#auditRun').onclick = async () => {
+  const out = $('#auditResult');
+  out.textContent = 'Checking…';
+  try {
+    const [a, preview] = await Promise.all([
+      api('/audit'),
+      api('/repair?dry_run=true', { method: 'POST' }),
+    ]);
+    if (a.clean) {
+      out.textContent = 'No malformed links found.';
+      $('#repairRun').disabled = true;
+      return;
+    }
+    const n = preview.changed;
+    out.innerHTML = `<b>${n} note${n === 1 ? '' : 's'}</b> would be rewritten.`;
+    const p = preview.notes.find((x) => x.preview && x.preview.before);
+    if (p) {
+      const box = document.createElement('div');
+      box.className = 'auditsample';
+      box.innerHTML = `<div class="abefore"></div><div class="aafter"></div>`;
+      box.querySelector('.abefore').textContent = p.preview.before;
+      box.querySelector('.aafter').textContent = p.preview.after;
+      out.appendChild(box);
+    }
+    $('#repairRun').disabled = false;
+  } catch { out.textContent = 'Could not run the check.'; }
+};
+
 $('#repairRun').onclick = async () => {
   const out = $('#auditResult');
   out.textContent = 'Repairing…';
@@ -2884,12 +2895,21 @@ $('#repairRun').onclick = async () => {
     out.textContent = describeRepair(r) + '.';
     $('#repairRun').disabled = true;
     toast(describeRepair(r), 6000);
-    clearHealthScan(); // repair invalidates whatever the last scan found here
     await loadList();
     await loadGraph();
     if (state.slug) await openNote(state.slug, false);
     window.tephraStudy?.refresh();
   } catch { out.textContent = 'Repair failed.'; }
+};
+
+$('#btnReindex').onclick = async () => {
+  const out = $('#auditResult');
+  out.textContent = 'Rebuilding…';
+  try {
+    const r = await api('/reindex', { method: 'POST' });
+    await loadList(); await loadGraph(); await loadMedia();
+    out.textContent = `Reindexed ${r.notes} notes.`;
+  } catch { out.textContent = 'Reindex failed.'; }
 };
 
 // One note-line within a duplicate-pair card: title (click to open), how
@@ -2936,7 +2956,6 @@ function dupNoteRow(slug, title, updatedIso, isNewer) {
       .filter((n) => n.dataset.slug === slug)
       .forEach((n) => n.closest('.dup-pair')?.remove());
     updateDupCount();
-    clearHealthScan(); // the cached scan's duplicate list no longer matches the vault
   };
   row.appendChild(del);
   return row;
@@ -2958,6 +2977,36 @@ $('#dupFilter').oninput = (e) => {
     card.style.display = !q || card.textContent.toLowerCase().includes(q) ? '' : 'none';
   }
   updateDupCount();
+};
+
+$('#dupRun').onclick = async () => {
+  const out = $('#dupResult'), list = $('#dupList');
+  // O(n^2) over every note's content -- on a vault of ~100 notes this is
+  // real seconds, not instant, and a static "Scanning…" is indistinguishable
+  // from hung. A running clock at least proves it's still alive.
+  const startedAt = Date.now();
+  list.innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
+  out.textContent = 'Scanning… 0s';
+  const tick = setInterval(() => {
+    out.textContent = `Scanning… ${Math.round((Date.now() - startedAt) / 1000)}s`;
+  }, 1000);
+  try {
+    const { pairs } = await api('/duplicates');
+    if (!pairs.length) { out.textContent = 'No near-duplicate notes found.'; return; }
+    for (const p of pairs) {
+      const card = document.createElement('div');
+      card.className = 'dup-pair';
+      const pct = document.createElement('div');
+      pct.className = 'dup-pct'; pct.textContent = Math.round(p.similarity * 100) + '% similar';
+      card.appendChild(pct);
+      const aNewer = (p.a_updated || '') > (p.b_updated || '');
+      card.appendChild(dupNoteRow(p.a_slug, p.a_title, p.a_updated, aNewer));
+      card.appendChild(dupNoteRow(p.b_slug, p.b_title, p.b_updated, !aNewer));
+      list.appendChild(card);
+    }
+    updateDupCount();
+  } catch { out.textContent = 'Could not scan for duplicates.'; }
+  finally { clearInterval(tick); }
 };
 
 /* Study guide index pages accumulate every topic and every guide that ever
@@ -3061,209 +3110,20 @@ function renderReconcileReport(r) {
   updateReconcileCount();
 }
 
-/* Scan vault: runs the four Vault Health checks in one pass instead of
-   requiring four separate button clicks. Each step is its own try/catch --
-   if one fails (e.g. an admin-gated dry-run 401ing because notes are
-   locked, which pops the admin pane via api()'s own 401 handler) the rest
-   still run rather than the whole scan dying on the first problem, so a
-   locked vault still gets its read-only Duplicates check even though
-   Links/Index/Study-guide can't. */
-function healthSetScanning(on) {
-  const card = $('#healthCard');
-  card.classList.toggle('scanning', on);
-  $('#healthScan').disabled = on;
-  $('#healthStatus').querySelector('.pulse').hidden = !on;
-}
-
-// Each of these renders one check's result into the same DOM the live scan
-// always used, given that check's raw API response -- shared by the live
-// scan and by hydrateHealthScan() below, which replays cached responses
-// after a reload instead of re-deriving them. Returns a one-line problem
-// summary for the final status line, or null if that check found nothing.
-function renderAuditCheck(a, preview) {
-  if (a.clean) {
-    $('#auditResult').textContent = 'No malformed links found.';
-    $('#repairRun').disabled = true;
-    return null;
-  }
-  const n = preview.changed;
-  $('#auditResult').innerHTML = `<b>${n} note${n === 1 ? '' : 's'}</b> would be rewritten.`;
-  const p = preview.notes.find((x) => x.preview && x.preview.before);
-  if (p) {
-    const box = document.createElement('div');
-    box.className = 'auditsample';
-    box.innerHTML = `<div class="abefore"></div><div class="aafter"></div>`;
-    box.querySelector('.abefore').textContent = p.preview.before;
-    box.querySelector('.aafter').textContent = p.preview.after;
-    $('#auditResult').appendChild(box);
-  }
-  $('#repairRun').disabled = false;
-  return `${n} link${n === 1 ? '' : 's'} to repair`;
-}
-
-function renderReindexCheck(count) {
-  $('#reindexResult').textContent = `Reindexed ${count} notes.`;
-}
-
-function renderDuplicatesCheck(pairs) {
-  const list = $('#dupList');
-  list.innerHTML = '';
-  if (!pairs.length) {
-    $('#dupResult').textContent = 'No near-duplicate notes found.';
-    $('#dupFilter').hidden = true;
-    return null;
-  }
-  for (const p of pairs) {
-    const card = document.createElement('div');
-    card.className = 'dup-pair';
-    const pct = document.createElement('div');
-    pct.className = 'dup-pct'; pct.textContent = Math.round(p.similarity * 100) + '% similar';
-    card.appendChild(pct);
-    const aNewer = (p.a_updated || '') > (p.b_updated || '');
-    card.appendChild(dupNoteRow(p.a_slug, p.a_title, p.a_updated, aNewer));
-    card.appendChild(dupNoteRow(p.b_slug, p.b_title, p.b_updated, !aNewer));
-    list.appendChild(card);
-  }
-  updateDupCount();
-  return `${pairs.length} possible duplicate${pairs.length === 1 ? '' : 's'}`;
-}
-
-function renderReconcileCheck(preview) {
-  if (!preview.changed.length && !preview.removed.length && !preview.orphaned.length) {
-    $('#reconcileResult').textContent = 'No dead references found.';
-    $('#reconcileRun').disabled = true;
-    return null;
-  }
-  renderReconcileReport(preview);
-  $('#reconcileRun').disabled = false;
-  const n = preview.changed.length + preview.removed.length + (preview.orphaned?.length || 0);
-  return `${n} study guide reference${n === 1 ? '' : 's'} to clean up`;
-}
-
-/* Scan results used to live only in the DOM, so a plain page reload lost
-   them outright and the card fell back to its static "Not scanned yet."
-   markup even right after a successful scan -- the in-app view-switch case
-   (leaving and returning to Overview) is handled separately, by keeping
-   #gvHealthSection alive across graph.js's renderStats() calls; this is
-   the reload case, which that fix doesn't touch. Cache the raw API
-   responses rather than rendered HTML: duplicate and reconcile cards carry
-   real onclick handlers (delete, open, clean up) that innerHTML can't
-   reproduce, but replaying them through the render* functions above can.
-   Keyed to the vault path so a scan never gets shown against the wrong
-   vault after switching. */
-const HEALTH_KEY = 'tephra:healthScan';
-
-function saveHealthScan(snapshot) {
-  if (!currentVaultPath) return;
-  try {
-    localStorage.setItem(HEALTH_KEY, JSON.stringify({ vault: currentVaultPath, at: Date.now(), ...snapshot }));
-  } catch {}
-}
-
-// Called whenever Repair, Clean up, or a duplicate delete changes the vault
-// out from under a cached scan -- the counts it recorded are now wrong, and
-// the honest thing on the next reload is "Not scanned yet", not stale ones.
-function clearHealthScan() {
-  try { localStorage.removeItem(HEALTH_KEY); } catch {}
-}
-
-function resetHealthUI() {
-  $('#healthResults').hidden = true;
-  $('#healthStatusText').textContent = 'Not scanned yet.';
-  $('#auditResult').textContent = 'Not checked yet.';
-  $('#reindexResult').textContent = 'Not checked yet.';
-  $('#dupResult').textContent = 'Not checked yet.';
-  $('#dupList').innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
-  $('#reconcileResult').textContent = 'Not checked yet.';
+$('#reconcileCheck').onclick = async () => {
+  const out = $('#reconcileResult');
   $('#reconcileList').innerHTML = ''; $('#reconcileFilter').hidden = true; $('#reconcileFilter').value = '';
-  $('#repairRun').disabled = true;
-  $('#reconcileRun').disabled = true;
-}
-
-// Runs at boot and after every vault switch. Resets to the un-scanned state
-// first, then replays a cached scan on top of it if one exists for the
-// vault that's actually open now.
-function hydrateHealthScan() {
-  resetHealthUI();
-  let cached;
-  try { cached = JSON.parse(localStorage.getItem(HEALTH_KEY) || 'null'); } catch { cached = null; }
-  if (!cached || cached.vault !== currentVaultPath) return;
-
-  if (cached.audit) renderAuditCheck(cached.audit.a, cached.audit.preview);
-  if (cached.reindexCount != null) renderReindexCheck(cached.reindexCount);
-  if (cached.duplicates) renderDuplicatesCheck(cached.duplicates);
-  if (cached.reconcile) renderReconcileCheck(cached.reconcile);
-
-  $('#healthResults').hidden = false;
-  const problems = cached.problems || [];
-  const when = fmtAgo(new Date(cached.at).toISOString());
-  $('#healthStatusText').textContent = problems.length
-    ? `Scanned ${when} — ${problems.join(', ')}.`
-    : `Scanned ${when} — nothing needs attention.`;
-}
-
-$('#healthScan').onclick = async () => {
-  const statusText = $('#healthStatusText');
-  const results = $('#healthResults');
-  healthSetScanning(true);
-  results.hidden = false;
-  $('#repairRun').disabled = true;
-  $('#reconcileRun').disabled = true;
-  $('#dupList').innerHTML = ''; $('#dupFilter').hidden = true; $('#dupFilter').value = '';
-  $('#reconcileList').innerHTML = ''; $('#reconcileFilter').hidden = true; $('#reconcileFilter').value = '';
-
-  const startedAt = Date.now();
-  let step = 'Checking links';
-  const elapsed = () => Math.round((Date.now() - startedAt) / 1000);
-  const tick = setInterval(() => { statusText.textContent = `${step}… ${elapsed()}s`; }, 1000);
-  statusText.textContent = `${step}… 0s`;
-
-  const problems = [];
-  const snapshot = {};
-
-  step = 'Checking links';
-  try {
-    const [a, preview] = await Promise.all([
-      api('/audit'),
-      api('/repair?dry_run=true', { method: 'POST' }),
-    ]);
-    const problem = renderAuditCheck(a, preview);
-    if (problem) problems.push(problem);
-    snapshot.audit = { a, preview };
-  } catch { $('#auditResult').textContent = 'Could not run the check.'; }
-
-  step = 'Rebuilding index';
-  try {
-    const r = await api('/reindex', { method: 'POST' });
-    await loadList(); await loadGraph(); await loadMedia();
-    renderReindexCheck(r.notes);
-    snapshot.reindexCount = r.notes;
-  } catch { $('#reindexResult').textContent = 'Reindex failed.'; }
-
-  step = 'Scanning for duplicates';
-  try {
-    const { pairs } = await api('/duplicates');
-    const problem = renderDuplicatesCheck(pairs);
-    if (problem) problems.push(problem);
-    snapshot.duplicates = pairs;
-  } catch { $('#dupResult').textContent = 'Could not scan for duplicates.'; }
-
-  step = 'Checking study guide indexes';
+  out.textContent = 'Checking…';
   try {
     const preview = await api('/study/import/reconcile?dry_run=true', { method: 'POST' });
-    const problem = renderReconcileCheck(preview);
-    if (problem) problems.push(problem);
-    snapshot.reconcile = preview;
-  } catch { $('#reconcileResult').textContent = 'Could not run the check.'; }
-
-  clearInterval(tick);
-  healthSetScanning(false);
-  statusText.textContent = problems.length
-    ? `Scan finished in ${elapsed()}s — ${problems.join(', ')}.`
-    : `Scan finished in ${elapsed()}s — nothing needs attention.`;
-
-  snapshot.problems = problems;
-  saveHealthScan(snapshot);
+    if (!preview.changed.length && !preview.removed.length && !preview.orphaned.length) {
+      out.textContent = 'No dead references found.';
+      $('#reconcileRun').disabled = true;
+      return;
+    }
+    renderReconcileReport(preview);
+    $('#reconcileRun').disabled = false;
+  } catch { out.textContent = 'Could not run the check.'; }
 };
 
 $('#reconcileRun').onclick = async () => {
@@ -3274,7 +3134,6 @@ $('#reconcileRun').onclick = async () => {
     renderReconcileReport(r);
     $('#reconcileRun').disabled = true;
     toast(describeReconcile(r) + '.', 6000);
-    clearHealthScan(); // clean-up invalidates whatever the last scan found here
     await loadList();
     await loadGraph();
     if (state.slug) await openNote(state.slug, false);
@@ -3340,7 +3199,6 @@ addEventListener('hashchange', () => {
   } catch {}
 
   await showVaultName();
-  hydrateHealthScan();
   window.tephraLinks?.poll();
 
   const want = location.hash.slice(1) || state.notes[0]?.slug;

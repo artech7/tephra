@@ -22,6 +22,17 @@ a folder of documents:
     device b "B"               DSL entirely; this file just passes the
     link a.P1 -> b.P1           fence content through untouched
     ```
+    ```sheets                a tabbed group of markdown tables -- one
+    ## Week 1                 `## Sheet name` heading per sheet, each
+    | Day | Topic |            followed by an ordinary GFM table. Unlike
+    | --- | --- |               the two fences above, the content here is
+    | Mon | [[Intro]] |          real markdown, rendered by this file, so
+                                 a [[link]] in a cell resolves and counts
+    ## Week 2                     toward the graph like any other link.
+    | Name | Score |
+    | --- | --- |
+    | Alice | 92 |
+    ```
 
 A bare URL alone on a line becomes a bookmark card. That is deliberate:
 pasting a link is the most common thing anyone does in a notes app, and it
@@ -394,6 +405,96 @@ def _callout_sub(body: str, stash, on_wiki, used: list) -> str:
     return CALLOUT_RE.sub(repl, body)
 
 
+# ── sheets ──────────────────────────────────────────────────────────────────
+#
+# ```sheets is a tabbed group of tables: one `## Sheet name` heading per
+# sheet, each followed by an ordinary GFM table. It exists because a single
+# table can't express the "one spreadsheet, several sheets" shape -- a
+# per-week course plan, a roster per team -- that otherwise ends up as a
+# note full of loose headings you have to scroll between.
+#
+# Unlike ```mermaid and ```netdiagram, whose content is an opaque DSL this
+# file passes straight through for the frontend to own, a sheets fence holds
+# *real markdown* and is rendered here. That's deliberate on both counts:
+#   - the file stays readable as plain markdown outside Tephra -- it's just
+#     headings and tables, which is what it actually is, so nothing is
+#     locked into a format only this app understands;
+#   - every cell goes through the same wikilink and embed pass the rest of
+#     the note does, so a [[link]] in a cell resolves, turns orange when its
+#     target doesn't exist, and counts toward backlinks and the graph exactly
+#     as it would outside the fence. Handing the content to the frontend
+#     instead would have meant reimplementing link resolution in JS and
+#     losing the graph entirely.
+#
+# Sheets are independent: each one declares its own columns, and nothing
+# checks that two sheets in the same group agree on them.
+SHEETS_RE = re.compile(r"^```sheets[ \t]*\n(?P<content>.*?)^```[ \t]*$", re.M | re.S)
+_SHEET_HEAD_RE = re.compile(r"^##[ \t]+(?P<name>.+?)[ \t]*$", re.M)
+
+
+def _parse_sheets(content: str) -> list[tuple[str, str]]:
+    """[(sheet name, that sheet's markdown), ...] in document order."""
+    heads = list(_SHEET_HEAD_RE.finditer(content))
+    if not heads:
+        # No `##` heading at all: treat the whole fence as one unnamed sheet,
+        # so wrapping a single plain table in a sheets fence still renders a
+        # table rather than an empty card.
+        stripped = content.strip()
+        return [("Sheet 1", stripped)] if stripped else []
+    out = []
+    for i, h in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(content)
+        out.append((h.group("name").strip(), content[h.end():end].strip()))
+    return out
+
+
+def _sheets_html(content: str, stash, on_wiki, used: list, index: int) -> str:
+    sheets = _parse_sheets(content)
+    if not sheets:
+        return ('<div class="sheets g2 sheets-empty" data-sheets-index="'
+                f'{index}"><div class="sheets-hint">Empty sheet group — add a '
+                '<code>## Sheet name</code> heading with a table under it.</div></div>')
+    tabs, panes = [], []
+    for i, (name, table_md) in enumerate(sheets):
+        on = " on" if i == 0 else ""
+        tabs.append(f'<button type="button" class="sheet-tab{on}" data-sheet="{i}" '
+                    f'role="tab" aria-selected="{"true" if i == 0 else "false"}">'
+                    f'{html.escape(name)}</button>')
+        # Same treatment a callout's content gets, and for the same reason:
+        # a plain md.render() here would leave an ![[embed]] or [[link]] in a
+        # cell as raw brackets, and would track neither -- an image only ever
+        # embedded inside a sheet would never count as "used", and a link
+        # made only from inside one would never reach the graph.
+        inner_text, embed_used = _embed_runs(table_md, stash)
+        used.extend(embed_used)
+        inner_text = WIKI_RE.sub(lambda m: stash(on_wiki(m)), inner_text)
+        inner = _unwrap_placeholder_p(md.render(inner_text))
+        panes.append(f'<div class="sheet-pane{on}" data-sheet="{i}" '
+                     f'role="tabpanel">{inner}</div>')
+    return (f'<div class="sheets g2" data-sheets-index="{index}">'
+            f'<div class="sheet-tabs" role="tablist">{"".join(tabs)}</div>'
+            f'<div class="sheet-body">{"".join(panes)}</div></div>')
+
+
+def _sheets_sub(body: str, stash, on_wiki, used: list) -> str:
+    """Runs on the raw body, before the top-level _embed_runs -- same
+    ordering requirement callouts have. It also has to run before the
+    wikilink/citation/bare-URL passes below, which deliberately skip over
+    fenced blocks (see _FENCE_RE): if a sheets fence were still present as a
+    fence by then, every [[link]] in every cell would be skipped along with
+    it. Extracting the fence here, and rendering its tables ourselves,
+    sidesteps that entirely.
+    """
+    counter = [0]
+
+    def repl(m: re.Match) -> str:
+        frag = _sheets_html(m.group("content"), stash, on_wiki, used, counter[0])
+        counter[0] += 1
+        return "\n\n" + stash(frag) + "\n\n"
+
+    return SHEETS_RE.sub(repl, body)
+
+
 def _bookmark_html(url: str) -> str:
     safe = html.escape(url, quote=True)
     host = re.sub(r"^www\.", "", url.split("/")[2]) if "//" in url else url
@@ -459,6 +560,11 @@ def render(body: str, resolve, sources=()) -> tuple[str, list[str], list[str]]:
     # why extracting a callout's content up front, before that split can
     # happen, sidesteps the problem entirely rather than working around it.
     body = _callout_sub(body, stash, on_wiki, used)
+
+    # Sheets next, still on the raw body and still before _embed_runs, for
+    # the reasons in _sheets_sub's own note: it renders its own tables, so
+    # it has to claim the fence before the fence-skipping passes below run.
+    body = _sheets_sub(body, stash, on_wiki, used)
 
     text, embed_used = _embed_runs(body, stash)
     used.extend(embed_used)

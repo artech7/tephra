@@ -303,7 +303,18 @@ def strip_code(text: str) -> str:
     return CODE_RE.sub(" ", text)
 
 
+# A ```sheets fence is the one fenced block whose content is ordinary
+# content rather than code: it's `## Sheet name` headings and GFM tables,
+# and its cells hold [[wikilinks]] exactly as any table's would. Those have
+# to count as real outgoing links -- backlinks, the graph, the orange
+# "pending" styling on a link whose target doesn't exist yet -- so the fence
+# is unwrapped to its inner rows before strip_code blanks every other fence.
+# See render.py's own _sheets_sub for the matching treatment at render time.
+SHEETS_FENCE_RE = re.compile(r"^```sheets[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
+
+
 def outgoing(body: str) -> list[str]:
+    body = SHEETS_FENCE_RE.sub(lambda m: "\n" + m.group(1) + "\n", body)
     return [m.group(1).strip() for m in WIKI_RE.finditer(strip_code(body))]
 
 
