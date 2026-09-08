@@ -40,6 +40,12 @@ against those.
 
     ./run-tests.sh        all 47 suites; 666 backend assertions, 966 UI
 
+It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
+overall percentage, and every failing check grouped by suite. The verbose
+output goes to test-results.log -- gitignored locally, uploaded as a CI
+artifact. CRASH means the suite died before printing its own tally, so its
+counts are unknown and the reason is only in the log.
+
 Run it before every commit. How the runner invokes things is not incidental:
 
 - Backend suites need `PYTHONPATH=. .venv/bin/python`. Bare `python3` picks

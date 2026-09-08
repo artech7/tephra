@@ -73,3 +73,16 @@ jobs:
         # a detail those suites depend on and that took a bug to arrive at.
         # A second copy of that setup living in CI would drift from it.
         run: ./run-tests.sh
+
+      - name: Upload verbose test output
+        # run-tests.sh prints one line per suite and keeps the full output in
+        # test-results.log. On a FAIL the failing check lines are in the step
+        # log already, but a CRASH only points at this file -- and there's no
+        # developer machine here to open it on. Matrix-suffixed so three
+        # interpreters don't fight over one artifact name.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-py${{ matrix.python }}
+          path: test-results.log
+          if-no-files-found: ignore

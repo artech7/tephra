@@ -24,3 +24,6 @@ node_modules/
 # local docker-compose env and config-dir mount
 .env
 config/
+
+# run-tests.sh verbose output
+test-results.log
