@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 837 backend assertions, 1163 UI
+    ./run-tests.sh        all 51 suites; 855 backend assertions, 1190 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -152,6 +152,35 @@ The preview iframe renders the *form*, one labelled box per field, not a
 flowing document -- and carries no stylesheet beyond the box chrome, so what
 survives in the preview is what survives the paste. A preview using the
 app's own CSS would be a comfortable lie.
+
+### The block palette
+
+`BLOCKS` in app/kb.py is a list of draggable snippets -- data, like the
+templates and the field schema, so adding a block is one entry and nothing
+else. A block is **a way of writing markdown without typing the syntax**,
+never a second document format: dropping one splices its `snippet` into the
+same textarea you could have typed into, and the file on disk stays markdown.
+`select` is the substring the editor highlights afterwards, so the first
+thing typed replaces the placeholder.
+
+Write mode is four columns: article list, palette, markdown, and a right
+column shared by the live render (default), the structure panel and the
+metadata form.
+
+`split_blocks()` cuts a body into top-level blocks on blank lines, ignoring
+blank lines inside a fence -- a ```sheets card split down the middle is not a
+card. `GET /api/kb/{slug}/render` returns those blocks each with its source
+line range and its HTML, and that range is the whole trick: an insertion
+between two rendered blocks is a splice at a known line number rather than a
+guess at where a pixel position falls in the source.
+
+The authoring preview deliberately uses **render.py**, not the exporter --
+it is what you write beside, so it should look like the rest of Tephra. Only
+the *export* preview shows the destination's look. `enhanceMermaid`,
+`enhanceCodeBlocks`, `tephraSheets.enhance` and `tephraNetDiagram.enhance`
+all take an optional root now (defaulting to `#noteBody`, so every existing
+caller is unchanged) and `window.tephraEnhanceRendered(root)` runs the set --
+one implementation, two hosts.
 
 ## Invariants
 

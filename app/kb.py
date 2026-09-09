@@ -250,6 +250,150 @@ TEMPLATES: dict[str, Template] = {
 DEFAULT_TEMPLATE = "troubleshooting"
 
 
+# ── the block palette ──────────────────────────────────────────────────────
+#
+# Data, like the templates and the field schema, and for the same reason:
+# "literally anything we have now and anything we add in the future" is only
+# true if adding a block is one entry here and nothing else. The palette UI,
+# the drag payload and the insertion are all generated from this list.
+#
+# `snippet` is plain markdown -- the file on disk stays the source of truth,
+# and a block is only a way of writing that markdown without typing the
+# syntax. `select` is the substring the editor highlights after a drop, so
+# the first thing you type replaces the placeholder.
+
+
+@dataclass
+class Block:
+    id: str
+    label: str
+    glyph: str
+    group: str
+    hint: str
+    snippet: str
+    select: str = ""
+    # Inline blocks land inside the paragraph you drop them on rather than
+    # becoming a block of their own.
+    inline: bool = False
+
+
+BLOCK_GROUPS = ("Text", "Structure", "Media", "Reference")
+
+BLOCKS: list[Block] = [
+    Block("heading", "Heading", "H2", "Text",
+          "A section heading. Sections are what the export maps onto form fields.",
+          "## Heading", "Heading"),
+    Block("subheading", "Sub-heading", "H3", "Text",
+          "A heading within a section.", "### Sub-heading", "Sub-heading"),
+    Block("paragraph", "Paragraph", "¶", "Text",
+          "Ordinary prose.", "Text.", "Text."),
+    Block("bullets", "Bullet list", "•", "Text",
+          "An unordered list — one item per distinct thing.",
+          "- Item\n- Item\n- Item", "Item"),
+    Block("numbered", "Numbered list", "1.", "Text",
+          "Steps, in order. One action per step.",
+          "1. Step\n2. Step\n3. Step", "Step"),
+    Block("quote", "Quote", "“", "Text",
+          "A quotation. For a note or warning box, use Callout instead.",
+          "> Quotation.", "Quotation."),
+    Block("callout", "Callout", "⚠", "Structure",
+          "A boxed note. Change WARNING to NOTE, TIP, IMPORTANT, CAUTION or DANGER.",
+          "> [!WARNING] Title\n> Text.", "Title"),
+    Block("table", "Table", "▦", "Structure",
+          "A 3-column table. Add rows by adding lines.",
+          "| Column | Column | Column |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |",
+          "Column"),
+    Block("sheets", "Sheets", "▤", "Structure",
+          "Several tables in one tabbed card. Each `## name` is a tab.",
+          "```sheets\n## Sheet name\n\n| Column | Column |\n| --- | --- |\n|  |  |\n```",
+          "Sheet name"),
+    Block("code", "Code block", "⌨", "Structure",
+          "A command or a config sample. Replace `bash` with the language.",
+          "```bash\ncommand --here\n```", "command --here"),
+    Block("divider", "Divider", "—", "Structure",
+          "A horizontal rule.", "---"),
+    Block("image", "Image", "▣", "Media",
+          "An attachment from this vault. Exports as a numbered placeholder "
+          "plus a manifest row.",
+          "![[image.png|Caption|500]]", "image.png"),
+    Block("mermaid", "Diagram", "◈", "Media",
+          "A Mermaid diagram. Exports as a placeholder — attach a screenshot.",
+          "```mermaid\ngraph TD\nA[Start] --> B[End]\n```", "A[Start]"),
+    Block("netdiagram", "Net diagram", "⬚", "Media",
+          "A device and cabling diagram.",
+          "```netdiagram\ndevice a \"Device A\"\ndevice b \"Device B\"\n"
+          "link a.P1 -> b.P1\n```", "Device A"),
+    Block("link", "Link", "↱", "Reference",
+          "An external link.", "[link text](https://example.com)", "link text"),
+    Block("bookmark", "Bookmark", "⌸", "Reference",
+          "A URL on its own line becomes a bookmark card.",
+          "https://example.com", "https://example.com"),
+    Block("wikilink", "Note link", "◉", "Reference",
+          "A link to another note. Drag a note from the list below instead to "
+          "pick one by name.",
+          "[[Note Title]]", "Note Title", inline=True),
+    Block("citation", "Citation", "¹", "Reference",
+          "A footnote marker pointing at the Nth entry of this article's Sources.",
+          "[^1]", "1", inline=True),
+    Block("sources", "Sources", "≡", "Reference",
+          "The source list citations point at. One bullet per source.",
+          "## Sources\n\n- [Title](https://example.com)", "Title"),
+]
+
+BLOCKS_BY_ID = {b.id: b for b in BLOCKS}
+
+
+def blocks_payload() -> list[dict]:
+    return [asdict(b) for b in BLOCKS]
+
+
+# ── splitting a body into droppable blocks ─────────────────────────────────
+
+
+def split_blocks(body: str) -> list[dict]:
+    """The body as its top-level markdown blocks, with the source lines each
+    one occupies.
+
+    This is what makes the live render droppable: every rendered block knows
+    which lines it came from, so an insertion between two of them is a splice
+    at a known line number rather than a guess at a character offset.
+
+    Blank lines separate blocks, except inside a fence -- a ```sheets block
+    holds blank lines and is emphatically one block. That is markdown's own
+    block structure, so nothing here needs to know what any given block
+    means.
+    """
+    lines = body.split("\n")
+    out: list[dict] = []
+    start = None
+    fence = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if fence is None:
+            m = re.match(r"^(`{3,}|~{3,})", stripped)
+            if m:
+                fence = m.group(1)[0] * 3
+                if start is None:
+                    start = i
+                continue
+        else:
+            if re.match(r"^(`{3,}|~{3,})\s*$", stripped):
+                fence = None
+            continue
+        if not stripped:
+            if start is not None:
+                out.append({"start": start, "end": i - 1,
+                            "text": "\n".join(lines[start:i])})
+                start = None
+            continue
+        if start is None:
+            start = i
+    if start is not None:
+        out.append({"start": start, "end": len(lines) - 1,
+                    "text": "\n".join(lines[start:])})
+    return out
+
+
 # ── metadata schema ────────────────────────────────────────────────────────
 #
 # Described as data for the same reason templates are: the authoring form is

@@ -471,8 +471,10 @@
     el.appendChild(btn);
   }
 
-  function enhanceNetDiagram() {
-    for (const el of document.querySelectorAll('#noteBody .netdiagram:not([data-processed])')) {
+  function enhanceNetDiagram(root) {
+    const host = root || document.querySelector('#noteBody');
+    if (!host) return;
+    for (const el of host.querySelectorAll('.netdiagram:not([data-processed])')) {
       el.setAttribute('data-processed', 'true');
       el.dataset.raw = el.textContent;
       renderInline(el, parseNetDiagram(el.dataset.raw));

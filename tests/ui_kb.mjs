@@ -115,6 +115,15 @@ window.tephraApi = async (p, opts = {}) => {
       form: 'Question and Answer',
       section_fields: ['Question', 'Environment', 'Answer', 'Additional Information', 'Internal Notes'],
       meta_fields: ['Short description', 'Meta'],
+      block_groups: ['Text', 'Structure'],
+      blocks: [
+        { id: 'heading', label: 'Heading', glyph: 'H2', group: 'Text', hint: 'h',
+          snippet: '## Heading', select: 'Heading', inline: false },
+        { id: 'bullets', label: 'Bullet list', glyph: '\u2022', group: 'Text', hint: 'h',
+          snippet: '- Item\n- Item', select: 'Item', inline: false },
+        { id: 'callout', label: 'Callout', glyph: '\u26a0', group: 'Structure', hint: 'h',
+          snippet: '> [!WARNING] Title\n> Text.', select: 'Title', inline: false },
+      ],
     };
   }
   if (p === '/kb/articles' && opts.method === 'POST') { created = body; return store.articles[0]; }
@@ -132,6 +141,28 @@ window.tephraApi = async (p, opts = {}) => {
   if (rel) { released = rel[1]; return { slug: rel[1], is_article: false }; }
   const ad = p.match(/^\/kb\/([^/]+)\/adopt$/);
   if (ad) { adopted = { slug: ad[1], ...body }; return store.articles[0]; }
+  const rnd = p.match(/^\/kb\/([^/]+)\/render$/);
+  if (rnd) {
+    const lines = (store.bodies[rnd[1]] || '').split('\n');
+    // Mirrors the server's own splitter closely enough for the drop maths:
+    // blank lines separate blocks.
+    const blocks = [];
+    let start = null;
+    lines.forEach((ln, i) => {
+      if (ln.trim() === '') {
+        if (start !== null) { blocks.push({ start, end: i - 1 }); start = null; }
+      } else if (start === null) start = i;
+    });
+    if (start !== null) blocks.push({ start, end: lines.length - 1 });
+    return {
+      slug: rnd[1], lines: lines.length,
+      blocks: blocks.map((b) => ({
+        ...b,
+        text: lines.slice(b.start, b.end + 1).join('\n'),
+        html: '<p>' + lines.slice(b.start, b.end + 1).join(' ') + '</p>',
+      })),
+    };
+  }
   if (p.startsWith('/kb/') && p.includes('/export')) {
     return {
       target: 'servicenow', title: 'Array unreachable', slug: 'a1', mime: 'text/html',
@@ -243,6 +274,112 @@ ck('a list field is split back into a list on save',
    JSON.stringify(lastMeta && lastMeta.kb_keywords));
 ck('the article type rides along, so saving fields cannot orphan the article',
    lastMeta.kb_type === 'troubleshooting');
+
+console.log('\n── the block palette ──');
+await window.tephraKb.open();
+await tick(40);
+const pal = doc.querySelector('#kbPalette');
+ck('the palette exists beside the editor', !!pal);
+ck('blocks are grouped the way the registry groups them',
+   [...pal.querySelectorAll('.kb-palgroup')].map((g) => g.textContent).join('|')
+   === 'Text|Structure|Notes',
+   [...pal.querySelectorAll('.kb-palgroup')].map((g) => g.textContent).join('|'));
+ck('one draggable item per block',
+   pal.querySelectorAll('.kb-palitem').length === 3);
+ck('every item is actually draggable',
+   [...pal.querySelectorAll('.kb-palitem')].every((i) => i.draggable === true));
+ck('each item shows its glyph and its label',
+   !!pal.querySelector('.kb-palglyph') && !!pal.querySelector('.kb-pallabel'));
+ck('vault notes are draggable in too, which is the point of writing KBs in a wiki',
+   pal.querySelectorAll('.kb-palnote').length >= 1);
+
+console.log('\n── clicking a block appends it and selects the placeholder ──');
+const ed = doc.querySelector('#kbBody');
+const before = ed.value;
+const calloutItem = [...pal.querySelectorAll('.kb-palitem')]
+  .find((i) => /Callout/.test(i.textContent));
+await calloutItem.onclick();
+await tick(60);
+ck('the snippet is appended as markdown, not as some other format',
+   ed.value.includes('> [!WARNING] Title'), JSON.stringify(ed.value.slice(-40)));
+ck('what was already written is untouched', ed.value.startsWith(before.trim()));
+ck('a blank line separates it from what came before, or markdown would join them',
+   /\n\n> \[!WARNING\]/.test(ed.value));
+ck('the placeholder is selected, so the first thing typed replaces it',
+   ed.value.slice(ed.selectionStart, ed.selectionEnd) === 'Title',
+   ed.value.slice(ed.selectionStart, ed.selectionEnd));
+ck('the edit is saved through the ordinary note endpoint',
+   lastPut && lastPut.body.includes('[!WARNING]'));
+
+console.log('\n── the live render, and dropping onto it ──');
+function dragEvent(type, payload) {
+  const e = new window.Event(type, { bubbles: true, cancelable: true });
+  const store = {
+    'application/x-tephra-block': JSON.stringify(payload),
+    'text/plain': '',
+  };
+  Object.defineProperty(e, 'dataTransfer', {
+    value: {
+      types: Object.keys(store),
+      getData: (k) => store[k] || '',
+      setData: (k, v) => { store[k] = v; },
+      dropEffect: '', effectAllowed: '',
+    },
+  });
+  return e;
+}
+
+const render = doc.querySelector('#kbRender');
+ck('the render pane is the default tab, since it is what you write beside',
+   !!render && !doc.querySelector('#kbPaneRender').hidden);
+ck('it renders through Tephra\u2019s own renderer, so the preview is the app\u2019s look',
+   render.innerHTML.includes('<p>'));
+const blks = [...render.querySelectorAll('.kb-blk')];
+ck('one wrapper per source block', blks.length >= 2, blks.length);
+ck('each wrapper carries its source line range',
+   blks.every((b) => b.dataset.start !== undefined && b.dataset.end !== undefined));
+const zones = [...render.querySelectorAll('.kb-drop')];
+ck('there is a drop zone before every block and one after the last',
+   zones.length === blks.length + 1, `${zones.length} zones, ${blks.length} blocks`);
+ck('the first zone targets line 0', zones[0].dataset.line === '0');
+
+const beforeDrop = ed.value.split('\n');
+zones[0].dispatchEvent(dragEvent('drop', { block: 'heading' }));
+await tick(80);
+ck('dropping on the first zone inserts at the very top',
+   ed.value.startsWith('## Heading'), JSON.stringify(ed.value.slice(0, 30)));
+ck('nothing that was already written is lost',
+   beforeDrop.every((l) => !l.trim() || ed.value.includes(l.trim())));
+ck('the placeholder is selected after a drop too',
+   ed.value.slice(ed.selectionStart, ed.selectionEnd) === 'Heading');
+
+const zones2 = [...doc.querySelectorAll('#kbRender .kb-drop')];
+const lastZone = zones2[zones2.length - 1];
+lastZone.dispatchEvent(dragEvent('drop', { note: 'A loose note' }));
+await tick(80);
+ck('a note dropped in becomes a wikilink, not a copy of the note',
+   ed.value.includes('[[A loose note]]'));
+
+console.log('\n── dropping onto the markdown itself ──');
+ed.value = 'line one\nline two';
+const editorDrop = dragEvent('drop', { block: 'bullets' });
+ed.dispatchEvent(editorDrop);
+await tick(80);
+ck('the snippet lands in the source', ed.value.includes('- Item'));
+ck('and it is still markdown on the way to disk',
+   lastPut && lastPut.body.includes('- Item'));
+
+console.log('\n── the right column takes turns ──');
+const tabs = [...doc.querySelectorAll('[data-kbtab]')];
+ck('three tabs share the column',
+   tabs.map((t) => t.dataset.kbtab).join('|') === 'render|structure|fields');
+tabs.find((t) => t.dataset.kbtab === 'structure').onclick();
+ck('switching shows the structure panel', !doc.querySelector('#kbPaneStructure').hidden
+   && doc.querySelector('#kbPaneRender').hidden);
+ck('and the outline is still there', !!doc.querySelector('.kb-sec'));
+tabs.find((t) => t.dataset.kbtab === 'fields').onclick();
+ck('the metadata form lives on its own tab now',
+   !doc.querySelector('#kbPaneFields').hidden && !!doc.querySelector('#kbf-kb_status'));
 
 console.log('\n── export mode ──');
 await window.tephraKb.open();

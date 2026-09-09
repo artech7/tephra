@@ -138,6 +138,39 @@ fenced = kb.sections("## Real\n\n```sheets\n## Not a section\n\n| a |\n| --- |\n
 ck("a ## inside a fence is a sheet name, not a section",
    [s["heading"] for s in fenced] == ["Real"], [s["heading"] for s in fenced])
 
+print("\n── the block palette and the droppable render ──")
+ck("every block belongs to a group the palette shows",
+   all(b.group in kb.BLOCK_GROUPS for b in kb.BLOCKS))
+ck("every block id is unique", len({b.id for b in kb.BLOCKS}) == len(kb.BLOCKS))
+ck("every block carries a snippet", all(b.snippet.strip() for b in kb.BLOCKS))
+ck("a block's select text is actually in its snippet, or the editor would "
+   "highlight nothing after a drop",
+   all(not b.select or b.select in b.snippet for b in kb.BLOCKS),
+   [b.id for b in kb.BLOCKS if b.select and b.select not in b.snippet])
+ck("every snippet is markdown Tephra already understands -- a block is a way "
+   "of writing the syntax, never a second format",
+   all("<" not in b.snippet or b.id in ("link", "bookmark") for b in kb.BLOCKS))
+
+# The line ranges are what make a drop land somewhere exact rather than
+# somewhere approximate, so the splitter is what these assertions are about.
+BODY = "## One\n\npara\n\n```sheets\n## S\n\n| a |\n| - |\n```\n\n- x\n- y\n"
+blks = kb.split_blocks(BODY)
+ck("blank lines separate blocks", len(blks) == 4, len(blks))
+ck("each block knows the source lines it came from",
+   [(b["start"], b["end"]) for b in blks] == [(0, 0), (2, 2), (4, 9), (11, 12)],
+   [(b["start"], b["end"]) for b in blks])
+ck("a fence stays one block even though it contains blank lines -- a sheets "
+   "card split down the middle is not a card",
+   blks[2]["text"].startswith("```sheets") and blks[2]["text"].endswith("```"))
+ck("the lines quoted back are the lines that were there",
+   all(b["text"] == "\n".join(BODY.split("\n")[b["start"]:b["end"] + 1]) for b in blks))
+ck("an empty body yields no blocks rather than one empty one",
+   kb.split_blocks("") == [] and kb.split_blocks("\n\n  \n") == [])
+ck("a body with no trailing newline still closes its last block",
+   kb.split_blocks("just text")[0]["end"] == 0)
+ck("an unterminated fence does not swallow everything after it silently",
+   len(kb.split_blocks("```\nopen\n\nmore\n")) == 1)
+
 print("\n── the API ──")
 with TestClient(app) as c:
     t = c.get("/api/kb/templates").json()
@@ -202,6 +235,32 @@ with TestClient(app) as c:
        [f.name for f in (vault.current().vault / ".trash").glob("*.md")])
     ck("deleting it twice is a 404, not a crash",
        c.delete(f"/api/notes/{doomed}").status_code == 404)
+
+    # The authoring preview deliberately uses Tephra's own renderer, not the
+    # exporter's: it is what you write beside, and it should look like the
+    # rest of the app. Only the export preview shows the destination's look.
+    rnd = c.get(f"/api/kb/{slug}/render").json()
+    ck("the render endpoint returns one entry per source block",
+       len(rnd["blocks"]) > 0)
+    ck("each rendered block carries its source line range, so a drop between "
+       "two of them is a splice at a known line",
+       all("start" in b and "end" in b and "html" in b for b in rnd["blocks"]))
+    ck("the ranges are in document order and do not overlap",
+       all(rnd["blocks"][i]["end"] < rnd["blocks"][i + 1]["start"]
+           for i in range(len(rnd["blocks"]) - 1)))
+    ck("it renders with Tephra's own classes, not the export's inline styles",
+       any("<h2" in b["html"] for b in rnd["blocks"])
+       and not any("style=\"font-size:1.3em" in b["html"] for b in rnd["blocks"]))
+    ck("rendering a missing article is a 404",
+       c.get("/api/kb/nope/render").status_code == 404)
+
+    cited = c.post("/api/kb/articles", json={"title": "Cited", "kb_type": "faq"}).json()["slug"]
+    c.put(f"/api/notes/{cited}", json={
+        "body": "## Scope\n\nA claim.[^1]\n\n## Sources\n\n- [S](https://example.com)\n"})
+    cr = c.get(f"/api/kb/{cited}/render").json()
+    joined = "".join(b["html"] for b in cr["blocks"])
+    ck("a citation resolves even though each block is rendered on its own",
+       'class="cite-link"' in joined and "missing" not in joined, joined[:0] or "")
 
     ck("an unknown export target is refused",
        c.get(f"/api/kb/{slug}/export", params={"target": "pdf"}).status_code == 400)

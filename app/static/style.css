@@ -2253,11 +2253,14 @@ body.kbdeck .side{left:-100%;right:100%}
 }
 body.kbdeck #kbview{left:0;right:0;pointer-events:auto}
 
-.kb-body{display:grid;grid-template-columns:262px minmax(0,1fr) 344px;min-height:0;
+.kb-body{display:grid;
+  grid-template-columns:238px 152px minmax(0,1fr) minmax(320px,.95fr);min-height:0;
   transition:grid-template-columns .32s var(--ease)}
 /* Export is a looking mode, not a typing mode: the preview earns the space
-   the metadata form was using. */
-#kbview.kb-exporting .kb-body{grid-template-columns:230px minmax(0,1fr) 330px}
+   the palette and the metadata form were using, and the palette has nothing
+   to drop onto. */
+#kbview.kb-exporting .kb-body{grid-template-columns:230px 0 minmax(0,1fr) 330px}
+#kbview.kb-exporting .kb-palette{opacity:0;pointer-events:none;padding:0;border:0}
 
 .kb-list{border-right:1px solid var(--edge);padding:16px 12px 12px;overflow-y:auto;
   background:rgba(0,0,0,.10);display:flex;flex-direction:column;min-height:0}
@@ -2384,9 +2387,17 @@ body.kbdeck #kbview{left:0;right:0;pointer-events:auto}
 .kb-empty{font-size:11.5px;line-height:1.6;color:var(--faint);padding:8px 2px}
 .kb-empty-lg{font-size:13px;padding:40px 0;text-align:center}
 
+@media(max-width:1440px){
+  .kb-body{grid-template-columns:206px 132px minmax(0,1fr) minmax(280px,.9fr)}
+}
+/* Below this the four columns stop being four columns. The palette keeps its
+   glyphs and drops its labels rather than disappearing -- it is the thing
+   you drag from, so it has to stay reachable. */
 @media(max-width:1180px){
-  .kb-body{grid-template-columns:220px minmax(0,1fr) 300px}
-  #kbview.kb-exporting .kb-body{grid-template-columns:200px minmax(0,1fr) 290px}
+  .kb-body{grid-template-columns:180px 46px minmax(0,1fr) minmax(260px,.85fr)}
+  #kbview.kb-exporting .kb-body{grid-template-columns:200px 0 minmax(0,1fr) 290px}
+  .kb-pallabel,.kb-palgroup,.kb-palsearch,.kb-palnotes{display:none}
+  .kb-palitem{justify-content:center;padding:7px 0}
 }
 
 /* ── KB: per-field copy, and the section→field mapping ──
@@ -2426,3 +2437,58 @@ body.kbdeck #kbview{left:0;right:0;pointer-events:auto}
 .sv-btn.danger:hover{background:rgba(255,120,120,.22)}
 .sv-btn.danger.armed{background:rgba(255,90,90,.34);border-color:rgba(255,90,90,.7);
   color:#fff}
+
+/* ── KB: the block palette, the split editor, and drop targets ──
+   Blocks are a way of writing markdown without typing the syntax. Nothing
+   here is a second document format: a drop splices a snippet into the same
+   textarea you could have typed into, and the file on disk stays markdown. */
+.kb-palette{border-right:1px solid var(--edge);background:rgba(0,0,0,.13);
+  overflow-y:auto;padding:16px 9px 30px;display:flex;flex-direction:column;gap:2px}
+.kb-palgroup{font-family:var(--mono);font-size:9px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--faint);margin:13px 3px 5px}
+.kb-palgroup:first-of-type{margin-top:4px}
+.kb-palitem{display:flex;align-items:center;gap:8px;width:100%;font:inherit;font-size:11.5px;
+  text-align:left;padding:6px 8px;border-radius:8px;cursor:grab;color:var(--muted);
+  background:rgba(255,255,255,.04);border:1px solid transparent;transition:.18s var(--ease)}
+.kb-palitem:hover{background:rgba(255,255,255,.10);color:var(--paper);
+  border-color:var(--edge)}
+.kb-palitem:active{cursor:grabbing}
+.kb-palglyph{flex:0 0 17px;text-align:center;font-family:var(--mono);font-size:11px;
+  color:var(--kb-a)}
+.kb-pallabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-palsearch{width:100%;font:inherit;font-size:11px;padding:6px 8px;margin:2px 0 6px;
+  border-radius:8px;border:1px solid var(--edge);background:rgba(0,0,0,.24);color:var(--paper)}
+.kb-palsearch:focus{outline:0;border-color:rgba(var(--acc),.7)}
+.kb-palnotes{display:flex;flex-direction:column;gap:2px}
+.kb-palnote{font:inherit;font-size:11px;text-align:left;padding:5px 8px;border-radius:7px;
+  cursor:grab;color:var(--muted);background:rgba(255,255,255,.03);border:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-palnote:hover{background:rgba(255,255,255,.09);color:var(--paper)}
+
+/* ── the right column's three tenants ── */
+.kb-tabs{display:flex;gap:2px;padding:3px;margin-bottom:12px;border-radius:var(--r-sm);
+  background:rgba(0,0,0,.24);border:1px solid var(--edge)}
+.kb-tabs button{flex:1;font:inherit;font-size:11px;font-weight:500;padding:6px 8px;border:0;
+  border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;
+  transition:.24s var(--ease)}
+.kb-tabs button[aria-pressed="true"]{background:rgba(255,255,255,.14);color:var(--paper);
+  box-shadow:0 1px 0 var(--edge-hi) inset}
+.kb-pane[hidden]{display:none}
+.kb-render{font-size:14px;line-height:1.65}
+/* The rendered blocks reuse the note view's own styling -- same renderer,
+   same classes -- so the preview is the app's look, not an approximation.
+   It becomes the destination's look only on export. */
+.kb-blk{border-radius:8px;padding:1px 8px;margin:0 -8px;cursor:text;
+  border:1px solid transparent;transition:background .16s var(--ease)}
+.kb-blk:hover{background:rgba(255,255,255,.035);border-color:var(--edge)}
+/* A drop zone is invisible until something is being dragged, then it is a
+   real target: a two-pixel line nobody can hit is not a drop target. */
+.kb-drop{height:6px;margin:1px 0;border-radius:3px;transition:.14s var(--ease)}
+.kb-drop.wide{height:60px}
+body.kb-dragging .kb-drop{height:16px;background:rgba(255,255,255,.05);
+  outline:1px dashed var(--edge);outline-offset:-4px}
+body.kb-dragging .kb-drop.wide{height:80px}
+.kb-drop.over{background:rgba(var(--acc),.30);outline:1px solid rgba(var(--acc),.8);
+  box-shadow:0 0 14px -2px rgba(var(--acc),.7)}
+.kb-editor.kb-dropinto{border-color:rgba(var(--acc),.8);
+  box-shadow:0 0 0 3px rgba(var(--acc),.16)}

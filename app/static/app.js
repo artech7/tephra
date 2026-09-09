@@ -1701,12 +1701,26 @@ async function commitEmbedMove(fromIdx, toIdx, side) {
 // a hard ceiling on how far the block can be pulled open afterward.
 const CODE_BLOCK_CAP = 200;
 
-function enhanceCodeBlocks() {
+/* The enhancement pass a freshly rendered note needs, in one place.
+   Called three times from this file for #noteBody, and by the KB deck for
+   its live preview -- which renders the same markdown through the same
+   renderer and so needs the same wiring. A root parameter rather than a
+   second implementation; every caller that passes nothing gets exactly the
+   behaviour it had. Headings are left out on purpose: collapsible folds are
+   a reading affordance, and the KB preview is something you write beside. */
+window.tephraEnhanceRendered = (root) => {
+  enhanceCodeBlocks(root);
+  enhanceMermaid(root);
+  window.tephraNetDiagram?.enhance(root);
+  window.tephraSheets?.enhance(root);
+};
+
+function enhanceCodeBlocks(root) {
   // :not(.mermaid) -- a ```mermaid fence renders as <pre class="mermaid">
   // holding raw diagram source until enhanceMermaid() below replaces it
   // with an SVG; capping its height here would either clip that source
   // mid-render or (once it's an SVG) crop the diagram for no reason.
-  for (const pre of $('#noteBody').querySelectorAll('pre:not(.mermaid)')) {
+  for (const pre of (root || $('#noteBody')).querySelectorAll('pre:not(.mermaid)')) {
     if (!pre.style.height && pre.scrollHeight > CODE_BLOCK_CAP) pre.style.height = CODE_BLOCK_CAP + 'px';
   }
 }
@@ -1717,8 +1731,8 @@ function enhanceCodeBlocks() {
 // automatic whole-document scan.
 if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
-async function enhanceMermaid() {
-  const nodes = [...$('#noteBody').querySelectorAll('pre.mermaid:not([data-processed])')];
+async function enhanceMermaid(root) {
+  const nodes = [...(root || $('#noteBody')).querySelectorAll('pre.mermaid:not([data-processed])')];
   if (nodes.length && window.mermaid) {
     // A malformed diagram doesn't land here -- mermaid.run() renders an
     // inline error diagram per-element by default. This only catches

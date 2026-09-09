@@ -409,7 +409,7 @@
     }
   }
 
-  function enhanceSheets() {
+  function enhanceSheets(root) {
     // A note re-render replaces #noteBody's innerHTML, which destroys the
     // placeholder marking where an expanded card came from -- leaving that
     // card orphaned inside the overlay with nowhere to return to. Drop it
@@ -420,7 +420,9 @@
       viewing.card.remove();
       viewing = null;
     }
-    for (const card of document.querySelectorAll('#noteBody .sheets:not([data-processed])')) {
+    const host = root || document.querySelector('#noteBody');
+    if (!host) return;
+    for (const card of host.querySelectorAll('.sheets:not([data-processed])')) {
       card.setAttribute('data-processed', 'true');
 
       card.addEventListener('click', (e) => {

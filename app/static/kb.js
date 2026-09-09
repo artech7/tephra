@@ -48,6 +48,11 @@
     filter: '',
     picking: false,
     fieldmap: {},
+    blocks: [],
+    blockGroups: [],
+    rightTab: 'render',
+    previewBlocks: [],
+    notes: [],
     sectionFields: [],
     form: '',
   };
@@ -82,6 +87,7 @@
           New article
         </button>
       </aside>
+      <aside class="kb-palette" id="kbPalette"></aside>
       <section class="kb-main" id="kbMain"></section>
       <aside class="kb-aside" id="kbAside"></aside>
     </div>`;
@@ -295,7 +301,11 @@
     }
   }
 
-  /* ── write mode ── */
+  /* ── write mode ────────────────────────────────────────────────────────
+     Markdown on the left, the same markdown rendered on the right, and a
+     palette of blocks you can drag into either. The file on disk stays
+     plain markdown throughout: a block is a way of writing the syntax
+     without typing it, never a second format. */
   function renderWrite() {
     const main = $('#kbMain');
     if (!S.article) {
@@ -303,6 +313,7 @@
       main.appendChild(el('p', 'kb-empty kb-empty-lg',
         'Pick an article on the left, or start a new one.'));
       $('#kbAside').innerHTML = '';
+      $('#kbPalette').innerHTML = '';
       return;
     }
     const a = S.article;
@@ -310,11 +321,257 @@
       <input type="text" id="kbTitle" class="kb-title" value="${esc(a.title)}"
              placeholder="Article title">
       <textarea id="kbBody" class="kb-editor" spellcheck="true"
-                placeholder="Write the article in markdown."></textarea>`;
+                placeholder="Write the article in markdown, or drag a block in."></textarea>`;
     $('#kbBody').value = a.body || '';
     $('#kbTitle').oninput = queueSave;
-    $('#kbBody').oninput = queueSave;
+    $('#kbBody').oninput = () => { queueSave(); queuePreview(); };
+    wireEditorDrop($('#kbBody'));
+    renderPalette();
     renderAside();
+    loadPreview();
+  }
+
+  /* ── the palette ── */
+  function renderPalette() {
+    const box = $('#kbPalette');
+    box.innerHTML = '<div class="eyebrow"><span>Blocks</span></div>';
+    S.blockGroups.forEach((group) => {
+      const items = S.blocks.filter((b) => b.group === group);
+      if (!items.length) return;
+      box.appendChild(el('p', 'kb-palgroup', group));
+      items.forEach((b) => box.appendChild(paletteItem(b)));
+    });
+    // Every note in the vault, draggable straight in as a [[wikilink]] --
+    // the point of writing KBs in a wiki rather than in the KB system.
+    box.appendChild(el('p', 'kb-palgroup', 'Notes'));
+    const search = el('input', 'kb-palsearch');
+    search.type = 'search';
+    search.placeholder = 'Find a note…';
+    search.oninput = () => renderNoteChips(search.value);
+    box.appendChild(search);
+    box.appendChild(el('div', 'kb-palnotes'));
+    renderNoteChips('');
+  }
+
+  function paletteItem(b) {
+    const item = el('button', 'kb-palitem');
+    item.type = 'button';
+    item.draggable = true;
+    item.title = b.hint;
+    item.innerHTML = `<span class="kb-palglyph">${esc(b.glyph)}</span>`
+      + `<span class="kb-pallabel">${esc(b.label)}</span>`;
+    item.addEventListener('dragstart', (e) => startDrag(e, { block: b.id }));
+    // Clicking appends, for anyone who would rather not drag -- and for a
+    // keyboard, where dragging is not available at all.
+    item.onclick = () => insertAtLine(lineCount(), b.snippet, b.select);
+    return item;
+  }
+
+  async function renderNoteChips(q) {
+    const box = $('.kb-palnotes');
+    if (!box) return;
+    if (!S.notes.length) {
+      try { S.notes = await api('/notes'); } catch { S.notes = []; }
+    }
+    const needle = q.trim().toLowerCase();
+    box.innerHTML = '';
+    S.notes
+      .filter((n) => n.slug !== S.slug)
+      .filter((n) => !needle || n.title.toLowerCase().includes(needle))
+      .slice(0, 24)
+      .forEach((n) => {
+        const chip = el('button', 'kb-palnote', n.title);
+        chip.type = 'button';
+        chip.draggable = true;
+        chip.title = 'Drag in as a [[link]] to this note';
+        chip.addEventListener('dragstart', (e) => startDrag(e, { note: n.title }));
+        chip.onclick = () => insertAtLine(lineCount(), `[[${n.title}]]`, n.title);
+        box.appendChild(chip);
+      });
+  }
+
+  function startDrag(e, payload) {
+    // text/plain as well as the private type: dropping onto the textarea
+    // uses the browser's own text insertion as a fallback when our handler
+    // cannot work out a caret position.
+    const snippet = payload.note
+      ? `[[${payload.note}]]`
+      : (S.blocks.find((b) => b.id === payload.block) || {}).snippet || '';
+    e.dataTransfer.setData('text/plain', snippet);
+    e.dataTransfer.setData('application/x-tephra-block', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'copy';
+    document.body.classList.add('kb-dragging');
+    e.target.addEventListener('dragend', () => {
+      document.body.classList.remove('kb-dragging');
+      clearDropMarks();
+    }, { once: true });
+  }
+
+  function payloadOf(e) {
+    const raw = e.dataTransfer.getData('application/x-tephra-block');
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+
+  function snippetOf(payload) {
+    if (!payload) return null;
+    if (payload.note) return { snippet: `[[${payload.note}]]`, select: payload.note };
+    const b = S.blocks.find((x) => x.id === payload.block);
+    return b ? { snippet: b.snippet, select: b.select } : null;
+  }
+
+  /* ── splicing ── */
+  const lineCount = () => (($('#kbBody') || {}).value || '').split('\n').length;
+
+  /* Insert `snippet` so that it starts at source line `line`, keeping the
+     blank lines markdown needs on either side, then select `select` so the
+     first thing typed replaces the placeholder. */
+  async function insertAtLine(line, snippet, select) {
+    const ta = $('#kbBody');
+    if (!ta) return;
+    const lines = ta.value.split('\n');
+    const before = lines.slice(0, Math.max(0, Math.min(line, lines.length)));
+    const after = lines.slice(Math.max(0, Math.min(line, lines.length)));
+    while (before.length && before[before.length - 1].trim() === '') before.pop();
+    while (after.length && after[0].trim() === '') after.shift();
+    const head = before.length ? before.join('\n') + '\n\n' : '';
+    const tail = after.length ? '\n\n' + after.join('\n') : '\n';
+    ta.value = head + snippet + tail;
+    ta.focus();
+    const at = head.length;
+    const rel = select ? snippet.indexOf(select) : -1;
+    if (rel >= 0) ta.setSelectionRange(at + rel, at + rel + select.length);
+    else ta.setSelectionRange(at + snippet.length, at + snippet.length);
+    scrollToOffset(ta, at);
+    await flushBody();
+    await loadPreview();
+  }
+
+  function scrollToOffset(ta, at) {
+    const line = ta.value.slice(0, at).split('\n').length;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    ta.scrollTop = Math.max(0, (line - 4) * lh);
+  }
+
+  /* Dropping onto the markdown itself inserts at the caret under the
+     pointer. caretRangeFromPoint and caretPositionFromPoint are the same
+     idea under two names -- neither is universal, so a plain append is the
+     floor rather than losing the drop. */
+  function wireEditorDrop(ta) {
+    if (!ta) return;
+    ta.addEventListener('dragover', (e) => {
+      if (!payloadOf(e) && !e.dataTransfer.types.includes('application/x-tephra-block')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      ta.classList.add('kb-dropinto');
+    });
+    ta.addEventListener('dragleave', () => ta.classList.remove('kb-dropinto'));
+    ta.addEventListener('drop', async (e) => {
+      const payload = payloadOf(e);
+      ta.classList.remove('kb-dropinto');
+      if (!payload) return;
+      e.preventDefault();
+      const bit = snippetOf(payload);
+      if (!bit) return;
+      const at = caretFromPoint(ta, e.clientX, e.clientY);
+      const line = ta.value.slice(0, at).split('\n').length - 1;
+      await insertAtLine(line, bit.snippet, bit.select);
+    });
+  }
+
+  function caretFromPoint(ta, x, y) {
+    if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos && pos.offsetNode) return pos.offset;
+    }
+    if (document.caretRangeFromPoint) {
+      const r = document.caretRangeFromPoint(x, y);
+      if (r) return r.startOffset;
+    }
+    return typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+  }
+
+  /* ── the live render ── */
+  let previewT = null;
+  function queuePreview() {
+    clearTimeout(previewT);
+    previewT = setTimeout(loadPreview, 320);
+  }
+
+  async function loadPreview() {
+    clearTimeout(previewT);
+    if (!S.slug || S.rightTab !== 'render') return;
+    const host = $('#kbRender');
+    if (!host) return;
+    try {
+      const res = await api('/kb/' + S.slug + '/render');
+      S.previewBlocks = res.blocks || [];
+      paintPreview(res);
+    } catch {
+      host.innerHTML = '';
+      host.appendChild(el('p', 'kb-empty', 'Could not render this article.'));
+    }
+  }
+
+  function paintPreview(res) {
+    const host = $('#kbRender');
+    if (!host) return;
+    host.innerHTML = '';
+    const blocks = res.blocks || [];
+    if (!blocks.length) {
+      host.appendChild(dropZone(0, true));
+      host.appendChild(el('p', 'kb-empty',
+        'Nothing here yet. Drag a block in from the left.'));
+      return;
+    }
+    blocks.forEach((b) => {
+      host.appendChild(dropZone(b.start));
+      const wrap = el('div', 'kb-blk');
+      wrap.dataset.start = b.start;
+      wrap.dataset.end = b.end;
+      wrap.innerHTML = b.html;
+      // Clicking a rendered block puts the caret on its source, so the two
+      // panes stay one document rather than two views you navigate apart.
+      wrap.onclick = () => selectSourceLines(b.start, b.end);
+      host.appendChild(wrap);
+    });
+    host.appendChild(dropZone((res.lines || 0)));
+    window.tephraEnhanceRendered?.(host);
+  }
+
+  function dropZone(line, wide) {
+    const z = el('div', 'kb-drop' + (wide ? ' wide' : ''));
+    z.dataset.line = line;
+    z.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes('application/x-tephra-block')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      clearDropMarks();
+      z.classList.add('over');
+    });
+    z.addEventListener('dragleave', () => z.classList.remove('over'));
+    z.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      z.classList.remove('over');
+      const bit = snippetOf(payloadOf(e));
+      if (bit) await insertAtLine(Number(z.dataset.line), bit.snippet, bit.select);
+    });
+    return z;
+  }
+
+  function clearDropMarks() {
+    document.querySelectorAll('.kb-drop.over').forEach((z) => z.classList.remove('over'));
+  }
+
+  function selectSourceLines(start, end) {
+    const ta = $('#kbBody');
+    if (!ta) return;
+    const lines = ta.value.split('\n');
+    const at = lines.slice(0, start).join('\n').length + (start ? 1 : 0);
+    const to = at + lines.slice(start, end + 1).join('\n').length;
+    ta.focus();
+    ta.setSelectionRange(at, to);
+    scrollToOffset(ta, at);
   }
 
   function fieldInput(f, value) {
@@ -334,6 +591,9 @@
       value="${esc(value)}"${hint}>`;
   }
 
+  /* The right column carries three things that all want the same space, so
+     they take turns: the live render (the default, because it is what you
+     look at while writing), the structure panel, and the metadata form. */
   function renderAside() {
     const box = $('#kbAside');
     if (!S.article) { box.innerHTML = ''; return; }
@@ -352,23 +612,34 @@
     }).join('');
 
     box.innerHTML = `
-      <div class="kb-asidesect">
-        <div class="eyebrow"><span>Structure</span><span>${esc(tpl ? tpl.name : '')}</span></div>
-        <div id="kbOutline" class="kb-outline"></div>
+      <div class="kb-tabs">
+        <button type="button" data-kbtab="render">Render</button>
+        <button type="button" data-kbtab="structure">Structure</button>
+        <button type="button" data-kbtab="fields">Fields</button>
       </div>
-      <div class="kb-asidesect">
-        <div class="eyebrow"><span>Metadata</span></div>
-        <div class="kb-fields admin-only">${fields}</div>
+      <div class="kb-pane" id="kbPaneRender">
+        <div class="kb-render" id="kbRender"></div>
       </div>
-      <div class="kb-asidesect kb-dangersect">
-        <button class="sv-btn admin-only" id="kbRelease"
-          title="Stop treating this note as a KB article. The prose is untouched.">
-          Release from KB</button>
-        <button class="sv-btn danger admin-only" id="kbDelete"
-          title="Move this article to the vault trash. Recoverable from vault/.trash.">
-          Delete article</button>
-        <p class="kb-fieldhint">Release keeps the note and only drops its KB fields.
-          Delete moves the whole note to the vault trash.</p>
+      <div class="kb-pane" id="kbPaneStructure">
+        <div class="kb-asidesect">
+          <div class="eyebrow"><span>Sections</span><span>${esc(tpl ? tpl.name : '')}</span></div>
+          <div id="kbOutline" class="kb-outline"></div>
+        </div>
+      </div>
+      <div class="kb-pane" id="kbPaneFields">
+        <div class="kb-asidesect">
+          <div class="kb-fields admin-only">${fields}</div>
+        </div>
+        <div class="kb-asidesect kb-dangersect">
+          <button class="sv-btn admin-only" id="kbRelease"
+            title="Stop treating this note as a KB article. The prose is untouched.">
+            Release from KB</button>
+          <button class="sv-btn danger admin-only" id="kbDelete"
+            title="Move this article to the vault trash. Recoverable from vault/.trash.">
+            Delete article</button>
+          <p class="kb-fieldhint">Release keeps the note and only drops its KB fields.
+            Delete moves the whole note to the vault trash.</p>
+        </div>
       </div>`;
 
     S.fields.forEach((f) => {
@@ -380,7 +651,24 @@
     });
     $('#kbRelease').onclick = releaseArticle;
     wireDelete($('#kbDelete'));
+    box.querySelectorAll('[data-kbtab]').forEach((b) => {
+      b.onclick = () => setRightTab(b.dataset.kbtab);
+    });
+    setRightTab(S.rightTab);
     renderOutline();
+  }
+
+  function setRightTab(tab) {
+    S.rightTab = tab;
+    const box = $('#kbAside');
+    if (!box) return;
+    box.querySelectorAll('[data-kbtab]').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b.dataset.kbtab === tab)));
+    ['render', 'structure', 'fields'].forEach((t) => {
+      const pane = $('#kbPane' + t.charAt(0).toUpperCase() + t.slice(1));
+      if (pane) pane.hidden = t !== tab;
+    });
+    if (tab === 'render') loadPreview();
   }
 
   function renderOutline() {
@@ -911,6 +1199,8 @@
         S.fields = t.fields || [];
         S.targets = t.targets || ['servicenow'];
         S.sectionFields = t.section_fields || [];
+        S.blocks = t.blocks || [];
+        S.blockGroups = t.block_groups || [];
         S.form = t.form || '';
         S.ready = true;
         fillTypeSelects();

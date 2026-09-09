@@ -1600,6 +1600,8 @@ def kb_templates():
         "targets": list(kb_export.TARGETS),
         "link_modes": list(kb_export.LINK_MODES),
         "form": kb.FORM,
+        "blocks": kb.blocks_payload(),
+        "block_groups": list(kb.BLOCK_GROUPS),
         "section_fields": list(kb.SECTION_FIELDS),
         "meta_fields": list(kb.META_FIELDS),
     }
@@ -1671,6 +1673,35 @@ def kb_article(slug: str):
         "field_plan": kb.field_plan(note),
         "fieldmap": kb.parse_fieldmap(note.meta.get(kb.MAP_KEY)),
     }
+
+
+@app.get("/api/kb/{slug}/render")
+def kb_render(slug: str):
+    """The article rendered block by block, each carrying the source lines it
+    came from.
+
+    Deliberately Tephra's own renderer, not the exporter's: this is the
+    authoring preview, and it should look like the rest of the app. The
+    export preview is a separate thing and shows the destination's look
+    instead.
+
+    The line ranges are what make the preview droppable. An insertion between
+    two rendered blocks becomes a splice at a known line number, rather than
+    a guess at where a pixel position falls in the source text.
+    """
+    note = _article(slug)
+    resolve = resolver()
+    # Citations index into the article's own Sources list, and each block is
+    # rendered on its own, so the parsed list has to be handed to every one
+    # of them or a [^1] in the prose renders as a dangling marker.
+    _, sources_sec = idx.split_sources_block(note.body)
+    sources = idx.parse_sources(sources_sec)
+    out = []
+    for b in kb.split_blocks(note.body):
+        html, _targets, _used = rndr.render(b["text"], resolve, sources=sources)
+        out.append({**b, "html": html})
+    return {"slug": slug, "blocks": out,
+            "lines": len(note.body.split("\n"))}
 
 
 @app.put("/api/kb/{slug}/meta")
