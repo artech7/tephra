@@ -107,5 +107,15 @@ ck("the wikilink in a cell became a link, not literal brackets",
    "[[Some Note]]" not in h3 and "<a" in h3, )
 ck("widths did not interfere with it", "<colgroup>" in h3)
 
+print("\n── a multi-line cell, the shape every report generator emits ──")
+# The reported case: a tool that writes one `<br>`-separated block per cell.
+# The cell has to break onto several lines and still render its markdown.
+h4 = html("```sheets\n## W\n\n| Check | Details |\n| --- | --- |\n"
+          "| CatalystJobs | 3 jobs.<br><br>**ID** · **Start**<br>1 · 2026 |\n```\n")
+ck("the <br>s became real line breaks inside the cell",
+   "3 jobs.<br />" in h4 and "&lt;br&gt;" not in h4)
+ck("markdown either side of a <br> still renders",
+   "<strong>ID</strong>" in h4)
+
 print(f"\n  {ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

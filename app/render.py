@@ -43,7 +43,8 @@ row rather than stacked -- the same "no new syntax" instinct as the size
 spec above. A blank line between two embeds keeps today's stacked layout.
 
 Tables and plain blockquotes are standard CommonMark/GFM and need nothing
-special. Callout/note boxes are not standard, but the syntax pasted-in
+special, beyond `<br>` being let through raw so a table cell can hold more
+than one line -- see the inline rule below. Callout/note boxes are not standard, but the syntax pasted-in
 sources actually use for them (GitHub's and Obsidian's, which agree) is
 recognised on top of an ordinary blockquote:
 
@@ -72,6 +73,42 @@ from .index import CITE_RE, EMBED_RE, WIKI_RE
 md = MarkdownIt("commonmark", {"html": False, "linkify": True, "breaks": False})
 md.enable("table")
 md.enable("strikethrough")
+
+# Raw HTML is off (`html: False` above), which is the right default for a
+# file anyone can paste into -- but it also escapes the one tag a markdown
+# table genuinely needs. A GFM cell cannot contain a newline, so every tool
+# that emits a multi-line cell emits `<br>`, and with raw HTML off those
+# arrive as visible "&lt;br&gt;" text with the whole cell run onto one line.
+# So `<br>` is allowed back in by name, as its own inline rule, rather than
+# by turning `html` on and admitting every other tag with it.
+#
+# It's an inline rule and not a post-pass over the rendered HTML because a
+# post-pass cannot tell a cell's `<br>` from a `` `<br>` `` written inside a
+# code span in a note *about* HTML -- by then both are the same escaped
+# text. Running as a rule, code spans are claimed by the `backticks` rule
+# first and fenced blocks never reach inline parsing at all, so a literal
+# `<br>` still shows as literal `<br>`.
+_BR_RE = re.compile(r"<br\s*/?>", re.I)
+
+
+def _raw_br(state, silent) -> bool:
+    if state.src[state.pos] != "<":
+        return False
+    m = _BR_RE.match(state.src, state.pos)
+    if not m:
+        return False
+    if not silent:
+        # "hardbreak" is markdown-it's own token for a line break, so this
+        # renders through the standard renderer and needs no rule of ours.
+        state.push("hardbreak", "br", 0)
+    state.pos = m.end()
+    return True
+
+
+# Before "autolink", the other rule that claims a "<": it wants a scheme, so
+# it would never match "<br>", but sitting next to it keeps the two "<"
+# handlers together.
+md.inline.ruler.before("autolink", "raw_br", _raw_br)
 
 URL_LINE_RE = re.compile(r"^\s*(https?://\S+)\s*$", re.M)
 

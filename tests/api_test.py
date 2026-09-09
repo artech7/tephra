@@ -226,6 +226,28 @@ with TestClient(app) as c:
     check("a [[...]]-looking label inside a netdiagram fence survives literally, not rewritten into a wikilink",
           "[[not a link]]" in h and 'class="wl' not in h, h)
 
+    print("\n── raw <br>: the one HTML tag let through, because a GFM cell has no newline ──")
+    h = rendered("| A | B |\n| --- | --- |\n| x | one<br>two |")
+    check("a <br> in a table cell becomes a real line break, not visible &lt;br&gt; text",
+          "one<br />\ntwo" in h and "&lt;br&gt;" not in h, h)
+
+    h = rendered("a<br>b<br/>c<br />d<BR>e")
+    check("the closing-slash and uppercase spellings are all recognised",
+          h.count("<br />") == 4 and "&lt;br" not in h, h)
+
+    h = rendered("A code span: `<br>` here.")
+    check("a <br> inside a code span stays literal -- the point of doing this as a parse "
+          "rule rather than a pass over the rendered HTML",
+          "<code>&lt;br&gt;</code>" in h, h)
+
+    h = rendered("```text\n<br>\n```")
+    check("a <br> inside a fence stays literal too", "&lt;br&gt;" in h, h)
+
+    h = rendered("<script>alert(1)</script> <b>x</b> <bru> <br class=\"x\">")
+    check("every other tag is still escaped -- this is not `html: True` by the back door",
+          "<script" not in h and "<b>" not in h and "&lt;bru&gt;" in h
+          and "&lt;br class=" in h, h)
+
     print("\n── search ──")
     s = c.get("/api/search", params={"q": "inverter"}).json()
     check("fts finds note", any(x["slug"] == new["slug"] for x in s), [x["slug"] for x in s])
