@@ -21,6 +21,8 @@ from . import guide_import
 from . import importers
 from . import settings as cfg
 from . import index as idx
+from . import kb
+from . import kb_export
 from . import sessions as sess
 from . import study as st
 from . import render as rndr
@@ -1565,6 +1567,177 @@ def study_reset(_admin: None = Depends(require_admin)):
     prog = st.load_progress()
     st.save_progress({"answers": {}, "flagged": [], "settings": prog.get("settings", {})})
     return {"ok": True}
+
+
+# ── KB authoring ───────────────────────────────────────────────────────────
+#
+# A KB article is an ordinary note carrying a `kb_type` frontmatter key --
+# see app/kb.py. These routes are a lens over the same notes every other
+# route already serves, not a parallel store: creating an article calls
+# vault.write and idx.reindex_note like anything else, and deleting one is
+# still DELETE /api/notes/{slug}.
+
+
+class KbCreateIn(BaseModel):
+    title: str | None = None
+    kb_type: str | None = None
+    meta: dict | None = None
+
+
+class KbMetaIn(BaseModel):
+    meta: dict
+
+
+@app.get("/api/kb/templates")
+def kb_templates():
+    """Everything the authoring UI needs to build itself: the article shapes,
+    the metadata schema its form is generated from, and the export targets.
+    One request, because all three change together or not at all."""
+    return {
+        "templates": kb.templates_payload(),
+        "fields": kb.fields_payload(),
+        "default": kb.DEFAULT_TEMPLATE,
+        "targets": list(kb_export.TARGETS),
+        "link_modes": list(kb_export.LINK_MODES),
+    }
+
+
+@app.get("/api/kb/articles")
+def kb_articles():
+    return {"articles": kb.list_articles()}
+
+
+@app.post("/api/kb/articles")
+def kb_create(payload: KbCreateIn, _admin: None = Depends(require_admin)):
+    kb_type = (payload.kb_type or kb.DEFAULT_TEMPLATE).strip()
+    if kb_type not in kb.TEMPLATES:
+        raise HTTPException(400, f"unknown article type: {kb_type}")
+    title = (payload.title or "Untitled article").strip() or "Untitled article"
+    meta = kb.sanitize_meta({**(payload.meta or {}), kb.TYPE_KEY: kb_type})
+    meta.setdefault("kb_status", "draft")
+    note = vault.Note(slug=vault.unique_slug(title), title=title,
+                      body=kb.new_body(kb_type), meta=meta)
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    return kb.article_row(note)
+
+
+def _article(slug: str) -> vault.Note:
+    note = vault.read(slug)
+    if not note:
+        raise HTTPException(404, "note not found")
+    return note
+
+
+@app.get("/api/kb/{slug}")
+def kb_article(slug: str):
+    """The article as the authoring deck needs it: the note itself, its KB
+    fields, and the template's sections matched up against the ones actually
+    present, so the deck can show what's missing without a second request."""
+    note = _article(slug)
+    tpl = kb.template_of(note)
+    present = {s["heading"].lower(): s for s in kb.sections(note.body)}
+    outline = []
+    if tpl:
+        for sec in tpl.sections:
+            hit = present.get(sec.heading.lower())
+            outline.append({
+                "heading": sec.heading, "hint": sec.hint,
+                "required": sec.required, "shape": sec.shape,
+                "present": hit is not None,
+                "empty": bool(hit) and not kb.strip_todos(hit["content"]).strip(),
+            })
+    extra = []
+    if tpl:
+        known = {s.heading.lower() for s in tpl.sections}
+        extra = [s["heading"] for s in kb.sections(note.body)
+                 if s["heading"] and s["heading"].lower() not in known]
+    return {
+        **_note_dict(note),
+        "kb": kb.meta_of(note),
+        "is_article": kb.is_article(note),
+        "template": tpl.id if tpl else "",
+        "template_name": tpl.name if tpl else "",
+        "outline": outline,
+        "extra_sections": extra,
+        "has_guidance": kb.has_todos(note.body),
+    }
+
+
+@app.put("/api/kb/{slug}/meta")
+def kb_save_meta(slug: str, payload: KbMetaIn, _admin: None = Depends(require_admin)):
+    """Replace this note's kb_* frontmatter wholesale. Non-KB frontmatter is
+    carried through untouched -- category, study state and anything a future
+    feature adds live in the same header and are none of this route's
+    business."""
+    note = _article(slug)
+    note.meta = {**kb.strip_meta(note.meta), **kb.sanitize_meta(payload.meta or {})}
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    return {"slug": note.slug, "kb": kb.meta_of(note),
+            "is_article": kb.is_article(note)}
+
+
+@app.post("/api/kb/{slug}/adopt")
+def kb_adopt(slug: str, payload: KbCreateIn, _admin: None = Depends(require_admin)):
+    """Turn an existing note into a KB article without touching its prose.
+
+    Most articles do not start life as articles -- they start as the note
+    someone took while working the case. Adopting one only sets the type and
+    a draft status; the headings it already has are the author's to
+    reconcile, and the structure panel is where that conversation happens.
+    """
+    note = _article(slug)
+    kb_type = (payload.kb_type or kb.DEFAULT_TEMPLATE).strip()
+    if kb_type not in kb.TEMPLATES:
+        raise HTTPException(400, f"unknown article type: {kb_type}")
+    meta = kb.sanitize_meta({**(payload.meta or {}), kb.TYPE_KEY: kb_type})
+    meta.setdefault("kb_status", "draft")
+    note.meta = {**kb.strip_meta(note.meta), **meta}
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    return kb.article_row(note)
+
+
+@app.post("/api/kb/{slug}/release")
+def kb_release(slug: str, _admin: None = Depends(require_admin)):
+    """Stop treating this note as a KB article. The prose stays exactly as it
+    is -- only the kb_* keys go -- because the note was always the real
+    thing and the article was only ever a lens over it."""
+    note = _article(slug)
+    note.meta = kb.strip_meta(note.meta)
+    vault.write(note)
+    idx.reindex_note(db(), note)
+    return {"slug": note.slug, "is_article": False}
+
+
+@app.get("/api/kb/{slug}/export")
+def kb_export_article(slug: str, target: str = "servicenow", links: str = "auto",
+                      include_meta: bool = True):
+    """The export as JSON, for the deck's preview and its copy buttons.
+
+    Not gated on the admin lock: exporting reads a note and writes nothing,
+    and a locked session is still allowed to read every other note route.
+    """
+    note = _article(slug)
+    if target not in kb_export.TARGETS:
+        raise HTTPException(400, f"unknown export target: {target}")
+    return kb_export.export(note, target=target, links=links,
+                            include_meta=include_meta)
+
+
+@app.get("/api/kb/{slug}/export/download")
+def kb_export_download(slug: str, target: str = "standalone", links: str = "auto",
+                       include_meta: bool = True):
+    note = _article(slug)
+    if target not in kb_export.TARGETS:
+        raise HTTPException(400, f"unknown export target: {target}")
+    out = kb_export.export(note, target=target, links=links, include_meta=include_meta)
+    return Response(
+        content=out["content"],
+        media_type=f"{out['mime']}; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{out["filename"]}"'},
+    )
 
 
 # ── theme ──────────────────────────────────────────────────────────────────

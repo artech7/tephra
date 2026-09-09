@@ -2214,3 +2214,177 @@ body.sheet-resizing .sheet-grip::after{opacity:1}
 /* Same reason as body.sheet-resizing above, in the other axis. */
 body.sheet-resizing-v{cursor:ns-resize!important;-webkit-user-select:none;user-select:none}
 body.sheet-resizing-v .sheet-vgrip::after{opacity:1}
+
+/* ══════════════════════════════════════════════════════════════
+   KB AUTHORING
+   ══════════════════════════════════════════════════════════════
+   The third deck. Parked one deck-width right and slid in exactly the way
+   Crucible is, using offsets rather than transform for the same reason
+   documented at #studyview: a transformed ancestor breaks backdrop-filter
+   on WebKit, and every glass region in here depends on it. */
+:root{
+  --kb-a:#4FD1C5;
+  --kb-b:#63B3ED;
+  --kb-c:#9F7AEA;
+}
+/* Same (0,1,1) trap `.mark i` set for Crucible -- an id selector is what
+   actually beats it, so KB gets its own gradient rather than Tephra's. */
+#kbBtn i{
+  background:conic-gradient(from 210deg,var(--kb-a),var(--kb-b),var(--kb-c),var(--kb-a));
+  box-shadow:0 0 16px -2px var(--kb-a);
+}
+#kbBtn[aria-pressed="true"] i{box-shadow:0 0 20px -1px var(--kb-a);transform:scale(1.06)}
+/* KB is the last mark in the row now, so it takes the trailing-border
+   exemption Crucible held while it was last. */
+#crucibleBtn{border-right:1px solid var(--edge);padding-right:15px}
+#kbBtn{border-right:0;padding-right:6px}
+
+body.kbdeck .side{left:-100%;right:100%}
+#kbview{
+  position:absolute;z-index:5;top:0;bottom:0;left:100%;right:-100%;
+  pointer-events:none;
+  transition:left .5s var(--ease),right .5s var(--ease);
+  overflow:hidden;display:grid;grid-template-rows:auto 1fr;
+  background:
+    linear-gradient(rgba(0,0,0,var(--veil-ink)),rgba(0,0,0,var(--veil-ink))),
+    rgba(255,255,255,var(--frost));
+  backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+  -webkit-backdrop-filter:blur(var(--blur-fixed)) saturate(var(--sat)) brightness(1.06);
+}
+body.kbdeck #kbview{left:0;right:0;pointer-events:auto}
+
+.kb-body{display:grid;grid-template-columns:262px minmax(0,1fr) 344px;min-height:0;
+  transition:grid-template-columns .32s var(--ease)}
+/* Export is a looking mode, not a typing mode: the preview earns the space
+   the metadata form was using. */
+#kbview.kb-exporting .kb-body{grid-template-columns:230px minmax(0,1fr) 330px}
+
+.kb-list{border-right:1px solid var(--edge);padding:16px 12px 12px;overflow-y:auto;
+  background:rgba(0,0,0,.10);display:flex;flex-direction:column;min-height:0}
+.kb-list .eyebrow{margin-bottom:10px}
+#kbFilter{width:100%;font:inherit;font-size:12px;padding:7px 10px;margin-bottom:10px;
+  border-radius:9px;border:1px solid var(--edge);background:rgba(0,0,0,.24);color:var(--paper)}
+#kbFilter:focus{outline:0;border-color:rgba(var(--acc),.7)}
+.kb-rows{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.kb-row{display:flex;flex-direction:column;gap:6px;align-items:flex-start;text-align:left;
+  font:inherit;width:100%;padding:9px 11px;border-radius:10px;cursor:pointer;
+  border:1px solid transparent;background:rgba(255,255,255,.04);color:var(--muted);
+  transition:.2s var(--ease)}
+.kb-row:hover{background:rgba(255,255,255,.09);color:var(--paper)}
+.kb-row[aria-pressed="true"]{background:rgba(var(--acc),.16);border-color:rgba(var(--acc),.45);
+  color:var(--paper)}
+.kb-row-t{font-size:13px;font-weight:500;line-height:1.35}
+.kb-row-m{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.kb-chip{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 6px;border-radius:5px;background:rgba(255,255,255,.10);color:var(--faint)}
+.kb-status-draft{background:rgba(255,255,255,.10);color:var(--faint)}
+.kb-status-review{background:rgba(255,200,97,.18);color:#FFC861}
+.kb-status-published{background:rgba(79,209,197,.18);color:var(--kb-a)}
+.kb-status-retired{background:rgba(255,123,156,.16);color:#FF7B9C}
+.kb-num{font-family:var(--mono);font-size:9px;color:var(--faint)}
+
+.kb-main{overflow-y:auto;padding:22px 28px 48px;display:flex;flex-direction:column;min-height:0}
+.kb-aside{border-left:1px solid var(--edge);overflow-y:auto;padding:16px 14px 40px;
+  background:rgba(0,0,0,.10)}
+.kb-asidesect{margin-bottom:22px}
+.kb-asidesect .eyebrow{margin-bottom:9px}
+
+.kb-title{font:inherit;font-family:var(--display,inherit);font-size:24px;font-weight:600;
+  letter-spacing:-.02em;width:100%;padding:6px 0 12px;margin-bottom:10px;
+  border:0;border-bottom:1px solid var(--edge);background:transparent;color:var(--paper)}
+.kb-title:focus{outline:0;border-bottom-color:rgba(var(--acc),.7)}
+.kb-editor{flex:1;min-height:340px;width:100%;resize:none;font-family:var(--mono);
+  font-size:13px;line-height:1.7;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--edge);background:rgba(0,0,0,.22);color:var(--paper)}
+.kb-editor:focus{outline:0;border-color:rgba(var(--acc),.55)}
+
+/* ── structure panel ── */
+.kb-outline{display:flex;flex-direction:column;gap:3px}
+.kb-sec{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;
+  background:rgba(255,255,255,.04);border-left:2px solid transparent}
+.kb-sec-ok{border-left-color:var(--kb-a)}
+.kb-sec-empty{border-left-color:#FFC861}
+.kb-sec-missing{border-left-color:#FF7B9C}
+.kb-sec-optional{opacity:.72}
+.kb-sec-name{flex:1;text-align:left;font:inherit;font-size:12px;padding:0;border:0;
+  background:none;color:var(--paper);cursor:pointer;line-height:1.4}
+.kb-sec-name:hover{text-decoration:underline}
+.kb-sec-state{font-family:var(--mono);font-size:9px;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--faint)}
+.kb-sec-add{font:inherit;font-size:10px;padding:2px 7px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--edge);background:rgba(255,255,255,.07);color:var(--muted)}
+.kb-sec-add:hover{background:rgba(255,255,255,.14);color:var(--paper)}
+.kb-outline-extra{font-size:11px;color:var(--faint);margin-top:9px;line-height:1.5}
+.kb-outline-warn{font-size:11px;color:#FFC861;margin-top:9px;line-height:1.5}
+
+/* ── metadata form ── */
+.kb-fields{display:flex;flex-direction:column;gap:14px}
+.kb-field input,.kb-field select,.kb-field textarea{width:100%;font:inherit;font-size:12px;
+  padding:7px 10px;border-radius:9px;border:1px solid var(--edge);
+  background:rgba(0,0,0,.24);color:var(--paper);resize:vertical}
+.kb-field input:focus,.kb-field select:focus,.kb-field textarea:focus{outline:0;
+  border-color:rgba(var(--acc),.7)}
+.kb-field.req .sv-fieldlabel::after{content:' ·';color:rgba(var(--acc),.9)}
+.kb-fieldhint{font-size:10.5px;line-height:1.5;color:var(--faint);margin-top:5px}
+
+/* ── export ── */
+.kb-previewhead{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--faint)}
+.kb-previewnote{color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px}
+.kb-preview{flex:1;min-height:420px;width:100%;border:1px solid var(--edge);
+  border-radius:12px;background:#fff}
+.kb-aside select{width:100%;font:inherit;font-size:12px;padding:7px 10px;border-radius:9px;
+  border:1px solid var(--edge);background:rgba(0,0,0,.24);color:var(--paper)}
+.kb-check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;
+  color:var(--muted);cursor:pointer}
+.kb-copyrow{display:flex;gap:7px;margin-bottom:9px}
+.kb-copyrow .sv-btn{flex:1}
+.kb-manifest{display:flex;flex-direction:column;gap:5px}
+.kb-manrow{display:grid;grid-template-columns:20px 1fr;gap:3px 8px;align-items:baseline;
+  padding:7px 9px;border-radius:8px;background:rgba(255,255,255,.04)}
+.kb-mannum{font-family:var(--mono);font-size:10px;color:var(--kb-a)}
+.kb-manname{font-family:var(--mono);font-size:11px;color:var(--paper);word-break:break-all}
+.kb-mancap{grid-column:2;font-size:10.5px;color:var(--faint);line-height:1.45}
+.kb-warns{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px}
+.kb-warns li{font-size:11px;line-height:1.5;color:#FFC861}
+
+/* The off-screen holder the rich-copy fallback selects from. It has to be
+   in the document and rendered for a Range to select it -- display:none or
+   visibility:hidden both make the selection empty and the copy silent -- so
+   it is parked outside the viewport instead. */
+.kb-copyholder{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
+
+/* ── new / adopt ── */
+.kb-pick{position:absolute;inset:0;z-index:12;display:flex;align-items:center;
+  justify-content:center;padding:24px;background:rgba(3,8,9,.55);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.kb-pick[hidden]{display:none}
+.kb-pick-card{width:min(460px,100%);max-height:86vh;overflow-y:auto;padding:18px;
+  border-radius:var(--radius);background:rgba(255,255,255,.09);
+  backdrop-filter:blur(38px) saturate(190%);-webkit-backdrop-filter:blur(38px) saturate(190%);
+  border:1px solid var(--edge);
+  box-shadow:0 1px 0 var(--edge-hi) inset,0 -1px 0 var(--rim-warm) inset,
+             0 46px 100px -34px rgba(0,0,0,.85)}
+.kb-pick-card input,.kb-pick-card select{width:100%;font:inherit;font-size:13px;
+  padding:9px 12px;border-radius:9px;border:1px solid var(--edge);
+  background:rgba(0,0,0,.24);color:var(--paper)}
+.kb-pick-card input:focus,.kb-pick-card select:focus{outline:0;border-color:rgba(var(--acc),.7)}
+.kb-tplsummary{font-size:11.5px;line-height:1.55;color:var(--faint);margin-top:9px}
+.kb-adoptlist{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;
+  margin-top:8px}
+.kb-adoptrow{font:inherit;font-size:12px;text-align:left;padding:7px 10px;border-radius:8px;
+  cursor:pointer;border:1px solid transparent;background:rgba(255,255,255,.05);
+  color:var(--muted)}
+.kb-adoptrow:hover{background:rgba(255,255,255,.10);color:var(--paper)}
+.kb-adoptrow[aria-pressed="true"]{background:rgba(var(--acc),.18);
+  border-color:rgba(var(--acc),.5);color:var(--paper)}
+.kb-pick-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+
+.kb-empty{font-size:11.5px;line-height:1.6;color:var(--faint);padding:8px 2px}
+.kb-empty-lg{font-size:13px;padding:40px 0;text-align:center}
+
+@media(max-width:1180px){
+  .kb-body{grid-template-columns:220px minmax(0,1fr) 300px}
+  #kbview.kb-exporting .kb-body{grid-template-columns:200px minmax(0,1fr) 290px}
+}

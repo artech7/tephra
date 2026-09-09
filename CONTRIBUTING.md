@@ -11,10 +11,12 @@ markdown files on disk are the source of truth; everything else is derived.
       vault.py          note read/write, slugify, path resolution
       render.py         markdown -> html
       study.py          Crucible: flashcards, quiz, fitting
+      kb.py             KB Authoring: article templates, metadata schema
+      kb_export.py      KB article -> ServiceNow / standalone / md / text
       settings.py       config file, recent vaults
       importers.py      study-guide import (json / py / csv / md)
       fb_import.py      FB study guide importer
-      static/           app.js graph.js links.js study.js index.html style.css
+      static/           app.js graph.js links.js study.js kb.js index.html style.css
     desktop/launcher.py webview window, loopback port, origin check
     tools/              operator scripts; NOT imported by the app
     tests/              api_*.py (python) + ui_*.mjs (node) + fixtures/
@@ -38,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 49 suites; 707 backend assertions, 1052 UI
+    ./run-tests.sh        all 51 suites; 792 backend assertions, 1140 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -65,6 +67,42 @@ counted. ui_cascade.mjs resolves the CSS cascade by hand because asserting
 computed inputs missed a specificity bug ((0,1,1) beating (0,1,0)) that
 painted the wrong gradient. Treat these numbers as contracts: if a change
 makes them worse, the change is wrong, not the test.
+
+## KB Authoring
+
+The third deck, beside Tephra and Crucible. A KB article is an ordinary note
+carrying a `kb_type` frontmatter key -- there is no second store, and
+`vault.parse`/`vault.dump` already round-trip arbitrary extra keys, so no
+schema changed to add this.
+
+Templates and the metadata schema are both *data* (`TEMPLATES` and `FIELDS`
+in app/kb.py). Adding an article type or a field is one entry; the authoring
+form, the structure panel and the export header are all generated from those
+two lists, so nothing in the frontend needs touching.
+
+Export is the reason the feature exists: articles have to leave for a
+ServiceNow KB that has never heard of Tephra's stylesheet. So export is a
+deliberate downgrade, not a dump of the app's HTML:
+
+- `servicenow` inlines every style on the element and gives tables
+  presentational attributes as well as CSS. No classes, no `<style>`.
+  Callouts become single-cell bordered tables -- a div flattens in a
+  sanitiser, and a warning that flattens into a paragraph stops reading as
+  a warning.
+- `standalone` is the faithful artifact: self-contained page, embedded
+  stylesheet, contents list, images inlined as data URIs.
+- `markdown` and `text` are for fields that accept nothing else.
+
+Syntax parsing is *imported* from render.py, never copied -- the same
+regexes and the same sheet splitter -- so an article cannot mean one thing
+on screen and another on export. Only emission differs, which is the part
+that genuinely has to.
+
+Images are never silently dropped: each becomes a numbered placeholder plus
+a manifest row, numbered in *document* order. That ordering is deferred
+(see `_Media.finalize`) because callouts and sheets are extracted before the
+passes that follow them, so the order media is met is not the order it
+appears in.
 
 ## Invariants
 
@@ -110,6 +148,15 @@ makes them worse, the change is wrong, not the test.
   the button silently does nothing. This shipped twice.
 - Vault rename goes through the app. Renaming in Finder leaves a dead
   recents entry pointing at an absolute path.
+- vault.py's frontmatter parser is a fixed-schema one, not YAML: a value is
+  one line, `[...]` means a list, and list items split on commas. Anything
+  writing free text into a header has to normalise for all three -- see
+  kb.py's `_scalar`/`_list`, which is where a KB keyword containing a comma
+  or a description starting with `[` would otherwise corrupt the file.
+- The three decks (Tephra, Crucible, KB) are driven by one `setDeck(name)`
+  in app.js, not by a boolean each. Two independent toggles can put two
+  opaque full-deck panes on screen at once, and the loser is invisible
+  rather than visibly wrong.
 
 ## Working agreement
 
