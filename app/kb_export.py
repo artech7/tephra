@@ -236,16 +236,22 @@ class _Media:
             "standalone HTML, screenshot it, and attach the image.")
         return _placeholder_box(token, "Diagram", name, f"{lang} diagram")
 
-    def finalize(self, content: str) -> str:
-        """Number the placeholders by where they ended up, and put the
-        manifest in that same order. Returns the content with tokens
-        resolved; call it once, on the finished article."""
+    def finalize(self, order_source: str):
+        """Number the placeholders by where they ended up and hand back a
+        resolver to apply to any fragment.
+
+        A resolver rather than a rewritten string, because the ServiceNow
+        target splits one article across several form fields: the numbering
+        has to be decided once, over the whole document in reading order, and
+        then applied to each fragment separately. Numbering each fragment on
+        its own would restart at 1 in every box.
+        """
         # An item whose token is nowhere in the output (an embed inside a
         # section that was stripped, say) sorts last rather than vanishing --
         # a manifest that quietly loses a row is the failure this whole
         # mechanism exists to prevent.
         def where(item: dict) -> tuple[bool, int]:
-            at = content.find(item["token"])
+            at = order_source.find(item["token"])
             return (at < 0, at)
 
         self.items.sort(key=where)
@@ -255,15 +261,15 @@ class _Media:
             item["n"] = n
 
         def resolve(text: str) -> str:
-            for token, n in numbers.items():
-                text = text.replace(token, n)
+            for token, num in numbers.items():
+                text = text.replace(token, num)
             return text
 
         for item in self.items:
             item["name"] = resolve(item["name"])
             item.pop("token", None)
         self.warnings = [resolve(w) for w in self.warnings]
-        return resolve(content)
+        return resolve
 
 
 # ── link resolution ────────────────────────────────────────────────────────
@@ -366,83 +372,178 @@ _FENCE_CAPTURE = re.compile(r"^```([\w-]*)[ \t]*\n(?P<code>.*?)^```[ \t]*$", re.
 _INLINE_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
-def _build_html(note: vault.Note, *, links: str, embed_images: bool,
-                include_meta: bool) -> tuple[str, _Media, list[dict]]:
-    """The shared body builder. Mirrors render.render's pass order, and for
-    the same reasons documented there: callouts before anything inserts blank
-    lines into them, sheets before the fence-skipping passes can claim their
-    fence, embeds before wikilinks, everything before markdown runs."""
-    prose, _quiz = st.split_quiz(note.body)
-    prose, sources_sec = idx.split_sources_block(prose)
-    sources = idx.parse_sources(sources_sec)
-    prose = kb.strip_todos(prose)
+class _Ctx:
+    """The state one export shares across every fragment it renders.
 
-    media = _Media(embed_images)
-    known = kb.by_number()
-    blocks: list[str] = []
+    Media numbering, the stash of pre-rendered block fragments, and the
+    resolved article map all have to be common to the whole document even
+    though the document is rendered a section at a time -- otherwise images
+    renumber per section and a citation in one field cannot point at the
+    reference list in another.
+    """
 
-    def stash(fragment: str) -> str:
-        blocks.append(fragment)
-        return PLACEHOLDER.format(len(blocks) - 1)
+    def __init__(self, links: str, embed_images: bool, sources: list[dict]):
+        self.links = links
+        self.sources = sources
+        self.media = _Media(embed_images)
+        self.known = kb.by_number()
+        self.blocks: list[str] = []
 
-    def on_wiki(m):
+    def stash(self, fragment: str) -> str:
+        self.blocks.append(fragment)
+        return PLACEHOLDER.format(len(self.blocks) - 1)
+
+    def on_wiki(self, m):
         title = m.group(1).strip()
         shown = (m.group(2) or title).strip()
-        return _link_text(title, shown, links, known)
+        return _link_text(title, shown, self.links, self.known)
 
-    def on_cite(m):
+    def on_cite(self, m):
         n = int(m.group(1))
-        if 1 <= n <= len(sources):
-            return (f'<sup><a href="#ref-{n}" style="{_TAG_CSS["a"]}">{n}</a></sup>')
+        if 1 <= n <= len(self.sources):
+            return f'<sup><a href="#ref-{n}" style="{_TAG_CSS["a"]}">{n}</a></sup>'
         return f"<sup>[{n}]</sup>"
 
-    def on_embed(m):
-        name = m.group(1).strip()
+    def on_embed(self, m):
         caption, _size = _split_embed_extra(m.group(2))
-        return media.image(name, (caption or "").strip())
+        return self.media.image(m.group(1).strip(), (caption or "").strip())
 
-    def sub(text: str) -> str:
+    def sub(self, text: str) -> str:
         """The nested pass a callout's or a sheet's own content gets. Same
         substitutions as the top level, minus the block-level ones that
         cannot legally appear inside one."""
-        text = _skip_fences(text, EMBED_RE, lambda m: stash(on_embed(m)))
-        text = _skip_fences(text, WIKI_RE, lambda m: stash(on_wiki(m)))
-        text = _skip_fences(text, CITE_RE, lambda m: stash(on_cite(m)))
+        text = _skip_fences(text, EMBED_RE, lambda m: self.stash(self.on_embed(m)))
+        text = _skip_fences(text, WIKI_RE, lambda m: self.stash(self.on_wiki(m)))
+        text = _skip_fences(text, CITE_RE, lambda m: self.stash(self.on_cite(m)))
         return text
 
+
+def _render_fragment(prose: str, ctx: _Ctx) -> str:
+    """One section's markdown to export HTML.
+
+    Pass order mirrors render.render's, and for the reasons documented there:
+    callouts before anything inserts blank lines into them, sheets before the
+    fence-skipping passes can claim their fence, embeds before wikilinks,
+    everything before markdown runs.
+    """
+    if not prose.strip():
+        return ""
     prose = CALLOUT_RE.sub(
-        lambda m: "\n\n" + stash(_callout(
+        lambda m: "\n\n" + ctx.stash(_callout(
             m.group("type"), m.group("title"),
-            _CALLOUT_STRIP_RE.sub("", m.group("lines")), sub)) + "\n\n",
+            _CALLOUT_STRIP_RE.sub("", m.group("lines")), ctx.sub)) + "\n\n",
         prose)
     prose = SHEETS_RE.sub(
-        lambda m: "\n\n" + stash(_sheets(m.group("content"), sub)) + "\n\n", prose)
+        lambda m: "\n\n" + ctx.stash(_sheets(m.group("content"), ctx.sub)) + "\n\n", prose)
     prose = _FENCE_CAPTURE.sub(
-        lambda m: "\n\n" + stash(_fence(m.group(1).split("|")[0].strip(),
-                                        m.group("code"), media)) + "\n\n", prose)
-    prose = EMBED_RE.sub(lambda m: "\n\n" + stash(on_embed(m)) + "\n\n", prose)
+        lambda m: "\n\n" + ctx.stash(_fence(m.group(1).split("|")[0].strip(),
+                                            m.group("code"), ctx.media)) + "\n\n", prose)
+    prose = EMBED_RE.sub(lambda m: "\n\n" + ctx.stash(ctx.on_embed(m)) + "\n\n", prose)
     prose = _INLINE_IMG_RE.sub(
-        lambda m: "\n\n" + stash(media.image(m.group(2).rsplit("/", 1)[-1],
-                                             m.group(1).split("|")[0].strip())) + "\n\n",
+        lambda m: "\n\n" + ctx.stash(ctx.media.image(m.group(2).rsplit("/", 1)[-1],
+                                                     m.group(1).split("|")[0].strip())) + "\n\n",
         prose)
-    prose = WIKI_RE.sub(lambda m: stash(on_wiki(m)), prose)
-    prose = CITE_RE.sub(lambda m: stash(on_cite(m)), prose)
+    prose = WIKI_RE.sub(lambda m: ctx.stash(ctx.on_wiki(m)), prose)
+    prose = CITE_RE.sub(lambda m: ctx.stash(ctx.on_cite(m)), prose)
     prose = URL_LINE_RE.sub(
-        lambda m: "\n\n" + stash(
+        lambda m: "\n\n" + ctx.stash(
             f'<p style="{_TAG_CSS["p"]}"><a href="{_attr(m.group(1))}" '
             f'style="{_TAG_CSS["a"]}">{_esc(m.group(1))}</a></p>') + "\n\n",
         prose)
 
     out = _style(_unwrap_placeholder_p(_MD.render(prose)))
-
     # Highest index first, for the reason render.render spells out: a
     # callout's own fragment can still hold a lower-indexed placeholder that
     # its nested render carried through untouched.
-    for i in range(len(blocks) - 1, -1, -1):
-        out = out.replace(PLACEHOLDER.format(i), blocks[i])
+    for i in range(len(ctx.blocks) - 1, -1, -1):
+        out = out.replace(PLACEHOLDER.format(i), ctx.blocks[i])
+    return out
 
-    head = _meta_table(note) if include_meta else ""
-    return head + out + _references(sources), media, sources
+
+def _build_sections(note: vault.Note, *, links: str, embed_images: bool):
+    """The article as a list of rendered sections, in document order."""
+    _, sources_sec = idx.split_sources_block(st.split_quiz(note.body)[0])
+    sources = idx.parse_sources(sources_sec)
+    prose = kb.strip_todos(kb.exportable_body(note))
+
+    ctx = _Ctx(links, embed_images, sources)
+    out = []
+    for sec in kb.sections(prose):
+        out.append({"heading": sec["heading"],
+                    "html": _render_fragment(sec["content"], ctx)})
+    return out, ctx, sources
+
+
+def _document_html(note: vault.Note, secs: list[dict], sources: list[dict],
+                   include_meta: bool) -> str:
+    """Every section stitched back into one document, headings and all. This
+    is what the standalone page and the preview show; the field split below
+    is a different view of the same rendered sections, never a second
+    render."""
+    parts = [_meta_table(note)] if include_meta else []
+    for sec in secs:
+        if sec["heading"]:
+            parts.append(f'<h2 style="{_TAG_CSS["h2"]}">{_esc(sec["heading"])}</h2>')
+        parts.append(sec["html"])
+    parts.append(_references(sources))
+    return "".join(parts)
+
+
+_TAGS_RE = re.compile(r"<[^>]+>")
+
+
+def _visible_len(html_text: str) -> int:
+    """Characters a reader would actually see. The form's limits count text,
+    not markup, so a character count that included style attributes would be
+    alarming and wrong."""
+    return len(html.unescape(_TAGS_RE.sub("", html_text)).strip())
+
+
+def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict]) -> list[dict]:
+    """One fragment per form field, in the order the form asks for them.
+
+    A field fed by exactly one section drops that section's heading -- the
+    field *is* the heading, and repeating it inside the box is noise. A field
+    fed by several keeps each heading, demoted to h3, because the box itself
+    is already playing the h2's role.
+    """
+    tpl = kb.template_of(note)
+    override = kb.parse_fieldmap(note.meta.get(kb.MAP_KEY))
+    buckets: dict[str, list[dict]] = {f: [] for f in kb.SECTION_FIELDS}
+    for sec in secs:
+        if not sec["html"].strip():
+            continue
+        buckets[kb.field_of(sec["heading"], tpl, override)].append(sec)
+
+    refs = _references(sources)
+    out: list[dict] = []
+    meta = kb.meta_of(note)
+
+    short = meta.get("kb_short_description", "")
+    out.append({"field": "Short description", "kind": "text", "content": short,
+                "chars": len(short), "limit": 160, "sections": []})
+
+    for name in kb.SECTION_FIELDS:
+        chunk = buckets[name]
+        # The reference list belongs with the supporting material, not
+        # stranded in whichever box happened to hold the last citation.
+        extra = refs if (name == "Additional Information" and refs) else ""
+        if not chunk and not extra:
+            continue
+        pieces = []
+        for sec in chunk:
+            if sec["heading"] and len(chunk) > 1:
+                pieces.append(f'<h3 style="{_TAG_CSS["h3"]}">{_esc(sec["heading"])}</h3>')
+            pieces.append(sec["html"])
+        body = "".join(pieces) + extra
+        out.append({"field": name, "kind": "html", "content": body,
+                    "chars": _visible_len(body), "limit": 0,
+                    "sections": [s["heading"] for s in chunk if s["heading"]]})
+
+    keywords = ", ".join(meta.get("kb_keywords", []) or [])
+    out.append({"field": "Meta", "kind": "text", "content": keywords,
+                "chars": len(keywords), "limit": kb.META_MAX, "sections": []})
+    return out
 
 
 # ── styling ────────────────────────────────────────────────────────────────
@@ -801,34 +902,60 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
 
     if target in ("markdown", "text"):
         md_text, media = _markdown(note, links=links)
-        content = media.finalize(md_text if target == "markdown" else _plain(md_text))
+        raw = md_text if target == "markdown" else _plain(md_text)
+        resolve = media.finalize(raw)
         ext = "md" if target == "markdown" else "txt"
         mime = "text/markdown" if target == "markdown" else "text/plain"
-        return {**common, "content": content, "mime": mime,
-                "filename": _filename(note, ext),
+        return {**common, "content": resolve(raw), "mime": mime,
+                "filename": _filename(note, ext), "parts": [],
                 "manifest": media.items, "warnings": media.warnings}
 
     embed = target == "standalone"
-    body, media, _sources = _build_html(
-        note, links=links, embed_images=embed, include_meta=include_meta)
+    secs, ctx, sources = _build_sections(note, links=links, embed_images=embed)
+    media = ctx.media
+    body = _document_html(note, secs, sources, include_meta)
     body, toc = _anchor_headings(body)
 
     if target == "standalone":
-        return {**common, "content": media.finalize(_standalone(note, body, toc)),
+        page = _standalone(note, body, toc)
+        resolve = media.finalize(page)
+        return {**common, "content": resolve(page), "parts": [],
                 "mime": "text/html", "filename": _filename(note, "html"),
                 "manifest": media.items, "warnings": media.warnings}
 
-    # ServiceNow gets the title as an H1 in the body only if the system does
-    # not own the title field itself -- and it does. So the body starts at
-    # the first real section, which is what the editor expects to receive.
-    # finalize first: it resolves the media tokens inside the warnings it
-    # collected as well as inside the body, so a snapshot taken before it
-    # runs would ship the raw tokens to the user.
-    content = media.finalize(body)
+    # ── servicenow ──
+    #
+    # The destination has no article *body*: it has a form with one rich-text
+    # box per section of the article. So the useful output is not one blob of
+    # HTML but a list of fragments, one per box, in the order the form asks
+    # for them -- `content` is still the whole document, because the preview
+    # needs something to show and a caller that only wants the markup should
+    # not have to reassemble it.
+    parts = _field_parts(note, secs, sources)
+
+    # Numbering is decided over the document, then applied to each fragment,
+    # so an image is "Image 3" in whichever box it lands in rather than
+    # restarting at 1 in every field. finalize also resolves the tokens
+    # inside the warnings it collected, so it has to run before they are read.
+    resolve = media.finalize(body)
+    for part in parts:
+        part["content"] = resolve(part["content"])
+
     warnings = list(media.warnings)
     if kb.has_todos(note.body):
         warnings.append("Template guidance was still in the article; it has been "
                         "stripped from this export but is still in the note.")
-    return {**common, "content": content, "mime": "text/html",
-            "filename": _filename(note, "html"),
+    over = [p for p in parts if p["limit"] and p["chars"] > p["limit"]]
+    for p_ in over:
+        warnings.append(f"{p_['field']} is {p_['chars']} characters; the form allows "
+                        f"{p_['limit']}.")
+    empty = [f for f in kb.SECTION_FIELDS
+             if f in ("Question", "Answer") and not any(p["field"] == f for p in parts)]
+    for f in empty:
+        warnings.append(f"Nothing is mapped to {f}. Check the field mapping, or write "
+                        "that section.")
+
+    return {**common, "content": resolve(body), "mime": "text/html",
+            "filename": _filename(note, "html"), "parts": parts,
+            "form": kb.FORM,
             "manifest": media.items, "warnings": warnings}

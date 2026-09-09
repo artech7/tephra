@@ -360,5 +360,134 @@ try:
 except ValueError:
     ck("an unknown target raises rather than guessing", True)
 
+print("\n── the destination form: one field per section, not one body ──")
+# The KB this exports to has no article body. It has five separate rich-text
+# boxes, so an export that produced one blob of HTML would have nowhere to
+# go. These are the assertions that keep that true.
+ck("every template section names a field the form actually has",
+   all(sec.field in kb.SECTION_FIELDS
+       for t in kb.TEMPLATES.values() for sec in t.sections))
+ck("there is a template that mirrors the form exactly, section for section",
+   [s.heading for s in kb.TEMPLATES["question-answer"].sections] == kb.SECTION_FIELDS)
+ck("an unmapped heading falls back to Answer rather than being dropped — "
+   "content that goes nowhere is the failure mode worth engineering against",
+   kb.field_of("Something Nobody Planned", kb.TEMPLATES["troubleshooting"], {}) == "Answer")
+
+fields = kb_export.export(art, target="servicenow")["parts"]
+order = [p["field"] for p in fields]
+ck("parts come back in the order the form asks for them",
+   order == ["Short description", "Question", "Environment", "Answer",
+             "Additional Information", "Meta"], order)
+ck("Short description and Meta are plain text, since their boxes are",
+   all(p["kind"] == "text" for p in fields if p["field"] in kb.META_FIELDS))
+ck("the rich-text fields are html", all(p["kind"] == "html" for p in fields
+                                        if p["field"] not in kb.META_FIELDS))
+ck("Meta carries the form's own 4000-character limit",
+   next(p for p in fields if p["field"] == "Meta")["limit"] == kb.META_MAX)
+ck("Meta is fed from the article's keywords",
+   next(p for p in fields if p["field"] == "Meta")["content"] == "arp")
+
+q = next(p for p in fields if p["field"] == "Question")
+ck("a field says which sections feed it", q["sections"] == ["Summary", "Symptoms"], q["sections"])
+ck("a field fed by several sections keeps their headings, demoted to h3 — "
+   "the box itself is already playing the h2's part",
+   "<h3 " in q["content"] and "Symptoms" in q["content"])
+
+env = next(p for p in fields if p["field"] == "Environment")
+ck("a field fed by exactly one section drops that heading, since the field "
+   "is the heading",
+   "Environment</h3>" not in env["content"] and "FlashArray" in env["content"])
+
+extra = next(p for p in fields if p["field"] == "Additional Information")
+ck("the reference list rides with the supporting material rather than being "
+   "stranded wherever the last citation happened to be",
+   'id="ref-1"' in extra["content"])
+
+ck("a character count measures what a reader sees, not the markup",
+   q["chars"] < len(q["content"]), (q["chars"], len(q["content"])))
+
+# Numbering has to be decided over the whole document and then applied per
+# field. Numbering each field on its own would restart at 1 in every box.
+ORDERED = """## Summary
+
+```mermaid
+graph TD
+A --> B
+```
+
+## Resolution
+
+![[topology.png|A topology]]
+"""
+ordered = vault.Note(slug="ordered", title="Ordered", body=ORDERED,
+                     meta={"kb_type": "troubleshooting"})
+vault.write(ordered)
+op = kb_export.export(vault.read("ordered"), target="servicenow")
+by_field = {p["field"]: p["content"] for p in op["parts"]}
+ck("media is numbered across the whole article, not restarted per field",
+   "[Diagram 1]" in by_field["Question"] and "[Image 2]" in by_field["Answer"],
+   [(p["field"], p["chars"]) for p in op["parts"]])
+ck("and the manifest agrees with what the fields say",
+   [i["n"] for i in op["manifest"]] == [1, 2])
+
+# The mapping editor lists whatever field_plan returns, and the copy buttons
+# emit whatever the exporter builds. When those two disagreed, the panel
+# offered a row for a section no button could honour.
+plan_headings = [h for f in kb.field_plan(art) for h in f["sections"]]
+ck("the mapping plan does not list sections the export never emits",
+   "Sources" not in plan_headings, plan_headings)
+ck("and it lists every section that does get emitted",
+   set(plan_headings) == {h for p in fields for h in p["sections"]},
+   plan_headings)
+
+print("\n── the per-article field override ──")
+mapped = vault.Note(slug="mapped", title="Mapped", body=(
+    "## Summary\n\nvisible\n\n## Resolution\n\nsecret\n"),
+    meta={"kb_type": "troubleshooting",
+          "kb_fieldmap": ["Resolution>Internal Notes"]})
+vault.write(mapped)
+mp = {p["field"]: p["content"] for p in
+      kb_export.export(vault.read("mapped"), target="servicenow")["parts"]}
+ck("an override moves a section to a different box",
+   "secret" in mp.get("Internal Notes", "") and "secret" not in mp.get("Answer", ""),
+   list(mp))
+ck("and the sections it does not name are untouched", "visible" in mp["Question"])
+ck("the override survives a frontmatter round trip",
+   kb.parse_fieldmap(["Resolution>Internal Notes"]) == {"resolution": "Internal Notes"})
+ck("an override naming a field the form does not have is discarded, not "
+   "written, so a typo cannot send a section into the void",
+   kb.parse_fieldmap(["Resolution>Nowhere"]) == {})
+ck("a comma or a > inside a heading cannot corrupt the map",
+   kb.dump_fieldmap({"A, B > C": "Answer"}) == ["A B C>Answer"],
+   kb.dump_fieldmap({"A, B > C": "Answer"}))
+
+print("\n── the export warns about what the form will reject ──")
+longdesc = vault.Note(slug="longdesc", title="Long", body="## Summary\n\nx\n\n## Resolution\n\ny\n",
+                      meta={"kb_type": "troubleshooting",
+                            "kb_short_description": "y" * 200})
+vault.write(longdesc)
+lw = kb_export.export(vault.read("longdesc"), target="servicenow")["warnings"]
+# The authoring form caps this field on save, so it cannot happen from the
+# UI -- but a file hand-edited outside Tephra can carry anything, and the
+# export saying so beats the export silently truncating it.
+ck("a short description over the form's limit is called out, not truncated",
+   any("Short description is 200 characters" in w for w in lw), lw)
+ck("and the value is left intact for the author to cut themselves",
+   len(kb.meta_of(vault.read("longdesc"))["kb_short_description"]) == 200)
+ck("saving through the app caps it instead, so the UI cannot produce one",
+   len(kb.sanitize_meta({"kb_short_description": "y" * 200})["kb_short_description"]) == 160)
+
+hollow = vault.Note(slug="hollow", title="Hollow", body="## Environment\n\njust this\n",
+                    meta={"kb_type": "troubleshooting"})
+vault.write(hollow)
+hw = kb_export.export(vault.read("hollow"), target="servicenow")["warnings"]
+ck("an empty Question is called out, since the form requires one",
+   any("Question" in w for w in hw), hw)
+ck("an empty Answer is called out too", any("Answer" in w for w in hw), hw)
+
+ck("a non-fielded target returns no parts, rather than parts that mean nothing",
+   kb_export.export(art, target="standalone")["parts"] == []
+   and kb_export.export(art, target="markdown")["parts"] == [])
+
 print(f"\n  {ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

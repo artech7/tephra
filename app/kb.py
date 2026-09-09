@@ -42,11 +42,18 @@ class Section:
     structure panel checks the section against it: "steps" must be a numbered
     list, "table" must contain a table, and so on. It is advisory at authoring
     time -- nothing here refuses to save a section that doesn't match.
+
+    `field` is where this section lands in the destination form. It is not
+    decoration: the KB this exports to does not have an article *body* at
+    all, it has five separate rich-text fields, so an export that produced
+    one blob of HTML would have nowhere to go. Every section names the field
+    it feeds, and export groups sections by field.
     """
     heading: str
     hint: str
     required: bool = True
     shape: str = "prose"        # prose | steps | list | table | code
+    field: str = "Answer"
 
 
 @dataclass
@@ -55,6 +62,25 @@ class Template:
     name: str
     summary: str
     sections: list[Section] = field(default_factory=list)
+
+
+# The destination form. One form serves every article kind -- Category is a
+# separate taxonomy from the form layout, so a "How to Article" and a
+# troubleshooting article are typed into the same five boxes. That is why
+# every template below maps onto this one list rather than each carrying a
+# form of its own.
+FORM = "Question and Answer"
+
+# The fields sections can be routed to, in the order they appear on the form,
+# so the export panel reads top to bottom the way the form does.
+SECTION_FIELDS = ["Question", "Environment", "Answer",
+                  "Additional Information", "Internal Notes"]
+
+# Fields fed from metadata rather than from a section.
+META_FIELDS = ["Short description", "Meta"]
+
+# The Meta field is a plain textarea with a hard limit the form enforces.
+META_MAX = 4000
 
 
 # The guidance line a fresh article carries under each heading. It is written
@@ -72,6 +98,29 @@ def _todo(hint: str) -> str:
 
 
 TEMPLATES: dict[str, Template] = {
+    "question-answer": Template(
+        id="question-answer",
+        name="Question and Answer",
+        summary="The destination form, one section per field. Start here when you "
+                "already know the article is going straight into the KB.",
+        sections=[
+            Section("Question", "What the reader is actually asking, phrased the way they "
+                                "would ask it. Not a title — a question.",
+                    shape="prose", field="Question"),
+            Section("Environment", "Products, versions, branches and platforms this applies "
+                                   "to. Be specific; 'all versions' is almost never true.",
+                    shape="table", field="Environment"),
+            Section("Answer", "The answer itself. Numbered steps if there is anything to do, "
+                              "one action per step.",
+                    shape="steps", field="Answer"),
+            Section("Additional Information", "Context that helps but is not the answer: "
+                                              "related articles, background, caveats.",
+                    required=False, shape="prose", field="Additional Information"),
+            Section("Internal Notes", "Anything that must never reach an external audience — "
+                                      "case numbers, internal tooling, unreleased fixes.",
+                    required=False, shape="prose", field="Internal Notes"),
+        ],
+    ),
     "troubleshooting": Template(
         id="troubleshooting",
         name="Troubleshooting",
@@ -79,23 +128,23 @@ TEMPLATES: dict[str, Template] = {
                 "for anything that starts life as a support case.",
         sections=[
             Section("Summary", "One paragraph: what breaks, for whom, and what this article fixes.",
-                    shape="prose"),
+                    shape="prose", field="Question"),
             Section("Symptoms", "What the user actually sees — exact error text, alert names, "
                                 "observed behaviour. One bullet per distinct symptom.",
-                    shape="list"),
+                    shape="list", field="Question"),
             Section("Environment", "Products, versions, and platforms this applies to. Be specific; "
                                    "'all versions' is almost never true.",
-                    shape="table"),
+                    shape="table", field="Environment"),
             Section("Cause", "Why it happens. If the root cause is unknown, say so plainly rather "
                              "than leaving this empty.",
-                    shape="prose"),
+                    shape="prose", field="Answer"),
             Section("Resolution", "Numbered steps that fix it. One action per step.",
-                    shape="steps"),
+                    shape="steps", field="Answer"),
             Section("Verification", "How the reader confirms the fix worked — the command to run, "
                                     "the value to expect.",
-                    shape="prose"),
+                    shape="prose", field="Answer"),
             Section("Related articles", "Links to adjacent KBs, tickets, or vendor documentation.",
-                    required=False, shape="list"),
+                    required=False, shape="list", field="Additional Information"),
         ],
     ),
     "how-to": Template(
@@ -105,18 +154,18 @@ TEMPLATES: dict[str, Template] = {
                 "back out if it goes wrong.",
         sections=[
             Section("Goal", "What the reader will have accomplished by the end. One sentence.",
-                    shape="prose"),
+                    shape="prose", field="Question"),
             Section("Prerequisites", "Access, versions, licences, and prior steps assumed. "
                                      "Everything that makes step 1 possible.",
-                    shape="list"),
+                    shape="list", field="Environment"),
             Section("Steps", "Numbered, imperative, one action each. Put expected output under "
                              "the step that produces it.",
-                    shape="steps"),
-            Section("Verification", "How to confirm it worked.", shape="prose"),
+                    shape="steps", field="Answer"),
+            Section("Verification", "How to confirm it worked.", shape="prose", field="Answer"),
             Section("Rollback", "How to undo it. An article without this is not finished.",
-                    shape="steps"),
+                    shape="steps", field="Answer"),
             Section("Related articles", "Adjacent procedures and reference material.",
-                    required=False, shape="list"),
+                    required=False, shape="list", field="Additional Information"),
         ],
     ),
     "reference": Template(
@@ -126,17 +175,18 @@ TEMPLATES: dict[str, Template] = {
                 "not to do.",
         sections=[
             Section("Overview", "What this is and why the reader cares, before any detail.",
-                    shape="prose"),
+                    shape="prose", field="Question"),
             Section("Key concepts", "The handful of terms the rest of the article depends on. "
                                     "Define each one where it is first used.",
-                    shape="list"),
+                    shape="list", field="Answer"),
             Section("Details", "The substance. Use sub-headings freely; keep each one to a "
                                "single idea.",
-                    shape="prose"),
+                    shape="prose", field="Answer"),
             Section("Limits and caveats", "Boundaries, known gaps, and things that look supported "
                                           "but are not.",
-                    required=False, shape="list"),
-            Section("Related articles", "Where to go next.", required=False, shape="list"),
+                    required=False, shape="list", field="Additional Information"),
+            Section("Related articles", "Where to go next.",
+                    required=False, shape="list", field="Additional Information"),
         ],
     ),
     "known-issue": Template(
@@ -146,18 +196,18 @@ TEMPLATES: dict[str, Template] = {
                 "the reader wasting time diagnosing it.",
         sections=[
             Section("Summary", "The defect in one paragraph, and whether a permanent fix exists yet.",
-                    shape="prose"),
-            Section("Affected versions", "Exactly which releases are affected, and which are not.",
-                    shape="table"),
+                    shape="prose", field="Question"),
             Section("Impact", "What the reader loses or risks while this is unresolved.",
-                    shape="prose"),
+                    shape="prose", field="Question"),
+            Section("Affected versions", "Exactly which releases are affected, and which are not.",
+                    shape="table", field="Environment"),
             Section("Workaround", "Numbered steps that restore service without the fix. Say clearly "
                                   "if there is none.",
-                    shape="steps"),
+                    shape="steps", field="Answer"),
             Section("Permanent fix", "The release that fixes it, or the tracking ID to watch.",
-                    shape="prose"),
+                    shape="prose", field="Answer"),
             Section("Related articles", "The parent defect, adjacent symptoms, vendor advisories.",
-                    required=False, shape="list"),
+                    required=False, shape="list", field="Additional Information"),
         ],
     ),
     "faq": Template(
@@ -168,12 +218,12 @@ TEMPLATES: dict[str, Template] = {
         sections=[
             Section("Scope", "What this FAQ covers, so the reader can tell in one line whether "
                              "they are in the right place.",
-                    shape="prose"),
+                    shape="prose", field="Question"),
             Section("Questions", "One `###` heading per question, phrased the way a reader would "
                                  "ask it, with the answer directly beneath.",
-                    shape="prose"),
+                    shape="prose", field="Answer"),
             Section("Related articles", "Fuller treatments of anything answered only briefly here.",
-                    required=False, shape="list"),
+                    required=False, shape="list", field="Additional Information"),
         ],
     ),
     "announcement": Template(
@@ -183,15 +233,16 @@ TEMPLATES: dict[str, Template] = {
                 "it stops being true.",
         sections=[
             Section("What is changing", "The change itself, in one paragraph, in plain language.",
-                    shape="prose"),
-            Section("When", "Dates and times, with the timezone spelled out.", shape="prose"),
+                    shape="prose", field="Question"),
+            Section("When", "Dates and times, with the timezone spelled out.",
+                    shape="prose", field="Question"),
             Section("Who is affected", "Which users, sites, or systems — and who is not.",
-                    shape="list"),
+                    shape="list", field="Environment"),
             Section("What you need to do", "Actions the reader must take, numbered. 'Nothing' is "
                                            "a valid and welcome answer.",
-                    shape="steps"),
+                    shape="steps", field="Answer"),
             Section("Support", "Where to raise problems arising from this change.",
-                    required=False, shape="prose"),
+                    required=False, shape="prose", field="Additional Information"),
         ],
     ),
 }
@@ -215,28 +266,58 @@ class Field:
     options: list[str] = field(default_factory=list)
     required: bool = False
     max_len: int = 0            # 0 = no limit
+    form_field: str = ""        # the box on the destination form, if any
 
 
+# Named after the destination form's own fields wherever one exists, so the
+# authoring panel and the KB form read the same way and nothing has to be
+# translated in someone's head while they fill the form in. `label` is what
+# the form calls it; the key keeps the kb_ prefix so it can never collide
+# with `category`, `study`, or whatever the next feature wants.
+#
+# `form_field` names the box on the form this value is typed into, or is
+# empty for the ones that are Tephra's own bookkeeping. That is what lets
+# the export panel offer a copy button per field.
 FIELDS: list[Field] = [
     Field("kb_short_description", "Short description", "textarea", required=True, max_len=160,
+          form_field="Short description",
           hint="The one line that shows in search results. Say what the reader gets, "
                "not what the article is about."),
-    Field("kb_status", "Status", "select", options=["draft", "review", "published", "retired"],
-          required=True, hint="Where this article is in your own workflow — Tephra's, not ServiceNow's."),
-    Field("kb_audience", "Audience", "select", options=["internal", "customer", "partner"],
-          required=True, hint="Who is allowed to read it. Drives the wording, not just the field."),
-    Field("kb_number", "KB number", "text",
-          hint="The identifier in your KB system, once it has one. Other articles link to "
-               "this article by this number on export."),
-    Field("kb_products", "Products / versions", "tags", required=True,
+    Field("kb_knowledge_base", "Knowledge base", "text", required=True,
+          hint="Which KB this is filed in, exactly as the form spells it."),
+    Field("kb_category", "Category", "text", required=True,
+          hint="The Category dropdown's value — the article kind, separate from the "
+               "form layout."),
+    Field("kb_audience", "Audience", "text", required=True,
+          hint="Who is allowed to read it. An external audience needs KCS Confidence "
+               "set to Validated first."),
+    Field("kb_kcs_confidence", "KCS Confidence", "select",
+          options=["Work in Progress", "Validated"],
+          hint="How much the article has been proven in practice. Gates who may read it."),
+    Field("kb_status", "Draft status", "select",
+          options=["draft", "review", "published", "retired"], required=True,
+          hint="Tephra's own workflow, not the KB's. Where this article is on your desk."),
+    Field("kb_number", "Number", "text",
+          hint="Assigned by the KB when the article is created — paste it back here "
+               "afterwards, and other articles will link to this one by it."),
+    Field("kb_pure_products", "Pure Product(s)", "tags", required=True,
           hint="Everything this applies to. Specific beats broad."),
-    Field("kb_keywords", "Keywords", "tags", required=True,
+    Field("kb_pure_features", "Pure Feature(s)", "tags",
+          hint="The features involved, where the product alone is too coarse."),
+    Field("kb_purity_branches", "Purity Branch(es) Affected", "tags",
+          hint="Which branches carry the problem."),
+    Field("kb_purity_versions_fix", "Purity Version(s) with Fix", "tags",
+          hint="The releases that resolve it, once they exist."),
+    Field("kb_keywords", "Meta", "tags", required=True, max_len=4000,
+          form_field="Meta",
           hint="The words a reader would search for — including the wrong ones they "
-               "actually type."),
-    Field("kb_owner", "Owner", "text",
-          hint="Who answers questions about this article."),
-    Field("kb_review_by", "Review by", "date",
+               "actually type. Goes in the form's Meta box."),
+    Field("kb_valid_to", "Valid to", "date",
           hint="The date this stops being trustworthy without a fresh look."),
+    Field("kb_ownership_group", "Ownership Group", "text",
+          hint="The team that answers for this article."),
+    Field("kb_owner", "Owner", "text",
+          hint="The person who answers questions about it."),
     Field("kb_source_url", "Source URL", "text",
           hint="Where this came from, if it started life somewhere else — a case, a "
                "vendor page, an existing article."),
@@ -302,6 +383,13 @@ def sanitize_meta(payload: dict) -> dict:
     kb_type = _scalar(payload.get(TYPE_KEY, ""))
     if kb_type in TEMPLATES:
         out[TYPE_KEY] = kb_type
+    if MAP_KEY in payload:
+        raw = payload[MAP_KEY]
+        pairs = dump_fieldmap(raw) if isinstance(raw, dict) else [
+            x for x in dump_fieldmap(
+                {h: d for h, _, d in (str(i).partition(_MAP_SPLIT) for i in (raw or []))})]
+        if pairs:
+            out[MAP_KEY] = pairs
     for f in FIELDS:
         if f.key not in payload:
             continue
@@ -416,6 +504,104 @@ def sections(body: str) -> list[dict]:
         stop = marks[i + 1][0] if i + 1 < len(marks) else len(body)
         out.append({"heading": heading, "content": body[end:stop].strip(), "start": start})
     return out
+
+
+# ── section -> form field ──────────────────────────────────────────────────
+#
+# The template decides where each section lands, which is right almost always
+# and wrong exactly when an author writes a section the template never
+# imagined. `kb_fieldmap` is the escape hatch: a per-article override, stored
+# in the same frontmatter as everything else so it travels with the file.
+#
+# Stored as `Heading>Field` pairs because the header parser splits a list on
+# commas and nothing else -- `>` is a separator it will never touch, and both
+# halves are scrubbed of the two characters that could confuse it.
+
+MAP_KEY = "kb_fieldmap"
+_MAP_SPLIT = ">"
+
+
+def _map_safe(text: str) -> str:
+    return _WS_RE.sub(" ", str(text).replace(",", " ").replace(_MAP_SPLIT, " ")
+                      .translate({ord(c): None for c in "[]"})).strip()
+
+
+def parse_fieldmap(raw) -> dict[str, str]:
+    """`[Summary>Question, Cause>Answer]` -> {"summary": "Question", ...}.
+
+    Keyed lowercase, because it is matched against headings the author typed
+    and capitalisation drifts.
+    """
+    out: dict[str, str] = {}
+    items = raw.split(",") if isinstance(raw, str) else list(raw or [])
+    for item in items:
+        head, _, dest = str(item).partition(_MAP_SPLIT)
+        head, dest = _map_safe(head), _map_safe(dest)
+        if head and dest in SECTION_FIELDS:
+            out[head.lower()] = dest
+    return out
+
+
+def dump_fieldmap(pairs: dict) -> list[str]:
+    out = []
+    for head, dest in (pairs or {}).items():
+        head, dest = _map_safe(head), _map_safe(dest)
+        if head and dest in SECTION_FIELDS:
+            out.append(f"{head}{_MAP_SPLIT}{dest}")
+    return out
+
+
+def field_of(heading: str, tpl: Template | None, override: dict[str, str]) -> str:
+    """Where one section goes. Override wins, then the template, then Answer.
+
+    Answer is the fallback rather than "drop it" for the reason the manifest
+    exists: content that quietly goes nowhere is the failure mode worth
+    engineering against. A section in the wrong box is visible and fixable;
+    a section that never arrives is neither.
+    """
+    key = (heading or "").strip().lower()
+    if key in override:
+        return override[key]
+    if tpl:
+        for sec in tpl.sections:
+            if sec.heading.lower() == key:
+                return sec.field
+    return "Answer"
+
+
+def exportable_body(note: vault.Note) -> str:
+    """The part of a note the export actually sections up.
+
+    `## Quiz` belongs to Crucible and `## Sources` becomes the reference
+    list, so both are lifted out before sectioning -- exactly as
+    kb_export._build_sections does. Shared rather than duplicated because
+    the mapping editor lists whatever this returns: when the two disagreed,
+    the panel offered a row for "Sources" that no copy button could ever
+    honour.
+
+    Imported locally to keep app/kb.py's own imports to vault alone -- this
+    module is the one both main.py and kb_export.py depend on, and it has no
+    business dragging the index and the study module in behind it.
+    """
+    from . import index as idx
+    from . import study as st
+    prose, _quiz = st.split_quiz(note.body)
+    prose, _sources = idx.split_sources_block(prose)
+    return prose
+
+
+def field_plan(note: vault.Note) -> list[dict]:
+    """[{field, sections: [heading, ...]}] in form order, for every field that
+    has something in it. This is the shape both the export and the mapping
+    editor read, so the panel can never disagree with what gets copied."""
+    tpl = template_of(note)
+    override = parse_fieldmap(note.meta.get(MAP_KEY))
+    buckets: dict[str, list[str]] = {f: [] for f in SECTION_FIELDS}
+    for sec in sections(exportable_body(note)):
+        if not strip_todos(sec["content"]).strip():
+            continue
+        buckets[field_of(sec["heading"], tpl, override)].append(sec["heading"])
+    return [{"field": f, "sections": buckets[f]} for f in SECTION_FIELDS if buckets[f]]
 
 
 def article_row(note: vault.Note) -> dict:

@@ -1599,6 +1599,9 @@ def kb_templates():
         "default": kb.DEFAULT_TEMPLATE,
         "targets": list(kb_export.TARGETS),
         "link_modes": list(kb_export.LINK_MODES),
+        "form": kb.FORM,
+        "section_fields": list(kb.SECTION_FIELDS),
+        "meta_fields": list(kb.META_FIELDS),
     }
 
 
@@ -1661,6 +1664,12 @@ def kb_article(slug: str):
         "outline": outline,
         "extra_sections": extra,
         "has_guidance": kb.has_todos(note.body),
+        # Where each section will land on the destination form, template
+        # default plus whatever this article overrides -- the export panel
+        # and the exporter read the same function, so the panel can never
+        # promise a mapping the copy buttons don't honour.
+        "field_plan": kb.field_plan(note),
+        "fieldmap": kb.parse_fieldmap(note.meta.get(kb.MAP_KEY)),
     }
 
 

@@ -46,6 +46,9 @@
     exportData: null,
     filter: '',
     picking: false,
+    fieldmap: {},
+    sectionFields: [],
+    form: '',
   };
 
   const tplById = (id) => S.templates.find((t) => t.id === id) || null;
@@ -265,7 +268,14 @@
   async function flushMeta() {
     clearTimeout(metaT);
     if (!S.slug) return;
-    const meta = { kb_type: S.article ? S.article.template : '' };
+    // Built on top of what the article already has, not rebuilt from the
+    // inputs. The metadata form only exists in Write mode, so rebuilding
+    // from inputs would blank every field the moment something saved while
+    // Export mode was showing -- which is exactly when the field mapping
+    // saves.
+    const meta = { ...(S.article ? S.article.kb : {}) };
+    meta.kb_type = S.article ? S.article.template : '';
+    meta.kb_fieldmap = S.fieldmap;
     S.fields.forEach((f) => {
       const input = $('#kbf-' + f.key);
       if (!input) return;
@@ -451,18 +461,39 @@
     }
   }
 
+  const PREVIEW_CSS =
+    "body{margin:0;padding:22px;background:#eef1f4;"
+    + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"
+    + 'font-size:15px;color:#1c2024}'
+    + '.fld{margin:0 0 18px}'
+    + '.fld h4{margin:0 0 6px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;'
+    + 'color:#5b6470;font-weight:700}'
+    + '.box{background:#fff;border:1px solid #c9d0d8;border-radius:3px;padding:14px 16px;'
+    + 'min-height:38px}'
+    + '.plain{margin:0;color:#1c2024}'
+    + '.none{margin:0;color:#98a1ad;font-style:italic}';
+
   function previewDoc(data) {
     if (!data) return '<p>Nothing to preview.</p>';
     if (S.target === 'standalone') return data.content;
     if (S.target === 'servicenow') {
-      // A plain white page with no stylesheet of its own. That is the whole
-      // point: everything visible here is carried by the markup itself, so
-      // anything that survives the paste survives here too, and anything
-      // that does not is visibly absent right now rather than after.
-      return '<!doctype html><html><head><meta charset="utf-8">'
-        + '<style>body{margin:0;padding:26px;background:#fff;'
-        + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"
-        + 'font-size:15px;color:#1c2024}</style></head><body>' + data.content + '</body></html>';
+      /* Laid out as the destination form rather than as one document, because
+         that document does not exist over there -- the article arrives as
+         five separate boxes. A preview that showed a single flowing page
+         would be a comfortable lie about what you are about to paste.
+         The page carries no stylesheet beyond the box chrome, so everything
+         visible inside a box is carried by the markup itself: what survives
+         here is what survives the paste. */
+      const boxes = (data.parts || []).map((p) => {
+        const inner = p.kind === 'html'
+          ? (p.content || '<p class="none">empty</p>')
+          : (p.content ? '<p class="plain">' + esc(p.content) + '</p>'
+            : '<p class="none">empty</p>');
+        return `<section class="fld"><h4>${esc(p.field)}</h4>`
+          + `<div class="box">${inner}</div></section>`;
+      }).join('');
+      return '<!doctype html><html><head><meta charset="utf-8"><style>'
+        + PREVIEW_CSS + '</style></head><body>' + boxes + '</body></html>';
     }
     return '<!doctype html><html><head><meta charset="utf-8">'
       + '<style>body{margin:0;padding:26px;background:#fff;color:#1c2024}'
@@ -480,9 +511,10 @@
       return;
     }
     const data = S.exportData;
+    const fielded = S.target === 'servicenow';
     main.innerHTML = '<div class="kb-previewhead"><span>Preview</span>'
       + `<span class="kb-previewnote">${esc(
-        S.target === 'servicenow' ? 'Unstyled page — only what the markup carries'
+        fielded ? `${S.form || 'the form'} — one box per field, unstyled`
           : S.target === 'standalone' ? 'The portable file, exactly as it will open'
             : 'Plain output')}</span></div>`
       + '<iframe id="kbPreview" class="kb-preview" sandbox="allow-same-origin"'
@@ -493,7 +525,7 @@
     $('#kbPreview').srcdoc = previewDoc(data);
 
     const targetOpts = S.targets.map((t) => {
-      const label = { servicenow: 'ServiceNow / rich paste', standalone: 'Standalone HTML',
+      const label = { servicenow: 'ServiceNow form', standalone: 'Standalone HTML',
         markdown: 'Markdown', text: 'Plain text' }[t] || t;
       return `<option value="${esc(t)}"${t === S.target ? ' selected' : ''}>${esc(label)}</option>`;
     }).join('');
@@ -512,17 +544,11 @@
           <option value="url">Source URL link</option>
           <option value="text">Plain text only</option>
         </select>
-        <label class="kb-check"><input type="checkbox" id="kbIncMeta"> Include the metadata table</label>
+        ${fielded ? '' : '<label class="kb-check"><input type="checkbox" id="kbIncMeta">'
+          + ' Include the metadata table</label>'}
       </div>
-      <div class="kb-asidesect">
-        <div class="eyebrow"><span>Copy</span></div>
-        <div class="kb-copyrow">
-          <button class="sv-btn primary" id="kbCopyRich">Copy formatted</button>
-          <button class="sv-btn" id="kbCopySrc">Copy source</button>
-        </div>
-        <p class="kb-fieldhint" id="kbCopyHint"></p>
-        <button class="sv-btn" id="kbDownload">Download ${esc(data ? data.filename : '')}</button>
-      </div>
+      <div class="kb-asidesect" id="kbCopySect"></div>
+      <div class="kb-asidesect" id="kbMapSect"${fielded ? '' : ' hidden'}></div>
       <div class="kb-asidesect">
         <div class="eyebrow"><span>Attachments</span><span>${manifest.length}</span></div>
         <div class="kb-manifest" id="kbManifest"></div>
@@ -533,10 +559,10 @@
       </div>`;
 
     $('#kbLinks').value = S.links;
-    $('#kbIncMeta').checked = S.includeMeta;
-    $('#kbCopyHint').textContent = S.target === 'servicenow'
-      ? 'Formatted pastes into the article body. Source pastes into the editor’s <> view.'
-      : 'Formatted and source are the same for this target.';
+    if ($('#kbIncMeta')) $('#kbIncMeta').checked = S.includeMeta;
+
+    if (fielded) renderFieldCopy(data); else renderWholeCopy(data);
+    if (fielded) renderMapping();
 
     const mbox = $('#kbManifest');
     if (!manifest.length) {
@@ -553,14 +579,111 @@
 
     $('#kbTarget').onchange = async (e) => { S.target = e.target.value; await loadExport(); renderExport(); };
     $('#kbLinks').onchange = async (e) => { S.links = e.target.value; await loadExport(); renderExport(); };
-    $('#kbIncMeta').onchange = async (e) => { S.includeMeta = e.target.checked; await loadExport(); renderExport(); };
-    $('#kbCopyRich').onclick = () => copyRich(data);
-    $('#kbCopySrc').onclick = () => copySource(data);
-    $('#kbDownload').onclick = () => {
+    if ($('#kbIncMeta')) {
+      $('#kbIncMeta').onchange = async (e) => {
+        S.includeMeta = e.target.checked; await loadExport(); renderExport();
+      };
+    }
+  }
+
+  /* One copy button per form field, in the order the form asks for them, so
+     filling the article in is a walk straight down this list rather than a
+     hunt through one blob of HTML for where each section starts. */
+  function renderFieldCopy(data) {
+    const box = $('#kbCopySect');
+    const parts = (data && data.parts) || [];
+    box.innerHTML = `<div class="eyebrow"><span>Copy into ${esc(S.form || 'the form')}</span>
+      <span>${parts.length}</span></div>`;
+    if (!parts.length) {
+      box.appendChild(el('p', 'kb-empty', 'Nothing to copy yet — this article has no content.'));
+      return;
+    }
+    parts.forEach((p) => {
+      const over = p.limit && p.chars > p.limit;
+      const row = el('div', 'kb-fieldcopy' + (over ? ' over' : ''));
+      const src = p.sections && p.sections.length ? p.sections.join(' · ') : '';
+      row.innerHTML = `
+        <div class="kb-fc-head">
+          <span class="kb-fc-name">${esc(p.field)}</span>
+          <span class="kb-fc-chars">${esc(p.chars)}${p.limit ? ' / ' + esc(p.limit) : ''}</span>
+        </div>
+        ${src ? `<div class="kb-fc-src">${esc(src)}</div>` : ''}`;
+      const actions = el('div', 'kb-fc-actions');
+      const copy = el('button', 'sv-btn primary', p.kind === 'html' ? 'Copy formatted' : 'Copy');
+      copy.type = 'button';
+      copy.onclick = () => (p.kind === 'html' ? copyRich(p.content) : copySource(p.content));
+      actions.appendChild(copy);
+      if (p.kind === 'html') {
+        const srcBtn = el('button', 'sv-btn kb-fc-srcbtn', '<>');
+        srcBtn.type = 'button';
+        srcBtn.title = 'Copy this field as HTML source, for the editor’s <> view';
+        srcBtn.onclick = () => copySource(p.content);
+        actions.appendChild(srcBtn);
+      }
+      row.appendChild(actions);
+      box.appendChild(row);
+    });
+  }
+
+  function renderWholeCopy(data) {
+    const box = $('#kbCopySect');
+    box.innerHTML = '<div class="eyebrow"><span>Copy</span></div>';
+    const row = el('div', 'kb-copyrow');
+    const rich = el('button', 'sv-btn primary', 'Copy formatted');
+    rich.type = 'button';
+    rich.onclick = () => (data && data.mime === 'text/html'
+      ? copyRich(data.content) : copySource(data && data.content));
+    const src = el('button', 'sv-btn', 'Copy source');
+    src.type = 'button';
+    src.onclick = () => copySource(data && data.content);
+    row.append(rich, src);
+    box.appendChild(row);
+    const dl = el('button', 'sv-btn', 'Download ' + (data ? data.filename : ''));
+    dl.type = 'button';
+    dl.onclick = () => {
       const q = `?target=${encodeURIComponent(S.target)}&links=${encodeURIComponent(S.links)}`
         + `&include_meta=${S.includeMeta}`;
       window.location.href = '/api/kb/' + S.slug + '/export/download' + q;
     };
+    box.appendChild(dl);
+  }
+
+  /* The template decides where each section lands, which is right almost
+     always and wrong exactly when someone writes a section the template
+     never imagined. This is the override, and it persists into the article's
+     own frontmatter so it travels with the file. */
+  function renderMapping() {
+    const box = $('#kbMapSect');
+    const plan = (S.article && S.article.field_plan) || [];
+    const rows = [];
+    plan.forEach((f) => f.sections.forEach((h) => rows.push({ heading: h, field: f.field })));
+    box.innerHTML = '<div class="eyebrow"><span>Section mapping</span></div>';
+    if (!rows.length) {
+      box.appendChild(el('p', 'kb-empty',
+        'No sections yet. Headings you write become fields on the form.'));
+      return;
+    }
+    rows.forEach((r) => {
+      const row = el('div', 'kb-maprow');
+      const name = el('span', 'kb-map-h', r.heading);
+      name.title = r.heading;
+      const sel = el('select', 'kb-map-f');
+      S.sectionFields.forEach((f) => {
+        const o = el('option', null, f);
+        o.value = f;
+        if (f === r.field) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.onchange = async () => {
+        S.fieldmap = { ...S.fieldmap, [r.heading]: sel.value };
+        await flushMeta();
+        await refreshArticle();
+        await loadExport();
+        renderExport();
+      };
+      row.append(name, sel);
+      box.appendChild(row);
+    });
   }
 
   /* Rich copy puts two flavours on the clipboard: text/html for an editor
@@ -568,17 +691,15 @@
      execCommand path is not legacy cruft -- it is the only rich copy that
      works outside a secure context, and Tephra is routinely opened over
      plain http on a LAN address, where navigator.clipboard is undefined. */
-  async function copyRich(data) {
-    if (!data) return;
-    const html = data.mime === 'text/html' ? data.content : null;
-    if (!html) return copySource(data);
+  async function copyRich(html) {
+    if (!html) return;
     try {
       if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
         await navigator.clipboard.write([new ClipboardItem({
           'text/html': new Blob([html], { type: 'text/html' }),
           'text/plain': new Blob([html], { type: 'text/plain' }),
         })]);
-        toast('Formatted article copied — paste into the article body');
+        toast('Copied — paste straight into the field');
         return;
       }
     } catch { /* fall through to the selection-based copy below */ }
@@ -594,24 +715,24 @@
     const ok = document.execCommand('copy');
     sel.removeAllRanges();
     holder.remove();
-    toast(ok ? 'Formatted article copied — paste into the article body'
+    toast(ok ? 'Copied — paste straight into the field'
       : 'Could not reach the clipboard — use Download instead', 4000);
   }
 
-  async function copySource(data) {
-    if (!data) return;
+  async function copySource(content) {
+    if (!content) return;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(data.content);
+        await navigator.clipboard.writeText(content);
       } else {
         const ta = el('textarea', 'kb-copyholder');
-        ta.value = data.content;
+        ta.value = content;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         ta.remove();
       }
-      toast('Source copied');
+      toast('Copied');
     } catch {
       toast('Could not reach the clipboard — use Download instead', 4000);
     }
@@ -629,7 +750,10 @@
 
   async function refreshArticle() {
     if (!S.slug) { S.article = null; return; }
-    try { S.article = await api('/kb/' + S.slug); } catch { S.article = null; }
+    try {
+      S.article = await api('/kb/' + S.slug);
+      S.fieldmap = { ...(S.article.fieldmap || {}) };
+    } catch { S.article = null; S.fieldmap = {}; }
   }
 
   async function openArticle(slug) {
@@ -707,6 +831,8 @@
         S.templates = t.templates || [];
         S.fields = t.fields || [];
         S.targets = t.targets || ['servicenow'];
+        S.sectionFields = t.section_fields || [];
+        S.form = t.form || '';
         S.ready = true;
         fillTypeSelects();
       } catch (e) {

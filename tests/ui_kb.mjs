@@ -103,6 +103,9 @@ window.tephraApi = async (p, opts = {}) => {
       fields: FIELDS, default: 'troubleshooting',
       targets: ['servicenow', 'standalone', 'markdown', 'text'],
       link_modes: ['auto', 'number', 'url', 'text'],
+      form: 'Question and Answer',
+      section_fields: ['Question', 'Environment', 'Answer', 'Additional Information', 'Internal Notes'],
+      meta_fields: ['Short description', 'Meta'],
     };
   }
   if (p === '/kb/articles' && opts.method === 'POST') { created = body; return store.articles[0]; }
@@ -120,6 +123,13 @@ window.tephraApi = async (p, opts = {}) => {
       target: 'servicenow', title: 'Array unreachable', slug: 'a1', mime: 'text/html',
       filename: 'KB1-a1.html', generated: '2026-01-02', meta: {},
       content: '<h2 style="font-size:1.3em">Summary</h2><p style="margin:0">real prose</p>',
+      form: 'Question and Answer',
+      parts: [
+        { field: 'Short description', kind: 'text', content: 'x'.repeat(180), chars: 180, limit: 160, sections: [] },
+        { field: 'Question', kind: 'html', content: '<p style="margin:0">real prose</p>', chars: 10, limit: 0, sections: ['Summary', 'Symptoms'] },
+        { field: 'Answer', kind: 'html', content: '<p style="margin:0">the fix</p>', chars: 7, limit: 0, sections: ['Resolution'] },
+        { field: 'Meta', kind: 'text', content: 'arp, dns', chars: 8, limit: 4000, sections: [] },
+      ],
       manifest: [{ n: 1, kind: 'image', name: 'topology.png', caption: 'Management topology' }],
       warnings: ['mermaid diagram 2 cannot be pasted as a diagram'],
     };
@@ -133,6 +143,11 @@ window.tephraApi = async (p, opts = {}) => {
       is_article: true, template: 'troubleshooting', template_name: 'Troubleshooting',
       outline: slug === 'a1' ? OUTLINE : [], extra_sections: slug === 'a1' ? ['Notes'] : [],
       has_guidance: slug === 'a1',
+      field_plan: slug === 'a1'
+        ? [{ field: 'Question', sections: ['Summary', 'Symptoms'] },
+           { field: 'Answer', sections: ['Resolution'] }]
+        : [],
+      fieldmap: {},
     };
   }
   throw new Error(p);
@@ -228,6 +243,13 @@ const frame = doc.querySelector('#kbPreview');
 ck('a preview iframe is rendered', !!frame);
 ck('the preview is fed the export payload, not the app’s own render',
    frame.getAttribute('srcdoc').includes('real prose'));
+ck('the preview is laid out as the destination form, one labelled box per '
+   + 'field, since that document does not exist over there',
+   frame.getAttribute('srcdoc').includes('>Question</h4>')
+   && frame.getAttribute('srcdoc').includes('>Answer</h4>'));
+ck('a field with nothing in it is shown as empty rather than omitted',
+   frame.getAttribute('srcdoc').includes('class="none"')
+   || !frame.getAttribute('srcdoc').includes('Internal Notes'));
 ck('the preview page carries no stylesheet of the app’s, so only what the '
    + 'markup carries is visible',
    !frame.getAttribute('srcdoc').includes('style.css'));
@@ -239,10 +261,48 @@ ck('every export target is offered',
    doc.querySelectorAll('#kbTarget option').length === 4);
 ck('wiki-link handling is a choice, not a hardcoded one',
    doc.querySelectorAll('#kbLinks option').length === 4);
-ck('both copy paths are offered',
-   !!doc.querySelector('#kbCopyRich') && !!doc.querySelector('#kbCopySrc'));
-ck('the download button names the file it will produce',
-   /KB1-a1\.html/.test(doc.querySelector('#kbDownload').textContent));
+console.log('\n── one copy button per form field ──');
+const fcs = [...doc.querySelectorAll('.kb-fieldcopy')];
+ck('one row per field, in the order the form asks for them',
+   fcs.map((f) => f.querySelector('.kb-fc-name').textContent).join('|')
+   === 'Short description|Question|Answer|Meta',
+   fcs.map((f) => f.querySelector('.kb-fc-name').textContent).join('|'));
+ck('a rich-text field offers a formatted copy and a source copy',
+   fcs[1].querySelectorAll('button').length === 2);
+ck('a plain-text field offers only the one copy, since there is no markup',
+   fcs[3].querySelectorAll('button').length === 1);
+ck('each field says which sections feed it',
+   fcs[1].querySelector('.kb-fc-src').textContent === 'Summary · Symptoms');
+ck('a field over the form’s character limit is flagged',
+   fcs[0].classList.contains('over'));
+ck('a field within its limit is not',
+   !fcs[3].classList.contains('over'));
+ck('the character count is shown against the limit where there is one',
+   fcs[0].querySelector('.kb-fc-chars').textContent.replace(/\s/g, '') === '180/160');
+ck('the whole-document copy and download are gone for a fielded target, '
+   + 'since there is nowhere to paste a whole document',
+   !doc.querySelector('#kbDownload') && !doc.querySelector('#kbIncMeta'));
+
+console.log('\n── the section mapping is editable and persists ──');
+const maprows = [...doc.querySelectorAll('.kb-maprow')];
+ck('one row per section that has content',
+   maprows.map((r) => r.querySelector('.kb-map-h').textContent).join('|')
+   === 'Summary|Symptoms|Resolution',
+   maprows.map((r) => r.querySelector('.kb-map-h').textContent).join('|'));
+ck('each row offers every field the form has',
+   maprows[0].querySelectorAll('option').length === 5);
+ck('the row shows where the section currently lands',
+   maprows[2].querySelector('select').value === 'Answer');
+const msel = maprows[2].querySelector('select');
+msel.value = 'Internal Notes';
+await msel.onchange();
+await tick(40);
+ck('changing a mapping saves it into the article’s own frontmatter',
+   lastMeta && lastMeta.kb_fieldmap && lastMeta.kb_fieldmap.Resolution === 'Internal Notes',
+   JSON.stringify(lastMeta && lastMeta.kb_fieldmap));
+ck('saving a mapping does not blank the metadata the form is not showing',
+   lastMeta.kb_keywords && lastMeta.kb_keywords.length > 0,
+   JSON.stringify(lastMeta && lastMeta.kb_keywords));
 ck('the attachment manifest is listed',
    doc.querySelectorAll('.kb-manrow').length === 1);
 ck('a manifest row carries its number, so it matches the placeholder in the paste',

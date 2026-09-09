@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 792 backend assertions, 1140 UI
+    ./run-tests.sh        all 51 suites; 820 backend assertions, 1153 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -80,6 +80,20 @@ in app/kb.py). Adding an article type or a field is one entry; the authoring
 form, the structure panel and the export header are all generated from those
 two lists, so nothing in the frontend needs touching.
 
+The destination KB has **no article body**. It has a form -- "Question and
+Answer" -- with five separate rich-text boxes (Question, Environment, Answer,
+Additional Information, Internal Notes), a Short description input, and a
+plain Meta textarea capped at 4000 characters. One form serves every article
+kind; Category is a separate taxonomy from the layout. So the ServiceNow
+export does not produce a document, it produces one fragment per box, and
+the export panel is a walk down the form rather than a single copy button.
+
+Every template section names the field it feeds (`Section.field`), and
+`kb_fieldmap` in an article's own frontmatter overrides that per article for
+the section the template never imagined. An unmapped heading falls back to
+Answer rather than being dropped: content that quietly goes nowhere is the
+failure mode worth engineering against.
+
 Export is the reason the feature exists: articles have to leave for a
 ServiceNow KB that has never heard of Tephra's stylesheet. So export is a
 deliberate downgrade, not a dump of the app's HTML:
@@ -88,7 +102,7 @@ deliberate downgrade, not a dump of the app's HTML:
   presentational attributes as well as CSS. No classes, no `<style>`.
   Callouts become single-cell bordered tables -- a div flattens in a
   sanitiser, and a warning that flattens into a paragraph stops reading as
-  a warning.
+  a warning. Returns `parts`, not just `content`.
 - `standalone` is the faithful artifact: self-contained page, embedded
   stylesheet, contents list, images inlined as data URIs.
 - `markdown` and `text` are for fields that accept nothing else.
@@ -100,9 +114,17 @@ that genuinely has to.
 
 Images are never silently dropped: each becomes a numbered placeholder plus
 a manifest row, numbered in *document* order. That ordering is deferred
-(see `_Media.finalize`) because callouts and sheets are extracted before the
-passes that follow them, so the order media is met is not the order it
-appears in.
+(see `_Media.finalize`, which returns a *resolver* rather than a string)
+for two reasons: callouts and sheets are extracted before the passes that
+follow them, so the order media is met is not the order it appears in; and
+the numbering has to be decided once over the whole document and then
+applied to each field fragment separately, or images restart at 1 in every
+box.
+
+The preview iframe renders the *form*, one labelled box per field, not a
+flowing document -- and carries no stylesheet beyond the box chrome, so what
+survives in the preview is what survives the paste. A preview using the
+app's own CSS would be a comfortable lie.
 
 ## Invariants
 
