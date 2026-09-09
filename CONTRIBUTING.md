@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 826 backend assertions, 1163 UI
+    ./run-tests.sh        all 51 suites; 837 backend assertions, 1163 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -79,6 +79,25 @@ Templates and the metadata schema are both *data* (`TEMPLATES` and `FIELDS`
 in app/kb.py). Adding an article type or a field is one entry; the authoring
 form, the structure panel and the export header are all generated from those
 two lists, so nothing in the frontend needs touching.
+
+These facts come from a published article, not from guesswork -- a saved
+page of a real KB article was read to settle them, and the assertions in
+tests/api_kb.py pin them:
+
+- **`<style>` blocks are not stripped.** Every field of every published
+  article carries the same house stylesheet (Inter body, cream `code`,
+  dark `pre` with a Pure-orange left border, `td{padding:16px !important}`).
+  So `kb_export.HOUSE_STYLE` is that block, byte for byte, prepended to each
+  rich-text fragment -- and `code`/`pre` are deliberately left *bare* by the
+  inliner, because an inline style would make a Tephra article the one whose
+  code blocks look different from every other article in the KB.
+- **Internal links are `https://kb.purestorage.com/csm?id=kb_article_view&sysparm_article=KB…`**,
+  not the platform-UI `kb_view.do` form.
+- **Nested ordered lists run 1 -> A -> i -> I**, via `list-style-type` on
+  each `<ol>`. Applied by depth after markdown-it, which knows nothing of it.
+- **`<br>` inside a table cell is everywhere** (one article holds 108), so
+  the export parser carries render.py's `raw_br` rule. Without it the export
+  silently reflows their tables onto one line.
 
 The destination KB has **no article body**. It has a form -- "Question and
 Answer" -- with five separate rich-text boxes (Question, Environment, Answer,

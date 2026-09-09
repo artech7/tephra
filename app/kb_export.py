@@ -58,6 +58,7 @@ from .render import (
     _parse_sheets,
     _unwrap_placeholder_p,
     _skip_fences,
+    _raw_br,
     _split_embed_extra,
 )
 
@@ -69,6 +70,44 @@ LINK_MODES = ("auto", "number", "url", "text")
 # back to the same placeholder the other targets use, with a warning saying
 # why.
 MAX_INLINE_BYTES = 4 * 1024 * 1024
+
+# How the KB actually links one article to another. Lifted verbatim from a
+# live article rather than guessed: the shape this code shipped with
+# (`kb_view.do?sysparm_article=`) is the ServiceNow platform-UI form, and the
+# portal these articles are read in does not serve it.
+KB_LINK_BASE = "https://kb.purestorage.com/csm?id=kb_article_view&sysparm_article="
+
+# The house stylesheet, copied byte for byte out of a published article.
+#
+# Every field of every article carries this block, and ServiceNow stores and
+# renders it untouched -- which settles the question this exporter was built
+# around. A `<style>` block is not stripped, so matching the house look is a
+# matter of shipping the house block rather than of inlining a private
+# approximation of it. `code`, `pre` and `td` are therefore left alone by the
+# inliner below: this block owns them, and an inline style would make a
+# Tephra article the one that looks different.
+HOUSE_STYLE = (
+    '<style> body{ font-family: inter; font-size:12pt; }  code{ background-color: '
+    '#faf7f1; font-family: 400 90%/1.4 "Space Mono",monospace; color:black;} pre { '
+    'background: #333 !important; color: #ddd !important; border-width: 0.1em 0.1em '
+    '0.1em 0.5em !important; font-variant-ligatures: none !important; border: solid '
+    '#fe5000 !important; border-width: 0.1em 0.1em 0.1em 0.5em !important; '
+    'text-shadow: 0px 0px black !important; font-family: 400 90%/1.4 "Space '
+    'Mono",monospace !important; } td{padding: 16px !important;} </style>'
+)
+
+# Tags the house block styles. Skipped by the inliner whenever the block is
+# being emitted, so its rules are the ones that apply.
+HOUSE_OWNED = ("code", "pre")
+
+# Nested ordered lists in the house articles run 1 -> A -> i -> I. markdown-it
+# has no idea about that convention, so it is applied by depth afterwards.
+_OL_DEPTH_STYLE = [
+    "list-style-position: inside;",
+    "list-style-position: inside; list-style-type: upper-alpha;",
+    "list-style-position: inside; list-style-type: lower-roman;",
+    "list-style-position: inside; list-style-type: upper-roman;",
+]
 
 
 # ── the look ───────────────────────────────────────────────────────────────
@@ -135,6 +174,13 @@ def _md_instance() -> MarkdownIt:
     m = MarkdownIt("commonmark", {"html": False, "linkify": True, "breaks": False})
     m.enable("table")
     m.enable("strikethrough")
+    # The same `<br>` rule render.py adds, and for the same reason: a GFM
+    # cell cannot contain a newline, so every tool that emits a multi-line
+    # cell emits `<br>`, and with raw HTML off it would arrive as visible
+    # "&lt;br&gt;" with the cell run onto one line. Published articles in the
+    # destination KB lean on this heavily -- one of them holds 108 of them --
+    # so an export that dropped it would quietly reflow their tables.
+    m.inline.ruler.before("autolink", "raw_br", _raw_br)
     return m
 
 
@@ -286,9 +332,9 @@ def _link_text(title: str, shown: str, mode: str, known: dict) -> str:
     hit = known.get(title.lower())
     if mode != "text" and hit:
         if mode in ("auto", "number") and hit["number"]:
-            href = f"kb_view.do?sysparm_article={hit['number']}"
+            href = f"{KB_LINK_BASE}{hit['number']}"
             return (f'<a href="{_attr(href)}" style="{_TAG_CSS["a"]}">'
-                    f'{_esc(shown)}</a> ({_esc(hit["number"])})')
+                    f'{_esc(shown)}</a>')
         if mode in ("auto", "url") and hit["url"]:
             return f'<a href="{_attr(hit["url"])}" style="{_TAG_CSS["a"]}">{_esc(shown)}</a>'
     return f"<strong>{_esc(shown)}</strong>"
@@ -297,11 +343,11 @@ def _link_text(title: str, shown: str, mode: str, known: dict) -> str:
 # ── body construction ──────────────────────────────────────────────────────
 
 
-def _callout(kind: str, title: str, inner_md: str, sub) -> str:
+def _callout(kind: str, title: str, inner_md: str, sub, house: bool = False) -> str:
     variant = CALLOUT_VARIANTS.get(kind.lower(), "note")
     border, wash, default_label = _CALLOUT_LOOK.get(variant, _CALLOUT_LOOK["note"])
     label = title.strip() or default_label
-    inner = _style(_unwrap_placeholder_p(_MD.render(sub(inner_md))))
+    inner = _style(_unwrap_placeholder_p(_MD.render(sub(inner_md))), house)
     return (
         f'<table border="1" cellspacing="0" cellpadding="0" '
         f'style="border-collapse:collapse;width:100%;margin:0 0 1.1em">'
@@ -312,7 +358,7 @@ def _callout(kind: str, title: str, inner_md: str, sub) -> str:
     )
 
 
-def _sheets(content: str, sub) -> str:
+def _sheets(content: str, sub, house: bool = False) -> str:
     """A sheets fence is a tabbed group on screen. Tabs are interaction, and
     interaction does not paste, so each sheet becomes a labelled table
     stacked in order -- the same information, laid out for a page rather
@@ -320,7 +366,7 @@ def _sheets(content: str, sub) -> str:
     out = []
     for name, table_md in _parse_sheets(content):
         out.append(f'<p style="margin:1.2em 0 .35em;font-weight:700;color:{INK}">{_esc(name)}</p>')
-        out.append(_style(_unwrap_placeholder_p(_MD.render(sub(table_md)))))
+        out.append(_style(_unwrap_placeholder_p(_MD.render(sub(table_md))), house))
     return "".join(out)
 
 
@@ -359,13 +405,16 @@ def _meta_table(note: vault.Note) -> str:
     return f'<table border="1" cellspacing="0" cellpadding="6" style="{_TAG_CSS["table"]}">{"".join(rows)}</table>'
 
 
-def _fence(lang: str, code: str, media: _Media) -> str:
+def _fence(lang: str, code: str, media: _Media, house: bool = False) -> str:
     if lang in ("mermaid", "netdiagram"):
         return media.diagram(lang, code)
     tag = (f'<p style="margin:0 0 .25em;color:{MUTED};font-size:.85em;'
            f'font-family:Consolas,Monaco,\'Courier New\',monospace">{_esc(lang)}</p>'
            ) if lang else ""
-    return f'{tag}<pre style="{_TAG_CSS["pre"]}"><code>{_esc(code)}</code></pre>'
+    # Bare <pre> when the house block is coming: it claims pre with
+    # !important anyway, and a bare tag is what published articles hold.
+    pre = "<pre>" if house else f'<pre style="{_TAG_CSS["pre"]}">'
+    return f'{tag}{pre}<code>{_esc(code)}</code></pre>'
 
 
 _FENCE_CAPTURE = re.compile(r"^```([\w-]*)[ \t]*\n(?P<code>.*?)^```[ \t]*$", re.M | re.S)
@@ -382,7 +431,9 @@ class _Ctx:
     reference list in another.
     """
 
-    def __init__(self, links: str, embed_images: bool, sources: list[dict]):
+    def __init__(self, links: str, embed_images: bool, sources: list[dict],
+                 house: bool = False):
+        self.house = house
         self.links = links
         self.sources = sources
         self.media = _Media(embed_images)
@@ -431,13 +482,14 @@ def _render_fragment(prose: str, ctx: _Ctx) -> str:
     prose = CALLOUT_RE.sub(
         lambda m: "\n\n" + ctx.stash(_callout(
             m.group("type"), m.group("title"),
-            _CALLOUT_STRIP_RE.sub("", m.group("lines")), ctx.sub)) + "\n\n",
+            _CALLOUT_STRIP_RE.sub("", m.group("lines")), ctx.sub, ctx.house)) + "\n\n",
         prose)
     prose = SHEETS_RE.sub(
-        lambda m: "\n\n" + ctx.stash(_sheets(m.group("content"), ctx.sub)) + "\n\n", prose)
+        lambda m: "\n\n" + ctx.stash(_sheets(m.group("content"), ctx.sub, ctx.house)) + "\n\n", prose)
     prose = _FENCE_CAPTURE.sub(
         lambda m: "\n\n" + ctx.stash(_fence(m.group(1).split("|")[0].strip(),
-                                            m.group("code"), ctx.media)) + "\n\n", prose)
+                                            m.group("code"), ctx.media,
+                                            ctx.house)) + "\n\n", prose)
     prose = EMBED_RE.sub(lambda m: "\n\n" + ctx.stash(ctx.on_embed(m)) + "\n\n", prose)
     prose = _INLINE_IMG_RE.sub(
         lambda m: "\n\n" + ctx.stash(ctx.media.image(m.group(2).rsplit("/", 1)[-1],
@@ -451,7 +503,7 @@ def _render_fragment(prose: str, ctx: _Ctx) -> str:
             f'style="{_TAG_CSS["a"]}">{_esc(m.group(1))}</a></p>') + "\n\n",
         prose)
 
-    out = _style(_unwrap_placeholder_p(_MD.render(prose)))
+    out = _style(_unwrap_placeholder_p(_MD.render(prose)), ctx.house)
     # Highest index first, for the reason render.render spells out: a
     # callout's own fragment can still hold a lower-indexed placeholder that
     # its nested render carried through untouched.
@@ -460,13 +512,14 @@ def _render_fragment(prose: str, ctx: _Ctx) -> str:
     return out
 
 
-def _build_sections(note: vault.Note, *, links: str, embed_images: bool):
+def _build_sections(note: vault.Note, *, links: str, embed_images: bool,
+                    house: bool = False):
     """The article as a list of rendered sections, in document order."""
     _, sources_sec = idx.split_sources_block(st.split_quiz(note.body)[0])
     sources = idx.parse_sources(sources_sec)
     prose = kb.strip_todos(kb.exportable_body(note))
 
-    ctx = _Ctx(links, embed_images, sources)
+    ctx = _Ctx(links, embed_images, sources, house)
     out = []
     for sec in kb.sections(prose):
         out.append({"heading": sec["heading"],
@@ -499,7 +552,8 @@ def _visible_len(html_text: str) -> int:
     return len(html.unescape(_TAGS_RE.sub("", html_text)).strip())
 
 
-def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict]) -> list[dict]:
+def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict],
+                 house: bool = True) -> list[dict]:
     """One fragment per form field, in the order the form asks for them.
 
     A field fed by exactly one section drops that section's heading -- the
@@ -536,6 +590,11 @@ def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict]) -> lis
                 pieces.append(f'<h3 style="{_TAG_CSS["h3"]}">{_esc(sec["heading"])}</h3>')
             pieces.append(sec["html"])
         body = "".join(pieces) + extra
+        if house:
+            # Prepended per field, not once for the article: each box is
+            # pasted into separately, and every published article carries the
+            # block in every one of its fields.
+            body = HOUSE_STYLE + body
         out.append({"field": name, "kind": "html", "content": body,
                     "chars": _visible_len(body), "limit": 0,
                     "sections": [s["heading"] for s in chunk if s["heading"]]})
@@ -566,16 +625,46 @@ def _style_tag(s: str, tag: str, css: str, extra: str = "") -> str:
     return re.sub(rf"<{tag}((?:\s[^>]*)?)>", rep, s)
 
 
-def _style(s: str) -> str:
-    """Inline the whole palette onto a fragment of generated HTML."""
+def _nest_ordered_lists(s: str) -> str:
+    """Give each `<ol>` the marker its depth calls for: 1, then A, then i,
+    then I. That progression is the house convention in published articles,
+    and it is what makes a long nested procedure readable -- every level of a
+    document full of bare `1.` markers looks like the same level."""
+    out, depth, at = [], 0, 0
+    for m in re.finditer(r"<ol(?:\s[^>]*)?>|</ol>", s):
+        out.append(s[at:m.start()])
+        at = m.end()
+        if m.group(0) == "</ol>":
+            depth = max(0, depth - 1)
+            out.append(m.group(0))
+        else:
+            css = _OL_DEPTH_STYLE[min(depth, len(_OL_DEPTH_STYLE) - 1)]
+            depth += 1
+            out.append(f'<ol style="{css}">')
+    out.append(s[at:])
+    return "".join(out)
+
+
+def _style(s: str, house: bool = False) -> str:
+    """Inline the whole palette onto a fragment of generated HTML.
+
+    With `house` set, the tags the house stylesheet owns are left bare so
+    that block's rules apply to them -- otherwise a Tephra article would be
+    the one article in the KB whose code blocks look different.
+    """
     # A <code> inside a <pre> is a code *block* and must not also get the
     # inline chip's border and background. Rename it out of reach, style
     # everything else, put it back.
     s = s.replace("<pre><code", "<pre><kbcode")
     for tag, css in _TAG_CSS.items():
+        if house and tag in HOUSE_OWNED:
+            continue
+        if tag == "ol":
+            continue        # depth-aware, applied below
         extra = ' border="1" cellspacing="0" cellpadding="6"' if tag == "table" else ""
         s = _style_tag(s, tag, css, extra)
     s = s.replace("<pre><kbcode", "<pre><code")
+    s = _nest_ordered_lists(s)
     # markdown-it emits a language class on a fenced block's <code>; it names
     # a stylesheet that will not be there, so it is noise at best.
     s = re.sub(r'<code class="[^"]*"', "<code", s)
@@ -713,7 +802,7 @@ def _markdown(note: vault.Note, *, links: str) -> tuple[str, _Media]:
             if links in ("auto", "url") and hit["url"]:
                 return f"[{shown}]({hit['url']})"
             if links in ("auto", "number") and hit["number"]:
-                return f"**{shown}** ({hit['number']})"
+                return f"[{shown}]({KB_LINK_BASE}{hit['number']})"
         return f"**{shown}**"
 
     def on_cite(m):
@@ -881,7 +970,7 @@ def _filename(note: vault.Note, ext: str) -> str:
 
 
 def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
-           include_meta: bool = True) -> dict:
+           include_meta: bool = True, house_style: bool = True) -> dict:
     """Render `note` for `target`. Never raises on content -- an article with
     a broken embed or an unknown fence language exports, with a warning
     saying what degraded, because an author mid-paste needs the output more
@@ -911,7 +1000,9 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
                 "manifest": media.items, "warnings": media.warnings}
 
     embed = target == "standalone"
-    secs, ctx, sources = _build_sections(note, links=links, embed_images=embed)
+    house = house_style and target == "servicenow"
+    secs, ctx, sources = _build_sections(note, links=links, embed_images=embed,
+                                         house=house)
     media = ctx.media
     body = _document_html(note, secs, sources, include_meta)
     body, toc = _anchor_headings(body)
@@ -931,7 +1022,7 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
     # for them -- `content` is still the whole document, because the preview
     # needs something to show and a caller that only wants the markup should
     # not have to reassemble it.
-    parts = _field_parts(note, secs, sources)
+    parts = _field_parts(note, secs, sources, house)
 
     # Numbering is decided over the document, then applied to each fragment,
     # so an image is "Image 3" in whichever box it lands in rather than

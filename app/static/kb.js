@@ -43,6 +43,7 @@
     target: 'servicenow',
     links: 'auto',
     includeMeta: true,
+    houseStyle: true,
     exportData: null,
     filter: '',
     picking: false,
@@ -460,7 +461,7 @@
     try {
       S.exportData = await api('/kb/' + S.slug + '/export'
         + `?target=${encodeURIComponent(S.target)}&links=${encodeURIComponent(S.links)}`
-        + `&include_meta=${S.includeMeta}`);
+        + `&include_meta=${S.includeMeta}&house_style=${S.houseStyle}`);
     } catch (e) {
       S.exportData = null;
       toast('Export failed: ' + String((e && e.message) || e).slice(0, 140), 4500);
@@ -550,8 +551,12 @@
           <option value="url">Source URL link</option>
           <option value="text">Plain text only</option>
         </select>
-        ${fielded ? '' : '<label class="kb-check"><input type="checkbox" id="kbIncMeta">'
-          + ' Include the metadata table</label>'}
+        ${fielded
+          ? '<label class="kb-check" title="Every published article carries the KB\u2019s'
+            + ' own stylesheet in each field. Leave this on so yours look like the rest.">'
+            + '<input type="checkbox" id="kbHouse"> Use the KB house stylesheet</label>'
+          : '<label class="kb-check"><input type="checkbox" id="kbIncMeta">'
+            + ' Include the metadata table</label>'}
       </div>
       <div class="kb-asidesect" id="kbCopySect"></div>
       <div class="kb-asidesect" id="kbMapSect"${fielded ? '' : ' hidden'}></div>
@@ -566,6 +571,7 @@
 
     $('#kbLinks').value = S.links;
     if ($('#kbIncMeta')) $('#kbIncMeta').checked = S.includeMeta;
+    if ($('#kbHouse')) $('#kbHouse').checked = S.houseStyle;
 
     if (fielded) renderFieldCopy(data); else renderWholeCopy(data);
     if (fielded) renderMapping();
@@ -588,6 +594,11 @@
     if ($('#kbIncMeta')) {
       $('#kbIncMeta').onchange = async (e) => {
         S.includeMeta = e.target.checked; await loadExport(); renderExport();
+      };
+    }
+    if ($('#kbHouse')) {
+      $('#kbHouse').onchange = async (e) => {
+        S.houseStyle = e.target.checked; await loadExport(); renderExport();
       };
     }
   }

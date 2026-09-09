@@ -1722,7 +1722,7 @@ def kb_release(slug: str, _admin: None = Depends(require_admin)):
 
 @app.get("/api/kb/{slug}/export")
 def kb_export_article(slug: str, target: str = "servicenow", links: str = "auto",
-                      include_meta: bool = True):
+                      include_meta: bool = True, house_style: bool = True):
     """The export as JSON, for the deck's preview and its copy buttons.
 
     Not gated on the admin lock: exporting reads a note and writes nothing,
@@ -1732,16 +1732,17 @@ def kb_export_article(slug: str, target: str = "servicenow", links: str = "auto"
     if target not in kb_export.TARGETS:
         raise HTTPException(400, f"unknown export target: {target}")
     return kb_export.export(note, target=target, links=links,
-                            include_meta=include_meta)
+                            include_meta=include_meta, house_style=house_style)
 
 
 @app.get("/api/kb/{slug}/export/download")
 def kb_export_download(slug: str, target: str = "standalone", links: str = "auto",
-                       include_meta: bool = True):
+                       include_meta: bool = True, house_style: bool = True):
     note = _article(slug)
     if target not in kb_export.TARGETS:
         raise HTTPException(400, f"unknown export target: {target}")
-    out = kb_export.export(note, target=target, links=links, include_meta=include_meta)
+    out = kb_export.export(note, target=target, links=links, include_meta=include_meta,
+                           house_style=house_style)
     return Response(
         content=out["content"],
         media_type=f"{out['mime']}; charset=utf-8",

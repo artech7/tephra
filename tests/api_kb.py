@@ -23,6 +23,7 @@ value that fails its own round trip.
 """
 import base64
 import os
+import re
 import shutil
 import sys
 import zlib
@@ -277,8 +278,12 @@ ck("template guidance never reaches an export",
    "TODO" not in h and "leftover guidance" not in h)
 ck("the export says out loud that it stripped guidance",
    any("guidance" in w for w in sn["warnings"]), sn["warnings"])
+# The link format is lifted from a live article, not guessed: the portal
+# these are read in does not serve the platform-UI `kb_view.do` form this
+# code originally shipped with.
 ck("a wikilink to an article with a number becomes a link to that number",
-   "kb_view.do?sysparm_article=KB0009876" in h)
+   "kb.purestorage.com/csm?id=kb_article_view&amp;sysparm_article=KB0009876" in h,
+   [l for l in h.split('"') if "sysparm" in l][:1])
 ck("a wikilink to a note that is not an article degrades to bold text, "
    "never to a dead link",
    "<strong>Nothing Here</strong>" in h)
@@ -304,7 +309,7 @@ ck("the metadata table can be turned off", "KB0012345" not in nometa["content"])
 
 plain = kb_export.export(art, target="servicenow", links="text")
 ck("link mode 'text' emits no article links at all",
-   "kb_view.do" not in plain["content"])
+   "sysparm_article" not in plain["content"])
 
 st = kb_export.export(art, target="standalone")
 s = st["content"]
@@ -458,6 +463,78 @@ ck("the mapping plan does not list sections the export never emits",
 ck("and it lists every section that does get emitted",
    set(plan_headings) == {h for p in fields for h in p["sections"]},
    plan_headings)
+
+print("\n── matching the house look, taken from a published article ──")
+# The question this exporter was designed around -- "does the sanitiser strip
+# <style>?" -- turned out to have the answer "no", and every published
+# article carries the same block in every field. So matching the house is a
+# matter of shipping that block, not of inlining a private approximation of
+# it, and these assertions pin that decision to what the real article does.
+ck("every rich-text field carries the house stylesheet, as published "
+   "articles do",
+   all(p["content"].startswith("<style>") for p in fields if p["kind"] == "html"),
+   [p["field"] for p in fields if p["kind"] == "html"
+    and not p["content"].startswith("<style>")])
+ck("plain-text fields do not, since their boxes hold no markup",
+   all("<style>" not in p["content"] for p in fields if p["kind"] == "text"))
+ck("the block is the published one, byte for byte",
+   "#fe5000" in kb_export.HOUSE_STYLE and "Space Mono" in kb_export.HOUSE_STYLE
+   and 'td{padding: 16px !important;}' in kb_export.HOUSE_STYLE)
+answer = next(p for p in fields if p["field"] == "Answer")
+ck("code and pre are left bare so the house block owns them -- an inline "
+   "style would make this the one article whose code looks different",
+   "<pre>" in answer["content"] or "<pre " not in answer["content"],
+   answer["content"][answer["content"].find("<pre"):][:60])
+ck("and everything the house block does not cover is still inlined",
+   "<p style=" in answer["content"])
+
+bare = kb_export.export(art, target="servicenow", house_style=False)
+bare_answer = next(p for p in bare["parts"] if p["field"] == "Answer")
+ck("the house block can be turned off, and then code carries its own styling",
+   "<style>" not in bare_answer["content"] and "<pre style=" in bare_answer["content"])
+ck("the standalone page never carries it -- it is a whole document with a "
+   "stylesheet of its own",
+   "#fe5000" not in kb_export.export(art, target="standalone")["content"])
+
+NESTED = """## Resolution
+
+1. Confirm the array's health
+   1. Check parity
+      1. Read the counter
+   2. Check mastership
+2. Replace the blade
+"""
+nested = vault.Note(slug="nested", title="Nested", body=NESTED,
+                    meta={"kb_type": "troubleshooting"})
+vault.write(nested)
+nh = next(p for p in kb_export.export(vault.read("nested"), target="servicenow")["parts"]
+          if p["field"] == "Answer")["content"]
+ck("nested steps run 1 -> A -> i, the house convention that makes a long "
+   "procedure readable",
+   "list-style-type: upper-alpha" in nh and "list-style-type: lower-roman" in nh, )
+ck("the outermost list takes no marker override, only the inside position",
+   nh.count('<ol style="list-style-position: inside;">') >= 1)
+
+# A GFM cell cannot hold a newline, so a multi-line cell is written with
+# <br> -- render.py grew a rule for exactly this, and the published articles
+# lean on it hard (one holds 108 of them). An export parser without that rule
+# silently reflows their tables onto one line.
+BR = """## Environment
+
+| Product | Versions |
+| --- | --- |
+| FlashArray | 6.5.0<br>**6.5.2 only** |
+"""
+brn = vault.Note(slug="brcell", title="Br", body=BR, meta={"kb_type": "troubleshooting"})
+vault.write(brn)
+bh = next(p for p in kb_export.export(vault.read("brcell"), target="servicenow")["parts"]
+          if p["field"] == "Environment")["content"]
+# `<br />` rather than `<br>`: the commonmark preset sets xhtmlOut, so this
+# is the same form Tephra's own renderer emits. Both are a line break
+# everywhere it matters, so the assertion is on the break, not the spelling.
+ck("a <br> in a table cell survives the export as a line break",
+   re.search(r"<br\s*/?>", bh) and "&lt;br&gt;" not in bh, bh[bh.find("6.5.0"):][:40])
+ck("and the markdown around it still renders", "<strong>6.5.2 only</strong>" in bh)
 
 print("\n── the per-article field override ──")
 mapped = vault.Note(slug="mapped", title="Mapped", body=(
