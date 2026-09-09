@@ -1144,6 +1144,11 @@ input[type=range]:active::-moz-range-thumb{transform:scale(1.15)}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13);border-radius:8px}
 ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
 ::-webkit-scrollbar-track{background:transparent}
+/* The square where a horizontal and a vertical scrollbar meet. Left
+   unstyled it paints solid white in Blink and WKWebView -- a bright block
+   in the bottom-right corner of any box that scrolls both ways (a wide,
+   tall sheet most of all), which reads as a resize gizmo you can't grab. */
+::-webkit-scrollbar-corner{background:transparent}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
@@ -2014,7 +2019,10 @@ input.sv-select{cursor:text}
 .body .sheets .sheet-tab:hover{background:rgba(255,255,255,.06);color:var(--paper)}
 .body .sheets .sheet-tab.on{background:rgba(var(--acc),.14);color:rgb(var(--acc));
   box-shadow:0 -2px 0 rgb(var(--acc)) inset}
-.body .sheets .sheet-body{padding:14px 14px 2px}
+/* The bottom padding is the gutter the height grip lives in (see
+   .sheet-vgrip below) -- without it the grip would sit on top of the
+   pane's own horizontal scrollbar and steal its drags. */
+.body .sheets .sheet-body{padding:14px 14px 13px}
 .body .sheets .sheet-pane{display:none}
 /* The pane, not the note column, is the scroll container -- so a wide sheet
    scrolls sideways inside its card instead of either overflowing the note or
@@ -2097,6 +2105,9 @@ input.sv-select{cursor:text}
    the same two things. */
 #shtViewBody .sheets .sheet-expand,
 #shtViewBody .sheets .sheet-edit{display:none}
+/* The height grip goes with them: in here the pane already takes all the
+   room there is, so --sheet-h has nothing left to cap. */
+#shtViewBody .sheets .sheet-vgrip{display:none}
 /* .body sets a serif reading font and a text-shadow tuned for prose over
    the wallpaper. A full-screen grid is not prose -- the shadow smears cell
    text at this density, and the table wants the UI font it already uses
@@ -2179,3 +2190,27 @@ input.sv-select{cursor:text}
    resizing, and the cursor flickers back to a caret between cells. */
 body.sheet-resizing{cursor:col-resize!important;-webkit-user-select:none;user-select:none}
 body.sheet-resizing .sheet-grip::after{opacity:1}
+
+/* ── height grip ──
+   A strip across the bottom edge of the card, dragged to make the sheet
+   taller or shorter. It exists because the only thing in that corner used
+   to be the scrollbar corner (see ::-webkit-scrollbar-corner above), which
+   looks exactly like a resize gizmo and is not one -- so the obvious thing
+   to reach for did nothing.
+
+   It sets --sheet-h, which is the pane's max-height, so a sheet shorter
+   than the box still ends where its last row does instead of trailing empty
+   space. Same 12px-tall-target/2px-line proportions as the column grips:
+   a hairline is unusable with a trackpad. */
+.body .sheets .sheet-vgrip{position:absolute;left:0;right:0;bottom:0;height:12px;
+  cursor:ns-resize;z-index:3;background:transparent;border:0;padding:0;
+  touch-action:none;-webkit-user-select:none;user-select:none}
+.body .sheets .sheet-vgrip::after{content:'';position:absolute;left:50%;bottom:4px;
+  width:38px;height:2px;margin-left:-19px;border-radius:2px;
+  background:var(--edge-hi);opacity:.5;transition:.16s var(--ease)}
+.body .sheets:hover .sheet-vgrip::after{opacity:.85}
+.body .sheets .sheet-vgrip:hover::after,
+.body .sheets .sheet-vgrip.dragging::after{opacity:1;background:rgb(var(--acc));width:54px;margin-left:-27px}
+/* Same reason as body.sheet-resizing above, in the other axis. */
+body.sheet-resizing-v{cursor:ns-resize!important;-webkit-user-select:none;user-select:none}
+body.sheet-resizing-v .sheet-vgrip::after{opacity:1}

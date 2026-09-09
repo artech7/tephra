@@ -299,6 +299,91 @@
     }
   }
 
+  /* ── reading view: card height ────────────────────────────────
+     The pane's max-height (--sheet-h) is what makes a 200-row sheet a
+     scrollable box instead of a page you scroll past; this is the drag that
+     changes it. Unlike a column width it is not written to the note: a
+     height is about this screen, not about the data, and it would have no
+     meaning in the file outside Tephra. It goes to localStorage keyed by
+     note and fence, the same place the sidebar width lives.
+     ─────────────────────────────────────────────────────────────────── */
+
+  const H_MIN = 90;                    // below this the header alone fills it
+  const H_KEY = 'tephra:sheet-h:';
+
+  function heightKey(card) {
+    const slug = window.tephraCurrentSlug?.();
+    const fence = card.dataset.sheetsIndex;
+    return slug && fence != null ? H_KEY + slug + ':' + fence : null;
+  }
+
+  function applyHeight(card, px) {
+    if (px == null) card.style.removeProperty('--sheet-h');
+    else card.style.setProperty('--sheet-h', px + 'px');
+  }
+
+  function restoreHeight(card) {
+    const key = heightKey(card);
+    if (!key) return;
+    let saved = null;
+    try { saved = localStorage.getItem(key); } catch {}
+    const px = parseInt(saved, 10);
+    if (px >= H_MIN) applyHeight(card, px);
+  }
+
+  function attachHeightGrip(card) {
+    if (card.querySelector('.sheet-vgrip')) return;
+    const grip = document.createElement('div');
+    grip.className = 'sheet-vgrip';
+    grip.title = 'Drag to resize; double-click to reset';
+    card.appendChild(grip);
+
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pane = card.querySelector('.sheet-pane.on') || card.querySelector('.sheet-pane');
+      if (!pane) return;
+      const startY = e.clientY;
+      const startH = pane.getBoundingClientRect().height;
+      // The tallest height worth allowing is the one where the whole sheet
+      // is visible: past that the box grows but nothing new appears, and
+      // dragging back up spends its first inches in that dead zone.
+      const full = pane.scrollHeight + (pane.offsetHeight - pane.clientHeight);
+      grip.classList.add('dragging');
+      document.body.classList.add('sheet-resizing-v');
+      grip.setPointerCapture?.(e.pointerId);
+
+      const onMove = (ev) => {
+        const h = Math.max(H_MIN, Math.min(Math.max(full, H_MIN),
+          Math.round(startH + (ev.clientY - startY))));
+        applyHeight(card, h);
+      };
+      const onUp = () => {
+        grip.removeEventListener('pointermove', onMove);
+        grip.removeEventListener('pointerup', onUp);
+        grip.removeEventListener('pointercancel', onUp);
+        grip.classList.remove('dragging');
+        document.body.classList.remove('sheet-resizing-v');
+        const key = heightKey(card);
+        const px = card.style.getPropertyValue('--sheet-h');
+        if (key && px) { try { localStorage.setItem(key, parseInt(px, 10)); } catch {} }
+      };
+      grip.addEventListener('pointermove', onMove);
+      grip.addEventListener('pointerup', onUp);
+      grip.addEventListener('pointercancel', onUp);
+    });
+
+    // Double-click hands the card back to the default cap, the same way
+    // double-clicking a column grip hands the column back to auto width.
+    grip.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      applyHeight(card, null);
+      const key = heightKey(card);
+      if (key) { try { localStorage.removeItem(key); } catch {} }
+    });
+  }
+
   function saveWidths(card, sheetIndex, widths) {
     const fenceIndex = Number(card.dataset.sheetsIndex);
     const slug = window.tephraCurrentSlug?.();
@@ -352,6 +437,8 @@
       });
 
       attachGrips(card);
+      attachHeightGrip(card);
+      restoreHeight(card);
 
       const exp = document.createElement('button');
       exp.type = 'button';
@@ -681,6 +768,7 @@
     widths: { parse: widthFromCell, cell: widthToCell, set: setSheetWidths,
               MIN: W_MIN, MAX: W_MAX, UNSET: W_UNSET },
     setBody: setSheetsBody,
+    height: { MIN: H_MIN, KEY: H_KEY },
     enhance: enhanceSheets,
   };
 })();

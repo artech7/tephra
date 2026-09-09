@@ -227,5 +227,72 @@ console.log('\n── the DOM a resize needs is wired up on enhance ──');
      !grip.closest('.sheet-pane').classList.contains('sheet-fixed'));
 }
 
+console.log('\n── the height grip drags the card taller and remembers it ──');
+{
+  const noteBody = doc.querySelector('#noteBody');
+  const card = noteBody.querySelector('.sheets');
+  const pane = card.querySelector('.sheet-pane.on');
+  const grip = card.querySelector('.sheet-vgrip');
+  const H = S.height;
+  ck('the card has exactly one height grip', card.querySelectorAll('.sheet-vgrip').length === 1);
+  ck('it sits on the card, not inside a pane, so it does not scroll away',
+     grip && grip.parentElement === card);
+
+  // jsdom has no layout: every box measures 0, so the start height is 0 and
+  // scrollHeight has to be declared. That makes the arithmetic exact -- a
+  // 300px drag from a 0px start is a 300px box.
+  Object.defineProperty(pane, 'scrollHeight', { value: 1000, configurable: true });
+  grip.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, clientY: 0 }));
+  grip.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: 300 }));
+  ck('dragging down raises the pane height cap',
+     card.style.getPropertyValue('--sheet-h') === '300px', card.style.getPropertyValue('--sheet-h'));
+  ck('the drag sets the cap on the card, not a height on the table',
+     pane.style.height === '' && pane.style.maxHeight === '');
+
+  // Past the content's own height the box would grow with nothing new in it,
+  // and dragging back would spend its first inches doing nothing.
+  grip.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: 99999 }));
+  ck('dragging past the whole sheet stops at the whole sheet',
+     card.style.getPropertyValue('--sheet-h') === '1000px', card.style.getPropertyValue('--sheet-h'));
+  grip.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: -99999 }));
+  ck('dragging up stops at the floor, not at zero',
+     card.style.getPropertyValue('--sheet-h') === H.MIN + 'px', card.style.getPropertyValue('--sheet-h'));
+
+  grip.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: 420 }));
+  grip.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientY: 420 }));
+  ck('the drag is over -- body no longer in vertical resizing mode',
+     !doc.body.classList.contains('sheet-resizing-v'));
+  ck('releasing stores the height against this note and this fence',
+     window.localStorage.getItem(H.KEY + 'a-note:0') === '420',
+     window.localStorage.getItem(H.KEY + 'a-note:0'));
+
+  // A height is about this screen, not about the data: it must never reach
+  // the file the way a column width does.
+  let touched = false;
+  const realSave = window.tephraSaveNoteBody;
+  window.tephraSaveNoteBody = () => { touched = true; };
+  grip.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, clientY: 0 }));
+  grip.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: 200 }));
+  grip.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientY: 200 }));
+  ck('a height drag never rewrites the note', !touched);
+  window.tephraSaveNoteBody = realSave;
+
+  // Re-render: the card is rebuilt from scratch on every note render, so the
+  // stored height has to be re-applied or the drag looks like it was lost.
+  noteBody.innerHTML = noteBody.innerHTML.replace(/ data-processed="true"/g, '');
+  for (const el of noteBody.querySelectorAll('.sheet-vgrip, .sheet-grip, .sheet-edit, .sheet-expand')) el.remove();
+  S.enhance();
+  const fresh = noteBody.querySelector('.sheets');
+  ck('a re-rendered card comes back at the stored height',
+     fresh.style.getPropertyValue('--sheet-h') === '200px', fresh.style.getPropertyValue('--sheet-h'));
+
+  const g2 = fresh.querySelector('.sheet-vgrip');
+  g2.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  ck('double-clicking the grip hands the card back to the default cap',
+     fresh.style.getPropertyValue('--sheet-h') === '', fresh.style.getPropertyValue('--sheet-h'));
+  ck('and forgets the stored height rather than restoring it next time',
+     window.localStorage.getItem(H.KEY + 'a-note:0') === null);
+}
+
 console.log(`\n  ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

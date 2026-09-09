@@ -168,6 +168,31 @@ console.log('\n── a sheet moved into the fullscreen viewer keeps its styling
   ck('the card\u2019s own Expand button is hidden in the viewer',
      winner(expand, 'display')?.value === 'none', winner(expand, 'display')?.sel);
 
+  // The height grip: a real drag target in the note, and gone in the viewer
+  // where the pane already takes all the height there is. Before it existed
+  // the only thing in that corner was the scrollbar corner, which looks like
+  // a resize gizmo and isn't one.
+  const vg = (card) => { const g = doc.createElement('div'); g.className = 'sheet-vgrip'; card.appendChild(g); return g; };
+  const gNote = vg(inNote), gView = vg(inView);
+  ck('the height grip is draggable in the note', winner(gNote, 'cursor')?.value === 'ns-resize',
+     winner(gNote, 'cursor')?.value);
+  ck('it is a real target, not a hairline', parseInt(winner(gNote, 'height')?.value, 10) >= 8,
+     winner(gNote, 'height')?.value);
+  ck('and it is hidden in the fullscreen viewer',
+     winner(gView, 'display')?.value === 'none', winner(gView, 'display')?.sel);
+
+  // What the grip drags. max-height (not height) is what keeps a short sheet
+  // ending at its last row instead of trailing empty space.
+  const mh = winner(inNote.querySelector('.sheet-pane.on'), 'max-height');
+  ck('the pane height is capped by the --sheet-h variable the grip sets',
+     mh && mh.value.includes('--sheet-h'), mh?.value);
+
+  // Pseudo-elements can't be matched against an element, so this one is
+  // checked as text. Unstyled, the corner where two scrollbars meet paints
+  // solid white -- the block that looked like a broken drag handle.
+  ck('the scrollbar corner is not left as a white block',
+     /::-webkit-scrollbar-corner\s*\{[^}]*background\s*:\s*transparent/.test(css));
+
   doc.querySelector('#noteBody').innerHTML = '';
   host.innerHTML = '';
 }
