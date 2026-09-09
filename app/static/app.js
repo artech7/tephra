@@ -2218,12 +2218,23 @@ const gv = $('#graphview');
 /* Tephra and Crucible are two sides of one deck. Clicking Tephra does not
    change which canvas mode is active underneath — it just brings that side
    back — so you can leave Crucible and land where you were. */
-function setStudy(on) {
-  $('#crucibleBtn')?.setAttribute('aria-pressed', String(!!on));
-  $('#tephraBtn')?.setAttribute('aria-pressed', String(!on));
-  if (on) window.tephraStudy?.open();
+/* Three sides of one deck now: Tephra, Crucible, and KB Authoring. Driven
+   through one function taking a name rather than through one boolean per
+   side, because independent toggles can put two full-deck panes on screen
+   at once -- and both are opaque, so the loser is not visibly wrong, it is
+   simply invisible, and the app looks like it lost your work. */
+function setDeck(name) {
+  $('#tephraBtn')?.setAttribute('aria-pressed', String(name === 'tephra'));
+  $('#crucibleBtn')?.setAttribute('aria-pressed', String(name === 'crucible'));
+  $('#kbBtn')?.setAttribute('aria-pressed', String(name === 'kb'));
+  if (name === 'crucible') window.tephraStudy?.open();
   else window.tephraStudy?.close();
+  if (name === 'kb') window.tephraKb?.open();
+  else window.tephraKb?.close();
 }
+
+function setStudy(on) { setDeck(on ? 'crucible' : 'tephra'); }
+function setKb(on) { setDeck(on ? 'kb' : 'tephra'); }
 
 function setView(v) {
   // A whole-screen overlay like Formatting & Uploads isn't part of this
@@ -2232,7 +2243,10 @@ function setView(v) {
   // on top of whatever was just chosen, unnoticed.
   window.tephraFormats?.close();
   if (v === 'study') return setStudy(!window.tephraStudy?.isOpen());
-  setStudy(false);
+  if (v === 'kb') return setKb(!window.tephraKb?.isOpen());
+  // Any canvas mode brings the Tephra side back: Graph and Overview live
+  // underneath the decks, so leaving one open would hide what was picked.
+  setDeck('tephra');
   document.querySelectorAll('.segmented button').forEach((b) =>
     b.setAttribute('aria-pressed', b.dataset.view === v));
   gv.classList.toggle('on', v === 'graph');
@@ -2252,8 +2266,9 @@ document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setVi
 $('#noteSort').onchange = (e) => { state.sort = e.target.value; renderList(); saveTheme(); };
 $('#tagClear').onclick = () => { state.tag = ''; renderList(); saveTheme(); };
 $('#favBtn').onclick = () => { if (state.slug) toggleFavorite(state.slug); };
-$('#tephraBtn').onclick = () => setStudy(false);
+$('#tephraBtn').onclick = () => setDeck('tephra');
 $('#crucibleBtn').onclick = () => setStudy(true);
+$('#kbBtn').onclick = () => setKb(!window.tephraKb?.isOpen());
 $('#gvClose').onclick = () => setView('write');
 $('#orbit').onclick = () => setView('graph');
 
@@ -2313,6 +2328,7 @@ addEventListener('keydown', (e) => {
     // Graph on the way past.
     if (!$('#findBar').hidden) return closeFind();
     if (!$('#imgLightbox').hidden) return closeLightbox();
+    if (window.tephraKb?.isOpen()) return setKb(false);
     if (window.tephraStudy?.isOpen()) return setStudy(false);
     if (vaultsEl().classList.contains('on')) return vaultsEl().classList.remove('on');
     if ($('#theme').classList.contains('on')) return $('#theme').classList.remove('on');
@@ -2327,6 +2343,7 @@ addEventListener('keydown', (e) => {
   }
   if (e.altKey && k === 'g') { e.preventDefault(); setView('graph'); }
   if (e.altKey && k === 'd') { e.preventDefault(); setView('study'); }
+  if (e.altKey && k === 'k') { e.preventDefault(); setView('kb'); }
   if (e.altKey && k === 't') { e.preventDefault(); $('#themeBtn').click(); }
   if (e.altKey && k === 'v') { e.preventDefault(); $('#vaultBtn').click(); }
   if (e.altKey && k === 'n') { e.preventDefault(); $('#newNote').click(); }
@@ -2651,6 +2668,9 @@ async function refreshAfterVaultSwitch() {
   await renderVaults();
   await showVaultName();
   hydrateHealthScan();
+  // The KB deck holds a whole vault's worth of state -- article list, open
+  // article, cached export -- and none of it survives a vault switch.
+  await window.tephraKb?.reset();
   window.tephraLinks?.poll();
   window.tephraStudy?.refresh();
 }
