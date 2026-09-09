@@ -53,6 +53,7 @@
     rightTab: 'render',
     previewBlocks: [],
     notes: [],
+    renderCollapsed: false,
     sectionFields: [],
     form: '',
   };
@@ -78,6 +79,7 @@
     </div>
     <div class="kb-body">
       <aside class="kb-list">
+        <div class="kb-grip" data-grip="list" title="Drag to resize"></div>
         <div class="eyebrow"><span>Articles</span><span id="kbCount">—</span></div>
         <input type="search" id="kbFilter" placeholder="Filter articles…" autocomplete="off">
         <div id="kbRows" class="kb-rows"></div>
@@ -87,9 +89,17 @@
           New article
         </button>
       </aside>
-      <aside class="kb-palette" id="kbPalette"></aside>
+      <aside class="kb-palette">
+        <div class="kb-palinner" id="kbPalette"></div>
+        <div class="kb-grip" data-grip="pal" title="Drag to resize"></div>
+      </aside>
       <section class="kb-main" id="kbMain"></section>
-      <aside class="kb-aside" id="kbAside"></aside>
+      <aside class="kb-aside">
+        <div class="kb-grip kb-grip-left" data-grip="right" title="Drag to resize"></div>
+        <div class="kb-asideinner" id="kbAside"></div>
+      </aside>
+      <button class="kb-reopen" id="kbReopen" type="button"
+              title="Show the render again">\u00ab</button>
     </div>`;
   (document.querySelector('.deck') || document.body).appendChild(view);
 
@@ -500,7 +510,7 @@
 
   async function loadPreview() {
     clearTimeout(previewT);
-    if (!S.slug || S.rightTab !== 'render') return;
+    if (!S.slug || S.rightTab !== 'render' || S.renderCollapsed) return;
     const host = $('#kbRender');
     if (!host) return;
     try {
@@ -616,6 +626,7 @@
         <button type="button" data-kbtab="render">Render</button>
         <button type="button" data-kbtab="structure">Structure</button>
         <button type="button" data-kbtab="fields">Fields</button>
+        <button type="button" class="kb-collapse" id="kbCollapse">\u00bb</button>
       </div>
       <div class="kb-pane" id="kbPaneRender">
         <div class="kb-render" id="kbRender"></div>
@@ -654,6 +665,8 @@
     box.querySelectorAll('[data-kbtab]').forEach((b) => {
       b.onclick = () => setRightTab(b.dataset.kbtab);
     });
+    $('#kbCollapse').onclick = () => setRenderCollapsed(!S.renderCollapsed);
+    setRenderCollapsed(S.renderCollapsed, true);
     setRightTab(S.rightTab);
     renderOutline();
   }
@@ -1186,6 +1199,95 @@
     }
   }
 
+  /* ── column widths ──────────────────────────────────────────────────────
+     Same shape as the notes sidebar's own grip in app.js: a CSS custom
+     property on the root, clamped, dragged with document-level listeners so
+     the pointer can leave the 9px strip without the drag dying, and
+     remembered in localStorage. Deliberately the same rather than a second
+     mechanism -- one of these to learn, not two. */
+  const COLS = {
+    list:  { var: '--kb-list-w',  key: 'tephra.kb.listw',  min: 150, max: 460, def: 238 },
+    pal:   { var: '--kb-pal-w',   key: 'tephra.kb.palw',   min: 46,  max: 300, def: 152 },
+    right: { var: '--kb-right-w', key: 'tephra.kb.rightw', min: 260, max: 900, def: 420 },
+  };
+  const COLLAPSE_KEY = 'tephra.kb.rightcollapsed';
+
+  function setCol(name, px) {
+    const c = COLS[name];
+    const w = Math.min(c.max, Math.max(c.min, Math.round(px)));
+    document.documentElement.style.setProperty(c.var, w + 'px');
+    return w;
+  }
+
+  function restoreCols() {
+    Object.keys(COLS).forEach((name) => {
+      const c = COLS[name];
+      let saved = parseInt(localStorage.getItem(c.key), 10);
+      if (!(saved >= c.min && saved <= c.max)) saved = c.def;
+      document.documentElement.style.setProperty(c.var, saved + 'px');
+    });
+    setRenderCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1', true);
+  }
+
+  function wireGrips() {
+    view.querySelectorAll('.kb-grip').forEach((grip) => {
+      const name = grip.dataset.grip;
+      const c = COLS[name];
+      if (!c) return;
+      // The right column grows leftwards, so its drag reads the opposite
+      // direction from the other two.
+      const sign = name === 'right' ? -1 : 1;
+      let startX = 0, startW = 0;
+      const onMove = (e) => setCol(name, startW + sign * (e.clientX - startX));
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('resizing-sidebar');
+        grip.classList.remove('dragging');
+        const w = parseInt(
+          document.documentElement.style.getPropertyValue(c.var), 10);
+        if (w) localStorage.setItem(c.key, String(w));
+      };
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        // A collapsed render has no width to drag; reopen it instead of
+        // starting a drag from zero.
+        if (name === 'right' && S.renderCollapsed) return setRenderCollapsed(false);
+        startX = e.clientX;
+        startW = grip.parentElement.getBoundingClientRect().width;
+        document.body.classList.add('resizing-sidebar');
+        grip.classList.add('dragging');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      // Double-click restores the default, the usual escape hatch for a
+      // column dragged somewhere useless.
+      grip.addEventListener('dblclick', () => {
+        setCol(name, c.def);
+        localStorage.setItem(c.key, String(c.def));
+      });
+    });
+  }
+
+  /* Collapsing hides the whole right column rather than only the render:
+     Structure and Fields live in the same space, and leaving an empty
+     column behind would be worse than either. */
+  function setRenderCollapsed(on, quiet) {
+    S.renderCollapsed = !!on;
+    view.classList.toggle('kb-collapsed', S.renderCollapsed);
+    const btn = $('#kbCollapse');
+    if (btn) {
+      btn.textContent = S.renderCollapsed ? '\u00ab' : '\u00bb';
+      btn.title = S.renderCollapsed
+        ? 'Show the render, structure and fields'
+        : 'Hide the right column and give the markdown the space';
+    }
+    if (!quiet) localStorage.setItem(COLLAPSE_KEY, S.renderCollapsed ? '1' : '0');
+    // Re-render on the way back so the preview is not showing stale text
+    // written while it was hidden.
+    if (!S.renderCollapsed && S.rightTab === 'render') loadPreview();
+  }
+
   /* ── open / close ── */
   async function open() {
     S.open = true;
@@ -1233,6 +1335,9 @@
   pick.querySelectorAll('[data-pick]').forEach((b) => {
     b.onclick = () => setPickTab(b.dataset.pick);
   });
+  restoreCols();
+  wireGrips();
+  $('#kbReopen').onclick = () => setRenderCollapsed(false);
   $('#kbNew').onclick = () => showPick(true);
   $('#kbPickCancel').onclick = () => showPick(false);
   $('#kbPickGo').onclick = createArticle;

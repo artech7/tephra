@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 855 backend assertions, 1190 UI
+    ./run-tests.sh        all 51 suites; 855 backend assertions, 1210 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -165,7 +165,16 @@ thing typed replaces the placeholder.
 
 Write mode is four columns: article list, palette, markdown, and a right
 column shared by the live render (default), the structure panel and the
-metadata form.
+metadata form. All three dividers drag, and the right column collapses to
+nothing when you want the width for writing -- widths and the collapsed flag
+live in localStorage. The grips reuse the notes sidebar's own mechanism from
+app.js (a CSS custom property on the root, document-level mousemove, clamped,
+`body.resizing-sidebar`) rather than a second one; the markdown column is the
+`1fr` that absorbs whatever the others give up.
+
+Collapse is scoped `:not(.kb-exporting)` -- the same column holds the export
+copy buttons in export mode, and a collapse meant for the render would take
+those with it.
 
 `split_blocks()` cuts a body into top-level blocks on blank lines, ignoring
 blank lines inside a fence -- a ```sheets card split down the middle is not a

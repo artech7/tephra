@@ -381,6 +381,68 @@ tabs.find((t) => t.dataset.kbtab === 'fields').onclick();
 ck('the metadata form lives on its own tab now',
    !doc.querySelector('#kbPaneFields').hidden && !!doc.querySelector('#kbf-kb_status'));
 
+console.log('\n── adjustable dividers ──');
+const root = doc.documentElement;
+const grips = [...doc.querySelectorAll('.kb-grip')];
+ck('one grip per divider', grips.length === 3, grips.length);
+ck('they name the columns they resize',
+   grips.map((g) => g.dataset.grip).sort().join('|') === 'list|pal|right');
+ck('the right column\u2019s grip is on its left edge, since it grows leftwards',
+   doc.querySelector('.kb-grip[data-grip="right"]').classList.contains('kb-grip-left'));
+ck('widths are custom properties, so a collapse is one property change',
+   /--kb-list-w/.test(flat) && /--kb-pal-w/.test(flat) && /--kb-right-w/.test(flat));
+ck('the markdown column takes whatever is left over',
+   /grid-template-columns:var\(--kb-list-w,238px\)var\(--kb-pal-w,152px\)minmax\(0,1fr\)var\(--kb-right-w,420px\)/
+     .test(flat));
+ck('the grip reuses the notes sidebar\u2019s own drag class, not a second one',
+   /body\.resizing-sidebar\{cursor:col-resize/.test(flat));
+
+function dragGrip(which, dx) {
+  const g = doc.querySelector(`.kb-grip[data-grip="${which}"]`);
+  g.getBoundingClientRect = () => ({ width: 0 });
+  g.parentElement.getBoundingClientRect = () => ({ width: 200 });
+  g.dispatchEvent(new window.MouseEvent('mousedown', { clientX: 500, bubbles: true, cancelable: true }));
+  doc.dispatchEvent(new window.MouseEvent('mousemove', { clientX: 500 + dx, bubbles: true }));
+  doc.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true }));
+  return parseInt(root.style.getPropertyValue('--kb-list-w'), 10);
+}
+dragGrip('list', 60);
+ck('dragging the list grip right widens the list',
+   parseInt(root.style.getPropertyValue('--kb-list-w'), 10) === 260,
+   root.style.getPropertyValue('--kb-list-w'));
+dragGrip('list', 9999);
+ck('a width is clamped to its maximum, so a column cannot eat the window',
+   parseInt(root.style.getPropertyValue('--kb-list-w'), 10) === 460);
+dragGrip('list', -9999);
+ck('and to its minimum, so it cannot vanish by accident',
+   parseInt(root.style.getPropertyValue('--kb-list-w'), 10) === 150);
+ck('the width is remembered', window.localStorage.getItem('tephra.kb.listw') === '150');
+doc.querySelector('.kb-grip[data-grip="list"]')
+   .dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+ck('double-clicking a grip restores the default',
+   parseInt(root.style.getPropertyValue('--kb-list-w'), 10) === 238);
+
+console.log('\n── collapsing the right column ──');
+const collapse = doc.querySelector('#kbCollapse');
+ck('there is a collapse control in the tab bar', !!collapse);
+ck('it starts expanded', !doc.querySelector('#kbview').classList.contains('kb-collapsed'));
+collapse.onclick();
+ck('collapsing marks the deck', doc.querySelector('#kbview').classList.contains('kb-collapsed'));
+ck('the markdown gets the space: the right column goes to zero, not to a gutter',
+   /#kbview\.kb-collapsed:not\(\.kb-exporting\)\.kb-body\{grid-template-columns:var\(--kb-list-w,238px\)var\(--kb-pal-w,152px\)minmax\(0,1fr\)0\}/
+     .test(flat));
+ck('a reopen handle is the only thing left of it',
+   /#kbview\.kb-collapsed:not\(\.kb-exporting\)\.kb-reopen\{display:block\}/.test(flat));
+ck('the collapse is remembered', window.localStorage.getItem('tephra.kb.rightcollapsed') === '1');
+ck('export mode is exempt \u2014 the same column holds the copy buttons over there',
+   /#kbview\.kb-collapsed:not\(\.kb-exporting\)/.test(flat)
+   && !/#kbview\.kb-collapsed\.kb-aside\{opacity:0/.test(flat));
+doc.querySelector('#kbReopen').onclick();
+ck('the reopen handle brings it back',
+   !doc.querySelector('#kbview').classList.contains('kb-collapsed'));
+ck('and the state is remembered the other way too',
+   window.localStorage.getItem('tephra.kb.rightcollapsed') === '0');
+
 console.log('\n── export mode ──');
 await window.tephraKb.open();
 await tick();
