@@ -24,6 +24,14 @@ const { window } = dom; const doc = window.document;
 let ok = 0, fail = 0;
 const ck = (l, c, x = '') => { c ? (ok++, console.log(`  PASS  ${l} ${x}`)) : (fail++, console.log(`  FAIL  ${l} ${x}`)); };
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+// Which article the deck currently has open, read off the DOM rather than
+// assumed -- the delete tests above move the selection.
+const S_openSlug = () => {
+  const row = doc.querySelector('.kb-row[aria-pressed="true"]');
+  const title = row && row.querySelector('.kb-row-t').textContent;
+  const hit = store.articles.find((a) => a.title === title);
+  return hit ? hit.slug : null;
+};
 
 const css = fs.readFileSync(`${ROOT}/style.css`, 'utf8');
 const flat = css.replace(/\s+/g, '');
@@ -91,6 +99,7 @@ const store = {
   meta: { a1: { kb_type: 'troubleshooting', kb_status: 'draft', kb_keywords: ['arp', 'dns'] }, a2: {} },
 };
 let lastPut = null, lastMeta = null, released = null, adopted = null, created = null;
+let deleted = null;
 
 window.tephraApi = async (p, opts = {}) => {
   const body = opts.body ? JSON.parse(opts.body) : {};
@@ -112,6 +121,11 @@ window.tephraApi = async (p, opts = {}) => {
   if (p === '/kb/articles') return { articles: store.articles };
   if (p === '/notes') return [{ slug: 'loose', title: 'A loose note' }, { slug: 'a1', title: 'Array unreachable' }];
   if (p.startsWith('/notes/') && opts.method === 'PUT') { lastPut = body; store.bodies.a1 = body.body; return {}; }
+  if (p.startsWith('/notes/') && opts.method === 'DELETE') {
+    deleted = decodeURIComponent(p.split('/').pop());
+    store.articles = store.articles.filter((a) => a.slug !== deleted);
+    return { ok: true, trashed: deleted };
+  }
   const meta = p.match(/^\/kb\/([^/]+)\/meta$/);
   if (meta) { lastMeta = body.meta; return { slug: meta[1], kb: body.meta, is_article: true }; }
   const rel = p.match(/^\/kb\/([^/]+)\/release$/);
@@ -332,12 +346,54 @@ ck('adopting posts the chosen note and type',
    JSON.stringify(adopted));
 ck('the picker closes afterwards', doc.querySelector('.kb-pick').hidden);
 
+console.log('\n── deleting an article ──');
+await window.tephraKb.open();
+await tick(30);
+const delBtn = doc.querySelector('#kbDelete');
+ck('the deck offers a delete, not only a release', !!delBtn);
+ck('release and delete are visibly different actions',
+   !!doc.querySelector('#kbRelease') && delBtn.classList.contains('danger'));
+ck('and the panel says which one keeps the note',
+   /Release keeps the note/.test(doc.querySelector('.kb-dangersect').textContent));
+
+await delBtn.onclick();
+ck('one click only arms it', deleted === null && /click again/.test(delBtn.textContent));
+ck('the armed state is visible', delBtn.classList.contains('armed'));
+await delBtn.onclick();
+await tick(40);
+ck('the second click deletes', deleted === 'a1', deleted);
+ck('it goes through the endpoint that trashes rather than unlinks',
+   deleted === 'a1');
+ck('the list drops it', !store.articles.some((a) => a.slug === 'a1'));
+ck('the deck lands on the next article rather than an empty pane',
+   doc.querySelector('#kbTitle') && doc.querySelector('#kbTitle').value === 'Mount a filesystem',
+   doc.querySelector('#kbTitle') && doc.querySelector('#kbTitle').value);
+
+// The bug this guards: a debounced autosave that lands after the delete
+// writes the file straight back out of the trash.
+lastPut = null;
+store.articles.push({ slug: 'a1', title: 'Array unreachable', updated: '2026-01-02',
+  kb_type: 'troubleshooting', type_name: 'Troubleshooting', status: 'draft',
+  audience: 'internal', number: 'KB1', short_description: 's', products: [], words: 40 });
+await window.tephraKb.open();
+await tick(30);
+const ta = doc.querySelector('#kbBody');
+ta.value = 'edited but doomed';
+ta.oninput();
+const d2 = doc.querySelector('#kbDelete');
+await d2.onclick(); await d2.onclick();
+await tick(900);
+ck('a pending autosave cannot resurrect a deleted article', lastPut === null,
+   JSON.stringify(lastPut));
+
 console.log('\n── releasing ──');
 await window.tephraKb.open();
 await tick(30);
+const openSlug = S_openSlug();
 doc.querySelector('#kbRelease').onclick();
 await tick(40);
-ck('releasing calls the endpoint that leaves the prose alone', released === 'a1', released);
+ck('releasing calls the endpoint that leaves the prose alone',
+   released === openSlug, `${released} vs ${openSlug}`);
 
 console.log('\n── closing ──');
 window.tephraKb.close();

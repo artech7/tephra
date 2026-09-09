@@ -183,6 +183,25 @@ with TestClient(app) as c:
     ck("releasing keeps the note and its other frontmatter",
        after.body.strip() == "## Notes\n\nprose" and after.meta.get("category") == "Networking")
 
+    # Deleting is the ordinary note delete, deliberately: a KB article is a
+    # note, so it goes to vault/.trash and stays recoverable rather than
+    # getting a second, harsher deletion path of its own.
+    doomed = c.post("/api/kb/articles",
+                    json={"title": "Doomed article", "kb_type": "faq"}).json()["slug"]
+    ck("a new article shows up in the list first",
+       any(a["slug"] == doomed for a in c.get("/api/kb/articles").json()["articles"]))
+    d = c.delete(f"/api/notes/{doomed}")
+    ck("deleting an article returns 200", d.status_code == 200, d.status_code)
+    ck("it leaves the KB list",
+       not any(a["slug"] == doomed for a in c.get("/api/kb/articles").json()["articles"]))
+    ck("its file leaves the notes folder",
+       not (vault.current().notes / f"{doomed}.md").is_file())
+    ck("but lands in the vault trash, so a mis-click is recoverable",
+       any(f.name.startswith(doomed) for f in (vault.current().vault / ".trash").glob("*.md")),
+       [f.name for f in (vault.current().vault / ".trash").glob("*.md")])
+    ck("deleting it twice is a 404, not a crash",
+       c.delete(f"/api/notes/{doomed}").status_code == 404)
+
     ck("an unknown export target is refused",
        c.get(f"/api/kb/{slug}/export", params={"target": "pdf"}).status_code == 400)
     dl = c.get(f"/api/kb/{slug}/export/download", params={"target": "standalone"})

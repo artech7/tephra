@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 820 backend assertions, 1153 UI
+    ./run-tests.sh        all 51 suites; 826 backend assertions, 1163 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -111,6 +111,14 @@ Syntax parsing is *imported* from render.py, never copied -- the same
 regexes and the same sheet splitter -- so an article cannot mean one thing
 on screen and another on export. Only emission differs, which is the part
 that genuinely has to.
+
+Deleting an article is the ordinary note delete (`DELETE /api/notes/{slug}`),
+deliberately -- an article *is* a note, so it goes to `vault/.trash` and stays
+recoverable rather than getting a second, harsher path of its own. The KB
+deck's Delete sits next to Release, which drops only the `kb_` fields and
+destroys nothing; both use the note editor's arm-then-confirm gesture. Delete
+clears the pending autosave first: a debounced flush landing after the delete
+writes the file straight back out of the trash.
 
 Images are never silently dropped: each becomes a numbered placeholder plus
 a manifest row, numbered in *document* order. That ordering is deferred

@@ -359,10 +359,15 @@
         <div class="eyebrow"><span>Metadata</span></div>
         <div class="kb-fields admin-only">${fields}</div>
       </div>
-      <div class="kb-asidesect">
+      <div class="kb-asidesect kb-dangersect">
         <button class="sv-btn admin-only" id="kbRelease"
           title="Stop treating this note as a KB article. The prose is untouched.">
           Release from KB</button>
+        <button class="sv-btn danger admin-only" id="kbDelete"
+          title="Move this article to the vault trash. Recoverable from vault/.trash.">
+          Delete article</button>
+        <p class="kb-fieldhint">Release keeps the note and only drops its KB fields.
+          Delete moves the whole note to the vault trash.</p>
       </div>`;
 
     S.fields.forEach((f) => {
@@ -373,6 +378,7 @@
       input.onchange = queueMeta;
     });
     $('#kbRelease').onclick = releaseArticle;
+    wireDelete($('#kbDelete'));
     renderOutline();
   }
 
@@ -787,6 +793,68 @@
     } catch (e) {
       toast('Could not create: ' + String((e && e.message) || e).slice(0, 140), 4000);
     }
+  }
+
+  /* Click twice to delete, same as the note editor's own Delete chip.
+     Deliberately the same gesture rather than a modal: a confirm dialog
+     trains people to dismiss it, and this sits next to Release, which is
+     the button most people actually want and which destroys nothing. */
+  function wireDelete(btn) {
+    if (!btn) return;
+    let armed = false, timer = null;
+    const disarm = () => {
+      armed = false;
+      btn.textContent = 'Delete article';
+      btn.classList.remove('armed');
+      clearTimeout(timer);
+    };
+    btn.onclick = async () => {
+      if (!armed) {
+        armed = true;
+        btn.textContent = 'Delete — click again';
+        btn.classList.add('armed');
+        timer = setTimeout(disarm, 4000);
+        return;
+      }
+      disarm();
+      await deleteArticle();
+    };
+  }
+
+  async function deleteArticle() {
+    if (!S.slug) return;
+    const slug = S.slug;
+    const title = (S.article && S.article.title) || slug;
+    // Drop the pending autosave before the note goes. A debounced flush that
+    // landed after the delete would write the file straight back out of the
+    // trash, which is how a deleted note comes back from the dead.
+    clearTimeout(saveT);
+    S.slug = null;
+    S.article = null;
+    try {
+      await api('/notes/' + encodeURIComponent(slug), { method: 'DELETE' });
+    } catch (e) {
+      S.slug = slug;
+      await refreshArticle();
+      toast('Could not delete: ' + String((e && e.message) || e).slice(0, 140), 4000);
+      return;
+    }
+    toast(`Moved “${title}” to the vault trash`);
+    await loadArticles();
+    // Land on whatever is next rather than on an empty pane -- the list is
+    // already sorted, so the top of it is the most recently touched.
+    if (S.articles.length) {
+      await openArticle(S.articles[0].slug);
+    } else {
+      S.exportData = null;
+      renderList();
+      if (S.mode === 'export') renderExport(); else renderWrite();
+    }
+    // The note is gone from the vault, not just from this deck: the sidebar,
+    // the graph and Crucible are all now holding a slug that no longer
+    // resolves.
+    window.tephraReloadList?.();
+    window.tephraStudy?.refresh();
   }
 
   async function releaseArticle() {
