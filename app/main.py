@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextvars
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -1700,7 +1701,18 @@ def kb_render(slug: str):
     for b in kb.split_blocks(note.body):
         html, _targets, _used = rndr.render(b["text"], resolve, sources=sources)
         out.append({**b, "html": html})
-    return {"slug": slug, "blocks": out,
+    # The headings, with the ids the *exporter* will give them -- computed by
+    # the same function, so a jump link the editor writes is a jump link that
+    # still lands after the paste. A picker that invented its own slugs would
+    # produce anchors that work in Tephra and nowhere else.
+    headings = []
+    seen: dict[str, int] = {}
+    for h in kb.heading_lines(note.body):
+        base = kb_export.heading_id(h["text"]) or "section"
+        seen[base] = seen.get(base, 0) + 1
+        headings.append({**h,
+                         "id": base if seen[base] == 1 else f"{base}-{seen[base]}"})
+    return {"slug": slug, "blocks": out, "headings": headings,
             "lines": len(note.body.split("\n"))}
 
 

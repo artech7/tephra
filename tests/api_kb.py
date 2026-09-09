@@ -595,6 +595,77 @@ ck("a <br> in a table cell survives the export as a line break",
    re.search(r"<br\s*/?>", bh) and "&lt;br&gt;" not in bh, bh[bh.find("6.5.0"):][:40])
 ck("and the markdown around it still renders", "<strong>6.5.2 only</strong>" in bh)
 
+print("\n── anchoring to another part of the article ──")
+# Evidence, not assumption: a published article carries a <pre id="..."> that
+# was pasted in from the docs site and survived a save, so id attributes are
+# not stripped. The five boxes are separate on the form but render into one
+# page, which is what makes a jump link in Question reach a heading in Answer.
+ANCH = """## Summary
+
+- [How to Add a Blade](#how-to-add-a-blade)
+- [How to Replace a Blade](#how-to-replace-a-blade)
+
+## Environment
+
+Only //S.
+
+## Resolution
+
+### How to Add a Blade
+
+Steps.
+
+### How to Replace a Blade
+
+Steps.
+"""
+anch = vault.Note(slug="anchored", title="Anchored", body=ANCH,
+                  meta={"kb_type": "troubleshooting"})
+vault.write(anch)
+ar = kb_export.export(vault.read("anchored"), target="servicenow")
+ap = {p["field"]: p["content"] for p in ar["parts"]}
+refs = set(re.findall(r'href="#([^"]+)"', "".join(ap.values())))
+ids = set(re.findall(r'<h[1-6] id="([^"]+)"', "".join(ap.values())))
+ck("headings get ids, so there is something to jump to",
+   {"how-to-add-a-blade", "how-to-replace-a-blade"} <= ids, sorted(ids))
+ck("a jump link in one field reaches a heading in another -- the boxes are "
+   "separate on the form but render into one page",
+   'href="#how-to-add-a-blade"' in ap["Question"]
+   and 'id="how-to-add-a-blade"' in ap["Answer"])
+ck("every jump link resolves to a real target", refs <= ids, sorted(refs - ids))
+ck("ids are derived from the heading text, so one can be typed by hand",
+   kb_export.heading_id("How to Add a Blade") == "how-to-add-a-blade")
+ck("the id function and the picker agree, because they are the same function",
+   kb_export.heading_id("Re-Add a Blade!") == "re-add-a-blade")
+
+# The field split drops a heading when its field is fed by one section. That
+# rule must not delete the one thing a link points at.
+solo = vault.Note(slug="solo", title="Solo", body=(
+    "## Summary\n\nSee [the setup](#environment).\n\n## Environment\n\nOnly //S.\n"),
+    meta={"kb_type": "troubleshooting"})
+vault.write(solo)
+sp = {p["field"]: p["content"]
+      for p in kb_export.export(vault.read("solo"), target="servicenow")["parts"]}
+ck("a sole section that is linked to keeps its heading, or the link would "
+   "jump to nowhere",
+   'id="environment"' in sp.get("Environment", ""))
+ck("a sole section nobody links to still drops it -- the field is the heading",
+   'id="environment"' not in ap.get("Environment", ""))
+
+dead = vault.Note(slug="dead", title="Dead", body=(
+    "## Summary\n\nSee [nothing](#not-a-heading).\n\n## Resolution\n\nx\n"),
+    meta={"kb_type": "troubleshooting"})
+vault.write(dead)
+dw = kb_export.export(vault.read("dead"), target="servicenow")["warnings"]
+ck("a jump link with no target is called out before publishing",
+   any("#not-a-heading" in w for w in dw), dw)
+
+ck("a heading inside a sheets fence is a tab name, not a jump target",
+   [h["text"] for h in kb.heading_lines(
+       "## Real\n\n```sheets\n## Ports\n\n| a |\n| - |\n```\n")] == ["Real"])
+ck("duplicate heading text still gets unique ids",
+   len({h["text"] for h in kb.heading_lines("## A\n\nx\n\n## A\n\ny\n")}) == 1)
+
 print("\n── the per-article field override ──")
 mapped = vault.Note(slug="mapped", title="Mapped", body=(
     "## Summary\n\nvisible\n\n## Resolution\n\nsecret\n"),

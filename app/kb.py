@@ -275,6 +275,10 @@ class Block:
     # Inline blocks land inside the paragraph you drop them on rather than
     # becoming a block of their own.
     inline: bool = False
+    # A block whose content depends on the article cannot be a fixed snippet.
+    # `action` names what the editor should offer instead -- "anchor" picks a
+    # heading to jump to, "contents" builds the list of all of them.
+    action: str = ""
 
 
 BLOCK_GROUPS = ("Text", "Structure", "Media", "Reference")
@@ -332,6 +336,14 @@ BLOCKS: list[Block] = [
           "A link to another note. Drag a note from the list below instead to "
           "pick one by name.",
           "[[Note Title]]", "Note Title", inline=True),
+    Block("anchor", "Jump link", "⤓", "Reference",
+          "A link to another heading in this article. Pick the heading; the "
+          "anchor is filled in for you.",
+          "[Section](#section)", "Section", inline=True, action="anchor"),
+    Block("contents", "Contents", "☰", "Reference",
+          "A list of jump links, one per heading in this article. Edit the "
+          "wording afterwards — the links keep working.",
+          "- [Section](#section)", "Section", action="contents"),
     Block("citation", "Citation", "¹", "Reference",
           "A footnote marker pointing at the Nth entry of this article's Sources.",
           "[^1]", "1", inline=True),
@@ -746,6 +758,25 @@ def field_plan(note: vault.Note) -> list[dict]:
             continue
         buckets[field_of(sec["heading"], tpl, override)].append(sec["heading"])
     return [{"field": f, "sections": buckets[f]} for f in SECTION_FIELDS if buckets[f]]
+
+
+_ANY_HEADING_RE = re.compile(r"^(#{2,6})[ \t]+(.*\S)[ \t]*$", re.M)
+
+
+def heading_lines(body: str) -> list[dict]:
+    """Every heading in the body, in document order, with the line it sits on.
+
+    Fences are blanked first, for the same reason `sections()` blanks them: a
+    `## Ports` inside a ```sheets fence is a tab name, not a heading, and a
+    jump link pointing at one would be a jump to nothing.
+    """
+    scan = _blank_fences(body)
+    out = []
+    for m in _ANY_HEADING_RE.finditer(scan):
+        line = scan[:m.start()].count("\n")
+        out.append({"level": len(m.group(1)), "text": m.group(2).strip(),
+                    "line": line})
+    return out
 
 
 def article_row(note: vault.Note) -> dict:

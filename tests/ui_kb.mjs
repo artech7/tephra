@@ -123,6 +123,10 @@ window.tephraApi = async (p, opts = {}) => {
           snippet: '- Item\n- Item', select: 'Item', inline: false },
         { id: 'callout', label: 'Callout', glyph: '\u26a0', group: 'Structure', hint: 'h',
           snippet: '> [!WARNING] Title\n> Text.', select: 'Title', inline: false },
+        { id: 'anchor', label: 'Jump link', glyph: '\u2913', group: 'Structure', hint: 'h',
+          snippet: '[Section](#section)', select: 'Section', inline: true, action: 'anchor' },
+        { id: 'contents', label: 'Contents', glyph: '\u2630', group: 'Structure', hint: 'h',
+          snippet: '- [Section](#section)', select: 'Section', action: 'contents' },
       ],
     };
   }
@@ -156,6 +160,14 @@ window.tephraApi = async (p, opts = {}) => {
     if (start !== null) blocks.push({ start, end: lines.length - 1 });
     return {
       slug: rnd[1], lines: lines.length,
+      headings: lines.map((ln, i) => ({ ln, i }))
+        .filter((x) => /^#{2,6}\s+\S/.test(x.ln))
+        .map((x) => ({
+          level: x.ln.match(/^#+/)[0].length,
+          text: x.ln.replace(/^#+\s+/, ''),
+          line: x.i,
+          id: x.ln.replace(/^#+\s+/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        })),
       blocks: blocks.map((b) => ({
         ...b,
         text: lines.slice(b.start, b.end + 1).join('\n'),
@@ -284,10 +296,16 @@ ck('blocks are grouped the way the registry groups them',
    [...pal.querySelectorAll('.kb-palgroup')].map((g) => g.textContent).join('|')
    === 'Text|Structure|Notes',
    [...pal.querySelectorAll('.kb-palgroup')].map((g) => g.textContent).join('|'));
-ck('one draggable item per block',
-   pal.querySelectorAll('.kb-palitem').length === 3);
-ck('every item is actually draggable',
-   [...pal.querySelectorAll('.kb-palitem')].every((i) => i.draggable === true));
+ck('one item per block',
+   pal.querySelectorAll('.kb-palitem').length === 5);
+ck('fixed-snippet blocks are draggable',
+   [...pal.querySelectorAll('.kb-palitem:not(.kb-palaction)')]
+     .every((i) => i.draggable === true));
+ck('blocks whose content depends on the article are not draggable, since '
+   + 'which heading they point at is decided at insertion',
+   [...pal.querySelectorAll('.kb-palaction')].every((i) => i.draggable === false));
+ck('and there are two of them — the jump link and the contents list',
+   pal.querySelectorAll('.kb-palaction').length === 2);
 ck('each item shows its glyph and its label',
    !!pal.querySelector('.kb-palglyph') && !!pal.querySelector('.kb-pallabel'));
 ck('vault notes are draggable in too, which is the point of writing KBs in a wiki',
@@ -310,6 +328,39 @@ ck('the placeholder is selected, so the first thing typed replaces it',
    ed.value.slice(ed.selectionStart, ed.selectionEnd));
 ck('the edit is saved through the ordinary note endpoint',
    lastPut && lastPut.body.includes('[!WARNING]'));
+
+console.log('\n── jump links ──');
+ed.value = '## First heading\n\nprose\n\n## Second heading\n\nmore\n';
+ed.setSelectionRange(ed.value.length, ed.value.length);
+const jump = [...pal.querySelectorAll('.kb-palaction')]
+  .find((i) => /Jump link/.test(i.textContent));
+await jump.onclick();
+await tick(40);
+const menu = doc.querySelector('.kb-anchormenu');
+ck('picking a jump link offers the article\u2019s own headings', !!menu);
+ck('one row per heading',
+   [...menu.querySelectorAll('.kb-anchorrow')].map((r) => r.textContent).join('|')
+   === 'First heading|Second heading',
+   [...menu.querySelectorAll('.kb-anchorrow')].map((r) => r.textContent).join('|'));
+await menu.querySelectorAll('.kb-anchorrow')[1].onclick();
+await tick(60);
+ck('choosing one writes an ordinary markdown link — no syntax of its own',
+   ed.value.includes('[Second heading](#second-heading)'),
+   JSON.stringify(ed.value.slice(-60)));
+ck('the picker closes afterwards', !doc.querySelector('.kb-anchormenu'));
+
+ed.value = '## First heading\n\nprose\n\n## Second heading\n\nmore\n';
+ed.setSelectionRange(0, 0);
+const contents = [...pal.querySelectorAll('.kb-palaction')]
+  .find((i) => /Contents/.test(i.textContent));
+await contents.onclick();
+await tick(60);
+ck('the contents block writes one jump link per heading',
+   ed.value.includes('- [First heading](#first-heading)')
+   && ed.value.includes('- [Second heading](#second-heading)'));
+ck('and it lands where the caret was, not at the end',
+   ed.value.trimStart().startsWith('- [First heading]'),
+   JSON.stringify(ed.value.slice(0, 40)));
 
 console.log('\n── the live render, and dropping onto it ──');
 function dragEvent(type, payload) {

@@ -439,6 +439,8 @@ class _Ctx:
         self.media = _Media(embed_images)
         self.known = kb.by_number()
         self.blocks: list[str] = []
+        self.toc: list[dict] = []
+        self.anchors: set[str] = set()
 
     def stash(self, fragment: str) -> str:
         self.blocks.append(fragment)
@@ -524,6 +526,8 @@ def _build_sections(note: vault.Note, *, links: str, embed_images: bool,
     for sec in kb.sections(prose):
         out.append({"heading": sec["heading"],
                     "html": _render_fragment(sec["content"], ctx)})
+    ctx.toc = _apply_heading_ids(out)
+    ctx.anchors = anchor_targets(prose)
     return out, ctx, sources
 
 
@@ -536,7 +540,8 @@ def _document_html(note: vault.Note, secs: list[dict], sources: list[dict],
     parts = [_meta_table(note)] if include_meta else []
     for sec in secs:
         if sec["heading"]:
-            parts.append(f'<h2 style="{_TAG_CSS["h2"]}">{_esc(sec["heading"])}</h2>')
+            parts.append(f'<h2 id="{_attr(sec.get("id", ""))}" '
+                         f'style="{_TAG_CSS["h2"]}">{_esc(sec["heading"])}</h2>')
         parts.append(sec["html"])
     parts.append(_references(sources))
     return "".join(parts)
@@ -553,14 +558,21 @@ def _visible_len(html_text: str) -> int:
 
 
 def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict],
-                 house: bool = True) -> list[dict]:
+                 house: bool = True, anchors: set | None = None) -> list[dict]:
     """One fragment per form field, in the order the form asks for them.
 
     A field fed by exactly one section drops that section's heading -- the
     field *is* the heading, and repeating it inside the box is noise. A field
     fed by several keeps each heading, demoted to h3, because the box itself
     is already playing the h2's role.
+
+    Unless something links to it. The five boxes are separate on the form but
+    render into one page, so an anchor in Question reaches a heading in
+    Answer -- and dropping the one heading a link points at turns that link
+    into a jump to nowhere. A heading that is an anchor target is kept
+    whatever the count says.
     """
+    anchors = anchors or set()
     tpl = kb.template_of(note)
     override = kb.parse_fieldmap(note.meta.get(kb.MAP_KEY))
     buckets: dict[str, list[dict]] = {f: [] for f in kb.SECTION_FIELDS}
@@ -586,8 +598,10 @@ def _field_parts(note: vault.Note, secs: list[dict], sources: list[dict],
             continue
         pieces = []
         for sec in chunk:
-            if sec["heading"] and len(chunk) > 1:
-                pieces.append(f'<h3 style="{_TAG_CSS["h3"]}">{_esc(sec["heading"])}</h3>')
+            linked = sec.get("id", "") in anchors
+            if sec["heading"] and (len(chunk) > 1 or linked):
+                pieces.append(f'<h3 id="{_attr(sec.get("id", ""))}" '
+                              f'style="{_TAG_CSS["h3"]}">{_esc(sec["heading"])}</h3>')
             pieces.append(sec["html"])
         body = "".join(pieces) + extra
         if house:
@@ -671,24 +685,61 @@ def _style(s: str, house: bool = False) -> str:
     return s
 
 
-_HEADING_RE = re.compile(r"<h([23])([^>]*)>(.*?)</h\1>", re.S)
+_HEADING_RE = re.compile(r"<h([1-6])([^>]*)>(.*?)</h\1>", re.S)
+_TAGSTRIP_RE = re.compile(r"<[^>]+>")
+# `[text](#anchor)` -- the ordinary markdown link, which is the whole point:
+# anchoring needs no syntax of its own, and a note written with one reads the
+# same in any other markdown tool.
+ANCHOR_REF_RE = re.compile(r"\]\(#([^)\s]+)\)")
 
 
-def _anchor_headings(s: str) -> tuple[str, list[dict]]:
-    """Give every h2/h3 a stable id and collect them for a contents list."""
+def heading_id(text: str) -> str:
+    """A stable, readable id for a heading. Deterministic on the text alone,
+    so an author can type `](#how-to-add-a-blade)` by hand and have it hit."""
+    return re.sub(r"[^a-z0-9]+", "-", _TAGSTRIP_RE.sub("", text).lower()).strip("-")
+
+
+def anchor_targets(body: str) -> set[str]:
+    """Every anchor this article links to. Used to decide which headings must
+    survive the export: the field split drops a heading when its field is fed
+    by exactly one section, and dropping the one thing a link points at turns
+    that link into a dead jump."""
+    return {m.group(1).lower() for m in ANCHOR_REF_RE.finditer(body)}
+
+
+def _apply_heading_ids(secs: list[dict]) -> list[dict]:
+    """Give every heading in the article a unique id, in document order.
+
+    Done once over the whole article and before anything is split into
+    fields, so the document view and the per-field fragments agree on every
+    id. Computed separately per view, they would drift apart the moment a
+    heading appeared twice -- and an anchor that works in the preview but not
+    after the paste is worse than one that never worked.
+    """
     seen: dict[str, int] = {}
     toc: list[dict] = []
 
-    def rep(m: re.Match) -> str:
-        level, attrs, inner = int(m.group(1)), m.group(2), m.group(3)
-        text = re.sub(r"<[^>]+>", "", inner).strip()
-        base = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or f"section-{len(toc) + 1}"
+    def unique(text: str) -> str:
+        base = heading_id(text) or f"section-{len(toc) + 1}"
         seen[base] = seen.get(base, 0) + 1
-        anchor = base if seen[base] == 1 else f"{base}-{seen[base]}"
-        toc.append({"level": level, "text": text, "id": anchor})
-        return f'<h{level} id="{_attr(anchor)}"{attrs}>{inner}</h{level}>'
+        return base if seen[base] == 1 else f"{base}-{seen[base]}"
 
-    return _HEADING_RE.sub(rep, s), toc
+    for sec in secs:
+        if sec["heading"]:
+            sec["id"] = unique(sec["heading"])
+            toc.append({"level": 2, "text": sec["heading"], "id": sec["id"]})
+
+        def rep(m: re.Match) -> str:
+            level, attrs, inner = int(m.group(1)), m.group(2), m.group(3)
+            if "id=" in attrs:
+                return m.group(0)
+            anchor = unique(inner)
+            toc.append({"level": level, "text": _TAGSTRIP_RE.sub("", inner).strip(),
+                        "id": anchor})
+            return f'<h{level} id="{_attr(anchor)}"{attrs}>{inner}</h{level}>'
+
+        sec["html"] = _HEADING_RE.sub(rep, sec["html"])
+    return toc
 
 
 # ── standalone page ────────────────────────────────────────────────────────
@@ -1005,7 +1056,7 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
                                          house=house)
     media = ctx.media
     body = _document_html(note, secs, sources, include_meta)
-    body, toc = _anchor_headings(body)
+    toc = ctx.toc
 
     if target == "standalone":
         page = _standalone(note, body, toc)
@@ -1022,7 +1073,7 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
     # for them -- `content` is still the whole document, because the preview
     # needs something to show and a caller that only wants the markup should
     # not have to reassemble it.
-    parts = _field_parts(note, secs, sources, house)
+    parts = _field_parts(note, secs, sources, house, ctx.anchors)
 
     # Numbering is decided over the document, then applied to each fragment,
     # so an image is "Image 3" in whichever box it lands in rather than
@@ -1040,6 +1091,13 @@ def export(note: vault.Note, *, target: str = "servicenow", links: str = "auto",
     for p_ in over:
         warnings.append(f"{p_['field']} is {p_['chars']} characters; the form allows "
                         f"{p_['limit']}.")
+    # The five boxes render into one page, so a jump link in Question can
+    # reach a heading in Answer -- but only if that heading is really there.
+    ids = {m.group(1) for m in re.finditer(r'<h[1-6] id="([^"]+)"',
+                                           "".join(p["content"] for p in parts))}
+    for dead in sorted(ctx.anchors - ids):
+        warnings.append(f"Nothing in this article is called #{dead}, so that jump "
+                        "link goes nowhere.")
     empty = [f for f in kb.SECTION_FIELDS
              if f in ("Question", "Answer") and not any(p["field"] == f for p in parts)]
     for f in empty:

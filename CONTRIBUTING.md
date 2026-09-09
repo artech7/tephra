@@ -40,7 +40,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 51 suites; 855 backend assertions, 1210 UI
+    ./run-tests.sh        all 51 suites; 865 backend assertions, 1218 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose
@@ -152,6 +152,35 @@ The preview iframe renders the *form*, one labelled box per field, not a
 flowing document -- and carries no stylesheet beyond the box chrome, so what
 survives in the preview is what survives the paste. A preview using the
 app's own CSS would be a comfortable lie.
+
+### Anchors
+
+Jump links use **ordinary markdown** -- `[text](#heading-id)` -- and no syntax
+of Tephra's own, so an article carrying them reads the same in any other
+markdown tool. `kb_export.heading_id()` derives the id from the heading text,
+and `/api/kb/{slug}/render` returns the headings with the ids *that same
+function* will give them, so a link the picker writes is a link that still
+lands after the paste.
+
+Two rules keep them alive through the export:
+
+- `_apply_heading_ids()` runs once over the whole article, before anything is
+  split into fields, so the document view and the per-field fragments agree
+  on every id. Computed per view they would drift apart the moment a heading
+  appeared twice.
+- `_field_parts()` normally drops a section's heading when its field is fed
+  by exactly one section -- the field *is* the heading. It keeps it when
+  something links to it, because dropping the one thing a link points at
+  turns that link into a jump to nowhere.
+
+A link with no matching heading is a warning before publishing, not a silent
+dead jump.
+
+That anchors work at all is evidence, not assumption: a published article
+carries a `<pre id="t_adding_the_blade_to_the_cluster__...">` pasted in from
+the docs site that survived a save, so `id` attributes are not stripped. The
+five form boxes render into one page, which is what lets a jump link in
+Question reach a heading in Answer.
 
 ### The block palette
 
