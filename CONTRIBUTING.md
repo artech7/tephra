@@ -38,7 +38,7 @@ against those.
 
 ## Tests
 
-    ./run-tests.sh        all 49 suites; 701 backend assertions, 1052 UI
+    ./run-tests.sh        all 49 suites; 707 backend assertions, 1052 UI
 
 It prints one line per suite (PASS/FAIL/CRASH plus that suite's count), an
 overall percentage, and every failing check grouped by suite. The verbose

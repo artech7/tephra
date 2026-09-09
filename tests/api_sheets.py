@@ -117,5 +117,25 @@ ck("the <br>s became real line breaks inside the cell",
 ck("markdown either side of a <br> still renders",
    "<strong>ID</strong>" in h4)
 
+print("\n── a table before the first heading is a sheet, not scrap ──")
+# Regression: the lead table was dropped whenever any `## heading` appeared
+# later in the fence, so a fence that opens with a table and ends with a
+# `## Summary` silently lost everything above the heading. The card still
+# rendered, with the named sheets on it, so it looked like the fence worked.
+# sheets.js has always kept the lead and calls it "Sheet 1"; the two parsers
+# have to agree, because the width-writing pass indexes sheets by position.
+h5 = html("```sheets\n| Check | Result |\n| --- | --- |\n| CatalystJobs | INFO |\n"
+          "\n## Summary\n\n| Total |\n| --- |\n| 44 |\n```\n")
+ck("the lead table is not dropped", "CatalystJobs" in h5)
+ck("both sheets get a tab", h5.count('role="tabpanel"') == 2)
+ck("the lead sheet is named the way sheets.js names it", ">Sheet 1</button>" in h5)
+ck("the lead sheet is index 0, so the two parsers agree on position",
+   'data-sheet="0" role="tab" aria-selected="true">Sheet 1<' in h5)
+ck("the named sheet still renders after it", "Summary" in h5 and ">44<" in h5)
+
+h6 = html("```sheets\n## Only\n\n| A |\n| --- |\n| 1 |\n```\n")
+ck("a fence that starts with a heading gains no phantom lead sheet",
+   h6.count('role="tabpanel"') == 1 and "Sheet 1" not in h6)
+
 print(f"\n  {ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

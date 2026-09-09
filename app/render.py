@@ -561,6 +561,18 @@ def _parse_sheets(content: str) -> list[tuple[str, str]]:
         stripped = content.strip()
         return [("Sheet 1", stripped)] if stripped else []
     out = []
+    # Content before the first heading is a sheet too, not scrap to drop.
+    # A fence that opens straight into a table and only later grows a
+    # `## Summary` is the shape anything generating markdown produces, and
+    # dropping the lead silently deleted the whole table -- the card
+    # rendered, with only the named sheets on it, so it read as "the fence
+    # works" rather than as data loss. sheets.js has always kept it (see
+    # its parseSheets), and names it "Sheet 1"; matching that name keeps
+    # the two parsers agreeing on both tab labels and sheet indices, which
+    # the width-writing pass indexes by.
+    lead = content[:heads[0].start()].strip()
+    if lead:
+        out.append(("Sheet 1", lead))
     for i, h in enumerate(heads):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(content)
         out.append((h.group("name").strip(), content[h.end():end].strip()))
